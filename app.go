@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"ops-cat/internal/ai"
@@ -32,6 +33,11 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// ConfirmResponse 命令确认响应
+type ConfirmResponse struct {
+	Behavior string // "allow" | "allowAll" | "deny"
+}
+
 // App Wails应用主结构体，替代controller层
 type App struct {
 	ctx                   context.Context
@@ -42,7 +48,8 @@ type App struct {
 	aiProvider            ai.Provider // 保留 provider 引用，用于权限回调注入
 	mcpServer             *ai.MCPServer
 	githubAuthCancel      context.CancelFunc
-	permissionChan        chan ai.PermissionResponse // 前端权限响应 channel
+	permissionChan        chan ai.PermissionResponse // 前端权限响应 channel（CLI 工具用）
+	pendingConfirms       sync.Map                   // map[string]chan ConfirmResponse（run_command 确认用）
 	currentConversationID int64                      // 当前活跃会话ID
 	aiProviderType        string                     // 当前 provider 类型
 	aiModel               string                     // 当前模型
@@ -66,6 +73,9 @@ func (a *App) SetAIProvider(providerType, apiBase, apiKey, model string) {
 	a.aiProviderType = providerType
 	a.aiModel = model
 
+	// 创建共用的命令权限检查器
+	checker := ai.NewCommandPolicyChecker(a.makeCommandConfirmFunc())
+
 	var provider ai.Provider
 	switch providerType {
 	case "openai":
@@ -78,8 +88,8 @@ func (a *App) SetAIProvider(providerType, apiBase, apiKey, model string) {
 			wailsRuntime.EventsEmit(a.ctx, "ai:permission", req)
 			return <-a.permissionChan
 		}
-		// 启动 MCP Server（使用应用数据目录作为默认配置目录）
-		mcpSrv := ai.NewMCPServer()
+		// 启动 MCP Server（使用应用数据目录作为默认配置目录），共用同一个 checker
+		mcpSrv := ai.NewMCPServer(checker)
 		if err := mcpSrv.Start(a.ctx, appDataDir()); err != nil {
 			fmt.Printf("MCP Server 启动失败: %v\n", err)
 		} else {
@@ -98,12 +108,12 @@ func (a *App) SetAIProvider(providerType, apiBase, apiKey, model string) {
 			}
 		}
 		a.aiProvider = cliProvider
-		a.aiAgent = ai.NewAgent(cliProvider, nil)
+		a.aiAgent = ai.NewAgent(cliProvider, nil, checker)
 		return
 	default:
 		provider = ai.NewOpenAIProvider(providerType, apiBase, apiKey, model)
 	}
-	a.aiAgent = ai.NewAgent(provider, ai.NewDefaultToolExecutor())
+	a.aiAgent = ai.NewAgent(provider, ai.NewDefaultToolExecutor(), checker)
 }
 
 // stopMCPServer 停止 MCP Server 并清理
@@ -850,11 +860,57 @@ func (a *App) DetectLocalCLIs() []ai.CLIInfo {
 	return ai.DetectLocalCLIs()
 }
 
-// RespondPermission 前端响应权限确认请求
+// RespondPermission 前端响应权限确认请求（CLI 工具用）
 func (a *App) RespondPermission(behavior, message string) {
 	select {
 	case a.permissionChan <- ai.PermissionResponse{Behavior: behavior, Message: message}:
 	default:
+	}
+}
+
+// makeCommandConfirmFunc 创建命令确认回调，向 AI 聊天流发送 tool_confirm 事件并阻塞等待
+func (a *App) makeCommandConfirmFunc() ai.CommandConfirmFunc {
+	return func(assetName, command string) (bool, bool) {
+		convID := a.currentConversationID
+		confirmID := fmt.Sprintf("cmd_%d_%d", convID, time.Now().UnixNano())
+		eventName := fmt.Sprintf("ai:event:%d", convID)
+
+		// 向 AI 聊天流发送 tool_confirm 事件
+		wailsRuntime.EventsEmit(a.ctx, eventName, ai.StreamEvent{
+			Type:      "tool_confirm",
+			ToolName:  "run_command",
+			ToolInput: fmt.Sprintf("[%s] $ %s", assetName, command),
+			ConfirmID: confirmID,
+		})
+
+		// 阻塞等待前端响应
+		ch := make(chan ConfirmResponse, 1)
+		a.pendingConfirms.Store(confirmID, ch)
+		defer a.pendingConfirms.Delete(confirmID)
+
+		select {
+		case resp := <-ch:
+			// 发送确认结果事件更新 UI 状态
+			wailsRuntime.EventsEmit(a.ctx, eventName, ai.StreamEvent{
+				Type:      "tool_confirm_result",
+				ConfirmID: confirmID,
+				Content:   resp.Behavior,
+			})
+			return resp.Behavior != "deny", resp.Behavior == "allowAll"
+		case <-a.ctx.Done():
+			return false, false
+		}
+	}
+}
+
+// RespondCommandConfirm 前端响应 run_command 确认请求
+func (a *App) RespondCommandConfirm(confirmID, behavior string) {
+	if v, ok := a.pendingConfirms.Load(confirmID); ok {
+		ch := v.(chan ConfirmResponse)
+		select {
+		case ch <- ConfirmResponse{Behavior: behavior}:
+		default:
+		}
 	}
 }
 

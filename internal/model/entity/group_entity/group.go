@@ -1,6 +1,12 @@
 package group_entity
 
-import "errors"
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+
+	"ops-cat/internal/model/entity/asset_entity"
+)
 
 // Group 资产分组实体
 type Group struct {
@@ -8,6 +14,7 @@ type Group struct {
 	Name       string `gorm:"column:name;type:varchar(255);not null"`
 	ParentID   int64  `gorm:"column:parent_id;index"`
 	Icon       string `gorm:"column:icon;type:varchar(100)"`
+	CmdPolicy  string `gorm:"column:command_policy;type:text"`
 	SortOrder  int    `gorm:"column:sort_order;default:0"`
 	Createtime int64  `gorm:"column:createtime"`
 	Updatetime int64  `gorm:"column:updatetime"`
@@ -29,4 +36,30 @@ func (g *Group) Validate() error {
 // IsRoot 是否为顶层分组
 func (g *Group) IsRoot() bool {
 	return g.ParentID == 0
+}
+
+// GetCommandPolicy 解析命令权限策略
+func (g *Group) GetCommandPolicy() (*asset_entity.CommandPolicy, error) {
+	if g.CmdPolicy == "" {
+		return &asset_entity.CommandPolicy{}, nil
+	}
+	var p asset_entity.CommandPolicy
+	if err := json.Unmarshal([]byte(g.CmdPolicy), &p); err != nil {
+		return nil, fmt.Errorf("解析命令权限策略失败: %w", err)
+	}
+	return &p, nil
+}
+
+// SetCommandPolicy 序列化命令权限策略
+func (g *Group) SetCommandPolicy(p *asset_entity.CommandPolicy) error {
+	if p == nil || (len(p.AllowList) == 0 && len(p.DenyList) == 0) {
+		g.CmdPolicy = ""
+		return nil
+	}
+	data, err := json.Marshal(p)
+	if err != nil {
+		return fmt.Errorf("序列化命令权限策略失败: %w", err)
+	}
+	g.CmdPolicy = string(data)
+	return nil
 }

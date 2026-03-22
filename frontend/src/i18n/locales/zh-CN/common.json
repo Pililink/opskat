@@ -65,6 +65,15 @@
     "proxyPort": "代理端口",
     "proxyUsername": "代理用户名",
     "proxyPassword": "代理密码",
+    "cmdPolicy": "命令权限",
+    "cmdPolicyAllowList": "允许列表（直接执行，无需确认）",
+    "cmdPolicyDenyList": "拒绝列表（始终拒绝执行）",
+    "cmdPolicyHint": "未列出的命令将请求用户确认后执行",
+    "cmdPolicyGroupHint": "此策略将被组内所有资产继承（除非资产自身覆盖）",
+    "cmdPolicyPlaceholder": "输入命令规则后按回车添加，如: kubectl get * -n app",
+    "groupDetail": "查看详情",
+    "groupDetailTitle": "分组详情",
+    "groupAssetCount": "资产数量",
     "parentGroup": "父分组",
     "parentGroupNone": "顶层分组",
     "deleteGroupTitle": "删除分组",
@@ -207,7 +216,11 @@
     "permissionTitle": "工具执行确认",
     "permissionAllow": "允许",
     "permissionAllowAll": "本次全部允许",
-    "permissionDeny": "拒绝"
+    "permissionDeny": "拒绝",
+    "commandConfirmHint": "该命令需要确认后才能执行",
+    "commandConfirmAllow": "允许",
+    "commandConfirmAllowAll": "始终允许",
+    "commandConfirmDeny": "拒绝"
   },
   "shortcut": {
     "title": "快捷键",

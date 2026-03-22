@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -295,7 +296,10 @@ func (s *CodexAppServer) handleNotification(method string, params json.RawMessag
 		"codex/event/task_started",
 		"codex/event/task_complete",
 		"codex/event/user_message",
-		"codex/event/mcp_startup_complete",
+		"codex/event/mcp_startup_complete":
+		log.Printf("[MCP] Codex mcp_startup_complete received: %s", string(params))
+
+	case
 		"item/agentMessage/delta",
 		"thread/started",
 		"thread/status/changed",
@@ -304,6 +308,9 @@ func (s *CodexAppServer) handleNotification(method string, params json.RawMessag
 		"turn/started",
 		"configWarning":
 		// 忽略
+
+	default:
+		log.Printf("[Codex] unhandled notification: method=%s params=%s", method, string(params))
 	}
 
 	return false

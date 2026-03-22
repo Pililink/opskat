@@ -62,7 +62,7 @@ func TestAgent_SimpleChat(t *testing.T) {
 			},
 		}
 		executor := &mockExecutor{}
-		agent := NewAgent(provider, executor)
+		agent := NewAgent(provider, executor, nil)
 
 		var events []StreamEvent
 		err := agent.Chat(context.Background(), []Message{
@@ -116,7 +116,7 @@ func TestAgent_ToolCallLoop(t *testing.T) {
 				"list_assets": `[{"ID":1,"Name":"web-01"},{"ID":2,"Name":"web-02"}]`,
 			},
 		}
-		agent := NewAgent(provider, executor)
+		agent := NewAgent(provider, executor, nil)
 
 		var events []StreamEvent
 		err := agent.Chat(context.Background(), []Message{

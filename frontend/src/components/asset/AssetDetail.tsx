@@ -208,6 +208,47 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
           </div>
         )}
 
+        {/* Command Policy */}
+        {(() => {
+          try {
+            const policy = JSON.parse(asset.CmdPolicy || "{}");
+            const hasAllow = policy.allow_list?.length > 0;
+            const hasDeny = policy.deny_list?.length > 0;
+            if (!hasAllow && !hasDeny) return null;
+            return (
+              <div className="rounded-xl border bg-card p-4">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+                  {t("asset.cmdPolicy")}
+                </h3>
+                {hasAllow && (
+                  <div className="mb-2">
+                    <span className="text-xs text-muted-foreground">{t("asset.cmdPolicyAllowList")}</span>
+                    <div className="flex flex-wrap gap-1.5 mt-1">
+                      {policy.allow_list.map((cmd: string, i: number) => (
+                        <span key={i} className="px-2 py-0.5 rounded-md bg-green-500/10 text-green-600 text-xs font-mono">
+                          {cmd}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {hasDeny && (
+                  <div>
+                    <span className="text-xs text-muted-foreground">{t("asset.cmdPolicyDenyList")}</span>
+                    <div className="flex flex-wrap gap-1.5 mt-1">
+                      {policy.deny_list.map((cmd: string, i: number) => (
+                        <span key={i} className="px-2 py-0.5 rounded-md bg-red-500/10 text-red-600 text-xs font-mono">
+                          {cmd}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          } catch { return null; }
+        })()}
+
         {asset.Description && (
           <>
             <Separator />

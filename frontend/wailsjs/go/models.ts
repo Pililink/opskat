@@ -101,6 +101,7 @@ export namespace asset_entity {
 	    Tags: string;
 	    Description: string;
 	    Config: string;
+	    CmdPolicy: string;
 	    SortOrder: number;
 	    Status: number;
 	    Createtime: number;
@@ -120,6 +121,7 @@ export namespace asset_entity {
 	        this.Tags = source["Tags"];
 	        this.Description = source["Description"];
 	        this.Config = source["Config"];
+	        this.CmdPolicy = source["CmdPolicy"];
 	        this.SortOrder = source["SortOrder"];
 	        this.Status = source["Status"];
 	        this.Createtime = source["Createtime"];
@@ -246,6 +248,7 @@ export namespace group_entity {
 	    Name: string;
 	    ParentID: number;
 	    Icon: string;
+	    CmdPolicy: string;
 	    SortOrder: number;
 	    Createtime: number;
 	    Updatetime: number;
@@ -260,6 +263,7 @@ export namespace group_entity {
 	        this.Name = source["Name"];
 	        this.ParentID = source["ParentID"];
 	        this.Icon = source["Icon"];
+	        this.CmdPolicy = source["CmdPolicy"];
 	        this.SortOrder = source["SortOrder"];
 	        this.Createtime = source["Createtime"];
 	        this.Updatetime = source["Updatetime"];

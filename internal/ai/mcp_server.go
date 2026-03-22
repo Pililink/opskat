@@ -15,11 +15,12 @@ import (
 
 // MCPServer 管理 MCP Server 生命周期
 type MCPServer struct {
-	mcpServer  *server.MCPServer
-	httpServer *server.StreamableHTTPServer
-	listener   net.Listener
-	configDir  string   // MCP 配置文件存放目录（应用数据目录）
-	configFiles []string // 生成的配置文件路径列表，Stop 时清理
+	mcpServer     *server.MCPServer
+	httpServer    *server.StreamableHTTPServer
+	listener      net.Listener
+	policyChecker *CommandPolicyChecker
+	configDir     string   // MCP 配置文件存放目录（应用数据目录）
+	configFiles   []string // 生成的配置文件路径列表，Stop 时清理
 }
 
 // mcpInstructions MCP Server 级别的指令，告知 AI 整体能力和工作流
@@ -43,13 +44,14 @@ const mcpInstructions = `You are connected to Ops Cat, a desktop application for
 - Credentials are resolved automatically from the app's encrypted store — do not ask the user for passwords.`
 
 // NewMCPServer 创建并注册所有工具的 MCP Server
-func NewMCPServer() *MCPServer {
+func NewMCPServer(checker *CommandPolicyChecker) *MCPServer {
 	mcpSrv := server.NewMCPServer("ops-cat", "1.0.0",
 		server.WithInstructions(mcpInstructions),
 	)
 	RegisterToMCP(mcpSrv, AllToolDefs())
 	return &MCPServer{
-		mcpServer: mcpSrv,
+		mcpServer:     mcpSrv,
+		policyChecker: checker,
 	}
 }
 
@@ -74,7 +76,13 @@ func (s *MCPServer) Start(ctx context.Context, configDir string) error {
 	// 启动 HTTP Server，用 mux 正确路由 /mcp 路径
 	s.httpServer = server.NewStreamableHTTPServer(s.mcpServer)
 	mux := http.NewServeMux()
-	mux.Handle("/mcp", s.httpServer)
+	// 中间件：将 PolicyChecker 注入到每个 HTTP 请求的 context
+	mux.Handle("/mcp", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.policyChecker != nil {
+			r = r.WithContext(WithPolicyChecker(r.Context(), s.policyChecker))
+		}
+		s.httpServer.ServeHTTP(w, r)
+	}))
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})

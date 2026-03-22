@@ -335,6 +335,14 @@ func handleRunCommand(ctx context.Context, args map[string]any) (string, error) 
 		return "", fmt.Errorf("缺少参数 command")
 	}
 
+	// 权限检查（两条路径共用）
+	if checker := GetPolicyChecker(ctx); checker != nil {
+		result := checker.Check(ctx, assetID, command)
+		if result.Decision != Allow {
+			return result.Message, nil // 返回提示消息给 AI（非 error）
+		}
+	}
+
 	asset, err := asset_svc.Asset().Get(ctx, assetID)
 	if err != nil {
 		return "", fmt.Errorf("资产不存在: %w", err)

@@ -83,6 +83,21 @@ func RunMigrations(db *gorm.DB) error {
 				return tx.Migrator().DropTable("conversations")
 			},
 		},
+		{
+			ID: "202603240001",
+			Migrate: func(tx *gorm.DB) error {
+				if err := tx.AutoMigrate(&asset_entity.Asset{}); err != nil {
+					return err
+				}
+				return tx.AutoMigrate(&group_entity.Group{})
+			},
+			Rollback: func(tx *gorm.DB) error {
+				if err := tx.Migrator().DropColumn("assets", "command_policy"); err != nil {
+					return err
+				}
+				return tx.Migrator().DropColumn("groups", "command_policy")
+			},
+		},
 	})
 	return m.Migrate()
 }

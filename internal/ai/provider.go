@@ -44,11 +44,12 @@ type ToolFunction struct {
 
 // StreamEvent 流式响应事件
 type StreamEvent struct {
-	Type      string     `json:"type"`                  // "content" | "tool_start" | "tool_result" | "tool_call" | "done" | "error"
-	Content   string     `json:"content,omitempty"`     // type=content/tool_result 时的文本
-	ToolName  string     `json:"tool_name,omitempty"`   // type=tool_start/tool_result 时的工具名
-	ToolInput string     `json:"tool_input,omitempty"`  // type=tool_start 时的输入摘要
+	Type      string     `json:"type"`                  // "content" | "tool_start" | "tool_result" | "tool_call" | "tool_confirm" | "tool_confirm_result" | "done" | "error"
+	Content   string     `json:"content,omitempty"`     // type=content/tool_result/tool_confirm_result 时的文本
+	ToolName  string     `json:"tool_name,omitempty"`   // type=tool_start/tool_result/tool_confirm 时的工具名
+	ToolInput string     `json:"tool_input,omitempty"`  // type=tool_start/tool_confirm 时的输入摘要
 	ToolCalls []ToolCall `json:"tool_calls,omitempty"`  // type=tool_call 时的工具调用 (OpenAI)
+	ConfirmID string     `json:"confirm_id,omitempty"`  // type=tool_confirm/tool_confirm_result 时的确认请求 ID
 	Error     string     `json:"error,omitempty"`       // type=error 时的错误信息
 }
 

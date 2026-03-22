@@ -23,7 +23,8 @@ export interface ContentBlock {
   // tool 类型专用
   toolName?: string;
   toolInput?: string;
-  status?: "running" | "completed" | "error";
+  status?: "running" | "completed" | "error" | "pending_confirm";
+  confirmId?: string; // tool_confirm 时的确认请求 ID
 }
 
 export interface ChatMessage {
@@ -38,6 +39,7 @@ interface StreamEventData {
   content?: string;
   tool_name?: string;
   tool_input?: string;
+  confirm_id?: string;
   error?: string;
 }
 
@@ -354,6 +356,47 @@ export const useAIStore = create<AIState>((set, get) => ({
                     break;
                   }
                 }
+                return { ...msg, blocks: newBlocks };
+              });
+              if (updated) set({ messages: updated });
+              break;
+            }
+
+            case "tool_confirm": {
+              // 在聊天流中插入待确认的 tool block
+              const updated = updateLastAssistant(msgs, (msg) => ({
+                ...msg,
+                blocks: [
+                  ...msg.blocks,
+                  {
+                    type: "tool" as const,
+                    content: "",
+                    toolName: event.tool_name || "run_command",
+                    toolInput: event.tool_input || "",
+                    status: "pending_confirm" as const,
+                    confirmId: event.confirm_id,
+                  },
+                ],
+              }));
+              if (updated) set({ messages: updated });
+              break;
+            }
+
+            case "tool_confirm_result": {
+              // 用户确认后更新 block 状态
+              const updated = updateLastAssistant(msgs, (msg) => {
+                const newBlocks = msg.blocks.map((b) =>
+                  b.confirmId === event.confirm_id &&
+                  b.status === "pending_confirm"
+                    ? {
+                        ...b,
+                        status:
+                          event.content === "deny"
+                            ? ("error" as const)
+                            : ("running" as const),
+                      }
+                    : b
+                );
                 return { ...msg, blocks: newBlocks };
               });
               if (updated) set({ messages: updated });

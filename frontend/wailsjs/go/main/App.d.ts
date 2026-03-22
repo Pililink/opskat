@@ -84,6 +84,8 @@ export function ResetAISession():Promise<void>;
 
 export function ResizeSSH(arg1:string,arg2:number,arg3:number):Promise<void>;
 
+export function RespondCommandConfirm(arg1:string,arg2:string):Promise<void>;
+
 export function RespondPermission(arg1:string,arg2:string):Promise<void>;
 
 export function SFTPCancelTransfer(arg1:string):Promise<void>;

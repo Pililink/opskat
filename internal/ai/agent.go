@@ -14,17 +14,19 @@ type ToolExecutor interface {
 
 // Agent AI 代理，管理对话循环和 tool 调度
 type Agent struct {
-	provider Provider
-	executor ToolExecutor
-	tools    []Tool
+	provider      Provider
+	executor      ToolExecutor
+	tools         []Tool
+	policyChecker *CommandPolicyChecker
 }
 
 // NewAgent 创建 Agent
-func NewAgent(provider Provider, executor ToolExecutor) *Agent {
+func NewAgent(provider Provider, executor ToolExecutor, checker *CommandPolicyChecker) *Agent {
 	return &Agent{
-		provider: provider,
-		executor: executor,
-		tools:    ToOpenAITools(AllToolDefs()),
+		provider:      provider,
+		executor:      executor,
+		tools:         ToOpenAITools(AllToolDefs()),
+		policyChecker: checker,
 	}
 }
 
@@ -33,6 +35,11 @@ func (a *Agent) Chat(ctx context.Context, messages []Message, onEvent func(Strea
 	// Chat 结束后关闭 executor 持有的资源（如缓存的 SSH 连接）
 	if closer, ok := a.executor.(io.Closer); ok {
 		defer closer.Close()
+	}
+
+	// 注入 PolicyChecker 到 context
+	if a.policyChecker != nil {
+		ctx = WithPolicyChecker(ctx, a.policyChecker)
 	}
 
 	const maxRounds = 10 // 防止无限循环

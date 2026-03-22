@@ -65,6 +65,15 @@
     "proxyPort": "Proxy Port",
     "proxyUsername": "Proxy Username",
     "proxyPassword": "Proxy Password",
+    "cmdPolicy": "Command Policy",
+    "cmdPolicyAllowList": "Allow List (execute without confirmation)",
+    "cmdPolicyDenyList": "Deny List (always reject)",
+    "cmdPolicyHint": "Commands not listed will require user confirmation",
+    "cmdPolicyGroupHint": "This policy is inherited by all assets in the group (unless overridden)",
+    "cmdPolicyPlaceholder": "Type a command rule and press Enter, e.g. kubectl get * -n app",
+    "groupDetail": "Details",
+    "groupDetailTitle": "Group Details",
+    "groupAssetCount": "Asset Count",
     "parentGroup": "Parent Group",
     "parentGroupNone": "Top Level",
     "deleteGroupTitle": "Delete Group",
@@ -207,7 +216,11 @@
     "permissionTitle": "Tool Execution Approval",
     "permissionAllow": "Allow",
     "permissionAllowAll": "Allow All",
-    "permissionDeny": "Deny"
+    "permissionDeny": "Deny",
+    "commandConfirmHint": "This command requires approval before execution",
+    "commandConfirmAllow": "Allow",
+    "commandConfirmAllowAll": "Always Allow",
+    "commandConfirmDeny": "Deny"
   },
   "shortcut": {
     "title": "Shortcuts",

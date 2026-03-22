@@ -23,20 +23,27 @@ const (
 	StatusDeleted = 2
 )
 
+// CommandPolicy 命令权限策略
+type CommandPolicy struct {
+	AllowList []string `json:"allow_list"` // 直接执行的命令规则
+	DenyList  []string `json:"deny_list"`  // 始终拒绝的命令规则
+}
+
 // Asset 通用资产实体（充血模型）
 type Asset struct {
-	ID          int64  `gorm:"column:id;primaryKey;autoIncrement"`
-	Name        string `gorm:"column:name;type:varchar(255);not null"`
-	Type        string `gorm:"column:type;type:varchar(50);not null;index"`
-	GroupID     int64  `gorm:"column:group_id;index"`
-	Icon        string `gorm:"column:icon;type:varchar(100)"`
-	Tags        string `gorm:"column:tags;type:text"`
-	Description string `gorm:"column:description;type:text"`
-	Config      string `gorm:"column:config;type:text"`
-	SortOrder   int    `gorm:"column:sort_order;default:0"`
-	Status      int    `gorm:"column:status;default:1"`
-	Createtime  int64  `gorm:"column:createtime"`
-	Updatetime  int64  `gorm:"column:updatetime"`
+	ID            int64  `gorm:"column:id;primaryKey;autoIncrement"`
+	Name          string `gorm:"column:name;type:varchar(255);not null"`
+	Type          string `gorm:"column:type;type:varchar(50);not null;index"`
+	GroupID       int64  `gorm:"column:group_id;index"`
+	Icon          string `gorm:"column:icon;type:varchar(100)"`
+	Tags          string `gorm:"column:tags;type:text"`
+	Description   string `gorm:"column:description;type:text"`
+	Config        string `gorm:"column:config;type:text"`
+	CmdPolicy     string `gorm:"column:command_policy;type:text"`
+	SortOrder     int    `gorm:"column:sort_order;default:0"`
+	Status        int    `gorm:"column:status;default:1"`
+	Createtime    int64  `gorm:"column:createtime"`
+	Updatetime    int64  `gorm:"column:updatetime"`
 }
 
 // TableName GORM表名
@@ -171,4 +178,30 @@ func (a *Asset) SSHAddress() (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf("%s:%d", cfg.Host, cfg.Port), nil
+}
+
+// GetCommandPolicy 解析命令权限策略
+func (a *Asset) GetCommandPolicy() (*CommandPolicy, error) {
+	if a.CmdPolicy == "" {
+		return &CommandPolicy{}, nil
+	}
+	var p CommandPolicy
+	if err := json.Unmarshal([]byte(a.CmdPolicy), &p); err != nil {
+		return nil, fmt.Errorf("解析命令权限策略失败: %w", err)
+	}
+	return &p, nil
+}
+
+// SetCommandPolicy 序列化命令权限策略
+func (a *Asset) SetCommandPolicy(p *CommandPolicy) error {
+	if p == nil || (len(p.AllowList) == 0 && len(p.DenyList) == 0) {
+		a.CmdPolicy = ""
+		return nil
+	}
+	data, err := json.Marshal(p)
+	if err != nil {
+		return fmt.Errorf("序列化命令权限策略失败: %w", err)
+	}
+	a.CmdPolicy = string(data)
+	return nil
 }

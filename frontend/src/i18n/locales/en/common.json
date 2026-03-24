@@ -356,6 +356,7 @@
     "openAIDesc": "Use an OpenAI-compatible API endpoint",
     "recommended": "Recommended",
     "notComplete": "Not Fully Complete",
+    "developing": "In Development",
     "cliConfig": "CLI Configuration",
     "integration": "Integration",
     "autoInstall": "Auto-install on setup",
@@ -378,6 +379,9 @@
     "commandConfirmAllow": "Allow",
     "commandConfirmAllowAll": "Always Allow",
     "commandConfirmDeny": "Deny",
+    "permissionRequestHint": "AI is requesting command execution permission. You can edit the pattern before approving.",
+    "permissionPatternPlaceholder": "Command pattern, supports * wildcard",
+    "permissionApprove": "Approve",
     "deleteConversationTitle": "Delete Conversation",
     "deleteConversationDesc": "Are you sure you want to delete this conversation? This action cannot be undone."
   },
@@ -488,7 +492,9 @@
     "skillInstallSuccess": "Skill installed successfully",
     "skillPath": "Skill Path",
     "skillPreview": "Preview",
-    "update": "Update"
+    "update": "Update",
+    "reinstall": "Reinstall",
+    "versionMismatch": "opsctl version ({{cliVersion}}) differs from app version ({{appVersion}}), consider reinstalling to keep in sync"
   },
   "appUpdate": {
     "title": "About",
@@ -527,8 +533,11 @@
     "typeCp": "File Transfer",
     "typeCreate": "Create Asset",
     "typeUpdate": "Update Asset",
-    "allowSession": "Allow Session",
-    "sessionHint": "From AI session"
+    "remember": "Remember",
+    "sessionHint": "From AI session",
+    "patternLabel": "Remember pattern (supports * wildcard):",
+    "patternPlaceholder": "e.g. cat /var/log/*",
+    "patternHint": "Future commands matching this pattern will be auto-approved"
   },
   "planApproval": {
     "title": "Batch Plan Approval",
@@ -564,7 +573,27 @@
     "poolRefCount": "Active Sessions",
     "poolLastUsed": "Last Used",
     "poolEmpty": "No active connections",
-    "poolRefresh": "Refresh"
+    "poolRefresh": "Refresh",
+    "timeRange": "Time Range",
+    "timeAll": "All",
+    "time1h": "Last 1 hour",
+    "time3h": "Last 3 hours",
+    "time6h": "Last 6 hours",
+    "time1d": "Last 1 day",
+    "time7d": "Last 7 days",
+    "timeCustom": "Custom",
+    "timeStart": "Start time",
+    "timeEnd": "End time",
+    "decision": "Decision",
+    "decisionSource": "Decision Source",
+    "matchedPattern": "Matched Pattern",
+    "sessionID": "Session ID",
+    "sessionAll": "All sessions",
+    "sessionGroupToday": "Today",
+    "sessionGroupYesterday": "Yesterday",
+    "sessionGroupThisWeek": "This week",
+    "sessionGroupEarlier": "Earlier",
+    "sessionOps": "{{count}} ops"
   },
   "sftp": {
     "upload": "Upload File",
@@ -637,6 +666,19 @@
     "pendingEdits": "{{count}} pending edit(s)",
     "discardEdits": "Discard",
     "submitEdits": "Submit Changes",
-    "updateSuccess": "{{count}} row(s) updated"
+    "updateSuccess": "{{count}} row(s) updated",
+    "deleteKey": "Delete Key",
+    "deleteKeyConfirm": "Delete this key?",
+    "editValue": "Edit",
+    "saveValue": "Save",
+    "cancelEdit": "Cancel",
+    "addField": "Add Field",
+    "addItem": "Add",
+    "addMember": "Add Member",
+    "newField": "Field name",
+    "newValue": "Value",
+    "newScore": "Score",
+    "newMember": "Member",
+    "dbKeyCount": "{{count}} keys"
   }
 }

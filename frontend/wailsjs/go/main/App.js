@@ -90,8 +90,12 @@ export function ExecuteImportFile(arg1, arg2) {
   return window['go']['main']['App']['ExecuteImportFile'](arg1, arg2);
 }
 
-export function ExecuteRedis(arg1, arg2) {
-  return window['go']['main']['App']['ExecuteRedis'](arg1, arg2);
+export function ExecuteRedis(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ExecuteRedis'](arg1, arg2, arg3);
+}
+
+export function ExecuteRedisArgs(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ExecuteRedisArgs'](arg1, arg2, arg3);
 }
 
 export function ExecuteSQL(arg1, arg2, arg3) {
@@ -198,8 +202,12 @@ export function ListAssets(arg1, arg2) {
   return window['go']['main']['App']['ListAssets'](arg1, arg2);
 }
 
-export function ListAuditLogs(arg1, arg2, arg3, arg4) {
-  return window['go']['main']['App']['ListAuditLogs'](arg1, arg2, arg3, arg4);
+export function ListAuditLogs(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
+  return window['go']['main']['App']['ListAuditLogs'](arg1, arg2, arg3, arg4, arg5, arg6, arg7);
+}
+
+export function ListAuditSessions(arg1) {
+  return window['go']['main']['App']['ListAuditSessions'](arg1);
 }
 
 export function ListBackupGists(arg1) {
@@ -266,12 +274,16 @@ export function RespondOpsctlApproval(arg1, arg2) {
   return window['go']['main']['App']['RespondOpsctlApproval'](arg1, arg2);
 }
 
-export function RespondOpsctlApprovalSession(arg1, arg2, arg3, arg4) {
-  return window['go']['main']['App']['RespondOpsctlApprovalSession'](arg1, arg2, arg3, arg4);
+export function RespondOpsctlApprovalSession(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['RespondOpsctlApprovalSession'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function RespondPermission(arg1, arg2) {
   return window['go']['main']['App']['RespondPermission'](arg1, arg2);
+}
+
+export function RespondPermissionRequest(arg1, arg2, arg3) {
+  return window['go']['main']['App']['RespondPermissionRequest'](arg1, arg2, arg3);
 }
 
 export function RespondPlanApproval(arg1, arg2) {

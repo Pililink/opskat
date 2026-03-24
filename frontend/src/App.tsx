@@ -31,9 +31,12 @@ function App() {
 
   const [openPageTabs, setOpenPageTabs] = useState<string[]>(() => {
     if (startupTabSetting.current === "last") {
-      const lastTab = localStorage.getItem("last_active_tab");
-      if (lastTab && !lastTab.startsWith(AI_TAB_PREFIX)) {
-        return [lastTab];
+      const saved = localStorage.getItem("open_page_tabs");
+      if (saved) {
+        try {
+          const tabs = JSON.parse(saved);
+          if (Array.isArray(tabs)) return tabs;
+        } catch {}
       }
     }
     return [];
@@ -50,6 +53,7 @@ function App() {
       return null;
     }
     if (lastTab.startsWith(AI_TAB_PREFIX)) return null;
+    if (lastTab.startsWith(QUERY_TAB_PREFIX)) return null;
     return lastTab;
   });
 
@@ -192,6 +196,11 @@ function App() {
   useEffect(() => {
     localStorage.setItem("last_active_tab", activePageTab || "");
   }, [activePageTab]);
+
+  // 持久化打开的页面标签
+  useEffect(() => {
+    localStorage.setItem("open_page_tabs", JSON.stringify(openPageTabs));
+  }, [openPageTabs]);
 
   // 启动时自动激活 AI store 中已打开的第一个 tab
   const aiActiveTabId = useAIStore((s) => s.activeAITabId);

@@ -158,6 +158,28 @@ func ExecuteRedis(ctx context.Context, client *redis.Client, command string) (st
 	return formatRedisResult(result)
 }
 
+// ExecuteRedisRaw 使用预拆分的参数执行 Redis 命令（支持含空格的值）
+func ExecuteRedisRaw(ctx context.Context, client *redis.Client, args []string) (string, error) {
+	if len(args) == 0 {
+		return "", fmt.Errorf("redis 命令为空")
+	}
+
+	redisArgs := make([]any, len(args))
+	for i, p := range args {
+		redisArgs[i] = p
+	}
+
+	result, err := client.Do(ctx, redisArgs...).Result()
+	if err != nil {
+		if err == redis.Nil {
+			return `{"type":"nil","value":null}`, nil
+		}
+		return "", fmt.Errorf("redis 命令执行失败: %w", err)
+	}
+
+	return formatRedisResult(result)
+}
+
 func formatRedisResult(result any) (string, error) {
 	var out map[string]any
 	switch v := result.(type) {

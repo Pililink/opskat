@@ -33,6 +33,10 @@ func (m *mockAuditRepo) List(_ context.Context, _ audit_repo.ListOptions) ([]*au
 	return m.logs, int64(len(m.logs)), nil
 }
 
+func (m *mockAuditRepo) ListSessions(_ context.Context, _ int64) ([]audit_repo.SessionInfo, error) {
+	return nil, nil
+}
+
 func TestContext_AuditSource(t *testing.T) {
 	convey.Convey("审计来源 context", t, func() {
 		convey.Convey("默认返回空字符串", func() {

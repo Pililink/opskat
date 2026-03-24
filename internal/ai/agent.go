@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"time"
+
+	"ops-cat/internal/sshpool"
 
 	"github.com/cago-frame/cago/pkg/logger"
 	"go.uber.org/zap"
@@ -121,6 +124,7 @@ func (a *Agent) Chat(ctx context.Context, messages []Message, onEvent func(Strea
 type DefaultToolExecutor struct {
 	handlers map[string]ToolHandlerFunc
 	sshCache *SSHClientCache
+	sshPool  *sshpool.Pool // SSH 连接池，供 Redis/Database 隧道使用
 }
 
 func NewDefaultToolExecutor() *DefaultToolExecutor {
@@ -131,11 +135,13 @@ func NewDefaultToolExecutor() *DefaultToolExecutor {
 	return &DefaultToolExecutor{
 		handlers: handlers,
 		sshCache: NewSSHClientCache(),
+		sshPool:  sshpool.NewPool(&AIPoolDialer{}, 5*time.Minute),
 	}
 }
 
 // Close 关闭所有缓存的 SSH 连接
 func (e *DefaultToolExecutor) Close() error {
+	e.sshPool.Close()
 	return e.sshCache.Close()
 }
 
@@ -150,5 +156,9 @@ func (e *DefaultToolExecutor) Execute(ctx context.Context, name string, argsJSON
 	}
 	// 注入 SSH 缓存，run_command 会自动使用
 	ctx = WithSSHCache(ctx, e.sshCache)
+	// 注入 SSH 连接池，仅在 context 中没有时设置（允许外部覆盖）
+	if getSSHPool(ctx) == nil {
+		ctx = WithSSHPool(ctx, e.sshPool)
+	}
 	return handler(ctx, args)
 }

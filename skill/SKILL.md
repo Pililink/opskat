@@ -11,10 +11,6 @@ ops-cat's standalone CLI for asset management and remote operations without the 
 
 /Users/codfrm/Library/Application Support/ops-cat
 
-## Data Directory
-
-/Users/codfrm/Library/Application Support/ops-cat
-
 ## Global Flags
 
 - `--data-dir <path>` — Override app data directory (default: platform-specific)
@@ -63,6 +59,25 @@ Most write operations require desktop app approval via Unix socket (`<data-dir>/
 2. Check plan session if `--session` points to a plan
 3. Check if session is already approved → auto-allow
 4. Fall back to desktop app approval (blocks until response)
+
+## User Rejected Approval — MUST STOP
+
+**When the user explicitly rejects an approval or permission request, you MUST immediately stop the current task. Do NOT attempt to retry, work around, or continue with subsequent steps.**
+
+Scenarios that require an immediate stop:
+
+1. **User rejected execution approval** — The user denied the approval dialog. Output contains "用户拒绝执行".
+2. **User rejected permission request** — A `request_permission` call was rejected by the user. Output contains "用户拒绝权限申请".
+
+**Correct behavior**:
+- Stop the entire task immediately — do not execute any remaining steps.
+- Report to the user which command was denied.
+- Wait for user instructions before taking any further action.
+
+**Do NOT**:
+- Retry the same command or a similar variant hoping it will pass.
+- Skip the denied step and continue with subsequent steps (the rest of the plan likely depends on it).
+- Treat the rejection as a non-fatal warning.
 
 ## Session Workflow
 

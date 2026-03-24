@@ -56,10 +56,94 @@ func TestClaudeEventParser(t *testing.T) {
 			So(done, ShouldBeTrue)
 		})
 
-		Convey("解析 assistant 消息不重复发送", func() {
+		Convey("assistant 消息仅含 text 不产生事件", func() {
 			events, done := parser.ParseLine(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"服务器分析结果"}]}}`)
 			So(done, ShouldBeFalse)
 			So(events, ShouldBeEmpty)
+		})
+
+		Convey("assistant 消息中的 tool_use 记录为待执行", func() {
+			// assistant 包含 tool_use
+			events, done := parser.ParseLine(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","id":"tool_1"}]}}`)
+			So(done, ShouldBeFalse)
+			So(events, ShouldBeEmpty)
+			So(parser.pendingTools, ShouldHaveLength, 1)
+			So(parser.pendingTools[0].Name, ShouldEqual, "Bash")
+		})
+
+		Convey("下一轮 content_block_start 时发出 tool_result", func() {
+			// 模拟完整的工具调用流程：tool_use → assistant → CLI 执行 → 新 content block
+			parser.ParseLine(`{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","name":"Bash","id":"tool_1"}}}`)
+			parser.ParseLine(`{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","text":"{\"command\":\"ls\"}"}}}`)
+			parser.ParseLine(`{"type":"stream_event","event":{"type":"content_block_stop","index":0}}`)
+
+			// assistant 消息，记录待执行工具
+			parser.ParseLine(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","id":"tool_1"}]}}`)
+			So(parser.pendingTools, ShouldHaveLength, 1)
+
+			// CLI 内部执行完毕，新一轮 stream_event 开始 → 应先发出 tool_result
+			events, done := parser.ParseLine(`{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text"}}}`)
+			So(done, ShouldBeFalse)
+			So(events, ShouldHaveLength, 1)
+			So(events[0].Type, ShouldEqual, "tool_result")
+			So(events[0].ToolName, ShouldEqual, "Bash")
+			So(parser.pendingTools, ShouldBeEmpty)
+		})
+
+		Convey("多个工具调用依次发出 tool_result", func() {
+			// assistant 包含两个 tool_use
+			parser.ParseLine(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","id":"t1"},{"type":"tool_use","name":"Read","id":"t2"}]}}`)
+			So(parser.pendingTools, ShouldHaveLength, 2)
+
+			// 下一轮 content block 开始
+			events, _ := parser.ParseLine(`{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text"}}}`)
+			So(events, ShouldHaveLength, 2)
+			So(events[0].Type, ShouldEqual, "tool_result")
+			So(events[0].ToolName, ShouldEqual, "Bash")
+			So(events[1].Type, ShouldEqual, "tool_result")
+			So(events[1].ToolName, ShouldEqual, "Read")
+		})
+
+		Convey("result 事件前刷新待执行工具", func() {
+			parser.ParseLine(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","id":"t1"}]}}`)
+			So(parser.pendingTools, ShouldHaveLength, 1)
+
+			events, done := parser.ParseLine(`{"type":"result","result":"done"}`)
+			So(done, ShouldBeTrue)
+			So(events, ShouldHaveLength, 1)
+			So(events[0].Type, ShouldEqual, "tool_result")
+			So(events[0].ToolName, ShouldEqual, "Bash")
+		})
+
+		Convey("server_tool_use 作为 tool_start 处理", func() {
+			events, done := parser.ParseLine(`{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"server_tool_use","name":"web_search","id":"srv_1"}}}`)
+			So(done, ShouldBeFalse)
+			So(events, ShouldHaveLength, 1)
+			So(events[0].Type, ShouldEqual, "tool_start")
+			So(events[0].ToolName, ShouldEqual, "web_search")
+			// 应记录 ID 映射
+			So(parser.toolIDToName["srv_1"], ShouldEqual, "web_search")
+		})
+
+		Convey("*_tool_result 发出 tool_result 并匹配工具名", func() {
+			// 先注册 server_tool_use
+			parser.ParseLine(`{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"server_tool_use","name":"web_search","id":"srv_1"}}}`)
+			parser.ParseLine(`{"type":"stream_event","event":{"type":"content_block_stop","index":0}}`)
+
+			// 收到对应的 tool_result
+			events, done := parser.ParseLine(`{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"web_search_tool_result","tool_use_id":"srv_1"}}}`)
+			So(done, ShouldBeFalse)
+			So(events, ShouldHaveLength, 1)
+			So(events[0].Type, ShouldEqual, "tool_result")
+			So(events[0].ToolName, ShouldEqual, "web_search")
+		})
+
+		Convey("thinking_delta 作为 content 发送", func() {
+			events, done := parser.ParseLine(`{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me think..."}}}`)
+			So(done, ShouldBeFalse)
+			So(events, ShouldHaveLength, 1)
+			So(events[0].Type, ShouldEqual, "content")
+			So(events[0].Content, ShouldEqual, "Let me think...")
 		})
 
 		Convey("空行不报错", func() {

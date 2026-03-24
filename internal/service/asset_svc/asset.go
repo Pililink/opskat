@@ -45,9 +45,16 @@ func (s *assetSvc) Create(ctx context.Context, asset *asset_entity.Asset) error 
 	asset.Createtime = now
 	asset.Updatetime = now
 	asset.Status = asset_entity.StatusActive
-	// 未设置命令策略时，应用默认拒绝列表
+	// 未设置命令策略时，根据资产类型应用默认拒绝列表
 	if asset.CmdPolicy == "" {
-		_ = asset.SetCommandPolicy(asset_entity.DefaultCommandPolicy())
+		switch asset.Type {
+		case asset_entity.AssetTypeDatabase:
+			_ = asset.SetQueryPolicy(asset_entity.DefaultQueryPolicy())
+		case asset_entity.AssetTypeRedis:
+			_ = asset.SetRedisPolicy(asset_entity.DefaultRedisPolicy())
+		default:
+			_ = asset.SetCommandPolicy(asset_entity.DefaultCommandPolicy())
+		}
 	}
 	return asset_repo.Asset().Create(ctx, asset)
 }

@@ -9,6 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { EventsOn, EventsOff } from "../../../wailsjs/runtime/runtime";
 import { RespondOpsctlApproval, RespondOpsctlApprovalSession } from "../../../wailsjs/go/main/App";
 import { ShieldAlert } from "lucide-react";
@@ -27,9 +28,11 @@ export function OpsctlApprovalDialog() {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [event, setEvent] = useState<ApprovalEvent | null>(null);
+  const [commandPattern, setCommandPattern] = useState("");
 
   const handleEvent = useCallback((data: ApprovalEvent) => {
     setEvent(data);
+    setCommandPattern(data.command || "");
     setOpen(true);
   }, []);
 
@@ -46,13 +49,16 @@ export function OpsctlApprovalDialog() {
     setEvent(null);
   }, [event]);
 
-  const respondSession = useCallback(() => {
-    if (event && event.session_id) {
-      RespondOpsctlApprovalSession(event.confirm_id, true, true, event.session_id);
+  const respondRemember = useCallback(() => {
+    if (event && event.session_id && commandPattern) {
+      RespondOpsctlApprovalSession(
+        event.confirm_id, true, event.session_id,
+        event.asset_id, commandPattern
+      );
     }
     setOpen(false);
     setEvent(null);
-  }, [event]);
+  }, [event, commandPattern]);
 
   const typeLabel = event ? t(`opsctlApproval.type${event.type.charAt(0).toUpperCase() + event.type.slice(1)}`) : "";
 
@@ -90,6 +96,22 @@ export function OpsctlApprovalDialog() {
               </div>
             )}
             <div className="text-xs text-muted-foreground font-mono">{event.detail}</div>
+            {event.session_id && event.command && (
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">
+                  {t("opsctlApproval.patternLabel")}
+                </label>
+                <Input
+                  value={commandPattern}
+                  onChange={(e) => setCommandPattern(e.target.value)}
+                  placeholder={t("opsctlApproval.patternPlaceholder")}
+                  className="font-mono text-sm"
+                />
+                <p className="text-xs text-muted-foreground">
+                  {t("opsctlApproval.patternHint")}
+                </p>
+              </div>
+            )}
           </div>
         )}
         <DialogFooter className="gap-2">
@@ -99,9 +121,9 @@ export function OpsctlApprovalDialog() {
           <Button variant="secondary" onClick={() => respond(true)}>
             {t("opsctlApproval.allow")}
           </Button>
-          {event?.session_id && (
-            <Button onClick={respondSession}>
-              {t("opsctlApproval.allowSession")}
+          {event?.session_id && event?.command && (
+            <Button onClick={respondRemember} disabled={!commandPattern.trim()}>
+              {t("opsctlApproval.remember")}
             </Button>
           )}
         </DialogFooter>

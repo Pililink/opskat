@@ -19,6 +19,15 @@ import (
 type auditSourceKey struct{}
 type conversationIDKey struct{}
 type planSessionIDKey struct{}
+type sessionIDKey struct{}
+type auditRecordKey struct{}
+
+// AuditRecord 每次工具调用的审计决策记录（可变，通过 context 传递）
+type AuditRecord struct {
+	Decision       string // "allow" | "deny"
+	DecisionSource string // policy_allow, policy_deny, session_allow, user_allow, user_deny, auto_allow, perm_request
+	MatchedPattern string // 匹配的命令模式
+}
 
 // WithAuditSource 注入审计来源
 func WithAuditSource(ctx context.Context, source string) context.Context {
@@ -59,6 +68,32 @@ func GetPlanSessionID(ctx context.Context) string {
 	return ""
 }
 
+// WithSessionID 注入会话 ID（opsctl session 或 AI session）
+func WithSessionID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, sessionIDKey{}, id)
+}
+
+// GetSessionID 获取会话 ID
+func GetSessionID(ctx context.Context) string {
+	if v, ok := ctx.Value(sessionIDKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// WithAuditRecord 注入审计记录（每次工具调用时由 AuditingExecutor 创建）
+func WithAuditRecord(ctx context.Context, record *AuditRecord) context.Context {
+	return context.WithValue(ctx, auditRecordKey{}, record)
+}
+
+// GetAuditRecord 获取当前审计记录
+func GetAuditRecord(ctx context.Context) *AuditRecord {
+	if v, ok := ctx.Value(auditRecordKey{}).(*AuditRecord); ok {
+		return v
+	}
+	return nil
+}
+
 // --- AuditingExecutor ---
 
 // AuditingExecutor 包装 ToolExecutor，自动记录审计日志
@@ -72,10 +107,14 @@ func NewAuditingExecutor(inner ToolExecutor) *AuditingExecutor {
 }
 
 func (a *AuditingExecutor) Execute(ctx context.Context, name string, argsJSON string) (string, error) {
-	result, err := a.inner.Execute(ctx, name, argsJSON)
+	// 每次调用创建独立的 AuditRecord，policy checker 填充决策信息
+	record := &AuditRecord{}
+	callCtx := WithAuditRecord(ctx, record)
 
-	// 写审计日志（fire-and-forget）
-	go a.writeAuditLog(ctx, name, argsJSON, result, err)
+	result, err := a.inner.Execute(callCtx, name, argsJSON)
+
+	// 写审计日志（fire-and-forget），携带 record 和原始 ctx（含 session/conversation 信息）
+	go a.writeAuditLog(ctx, name, argsJSON, result, err, record)
 
 	return result, err
 }
@@ -88,7 +127,7 @@ func (a *AuditingExecutor) Close() error {
 	return nil
 }
 
-func (a *AuditingExecutor) writeAuditLog(ctx context.Context, name string, argsJSON string, result string, execErr error) {
+func (a *AuditingExecutor) writeAuditLog(ctx context.Context, name string, argsJSON string, result string, execErr error, record *AuditRecord) {
 	var args map[string]any
 	_ = json.Unmarshal([]byte(argsJSON), &args)
 
@@ -125,7 +164,15 @@ func (a *AuditingExecutor) writeAuditLog(ctx context.Context, name string, argsJ
 		Success:        success,
 		ConversationID: GetConversationID(ctx),
 		PlanSessionID:  GetPlanSessionID(ctx),
+		SessionID:      GetSessionID(ctx),
 		Createtime:     time.Now().Unix(),
+	}
+
+	// 填充决策信息
+	if record != nil {
+		entry.Decision = record.Decision
+		entry.DecisionSource = record.DecisionSource
+		entry.MatchedPattern = record.MatchedPattern
 	}
 
 	if repo := audit_repo.Audit(); repo != nil {
@@ -141,6 +188,14 @@ func ExtractCommandForAudit(toolName string, args map[string]any) string {
 	case "run_command":
 		if v, ok := args["command"].(string); ok {
 			return v
+		}
+	case "request_permission":
+		if v, ok := args["command_pattern"].(string); ok {
+			reason, _ := args["reason"].(string)
+			if reason != "" {
+				return "pattern: " + v + " reason: " + reason
+			}
+			return "pattern: " + v
 		}
 	case "upload_file":
 		local, _ := args["local_path"].(string)
@@ -165,6 +220,12 @@ func truncateString(s string, maxLen int) string {
 func WriteAuditLog(ctx context.Context, entry *audit_entity.AuditLog) {
 	if entry.Createtime == 0 {
 		entry.Createtime = time.Now().Unix()
+	}
+	// 自动补全资产名称
+	if entry.AssetName == "" && entry.AssetID > 0 && asset_repo.Asset() != nil {
+		if a, err := asset_repo.Asset().Find(context.Background(), entry.AssetID); err == nil {
+			entry.AssetName = a.Name
+		}
 	}
 	if repo := audit_repo.Audit(); repo != nil {
 		if err := repo.Create(context.Background(), entry); err != nil {

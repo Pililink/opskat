@@ -89,7 +89,7 @@ type App struct {
 	pendingConfirms       sync.Map                   // map[string]chan ConfirmResponse（run_command 确认用）
 	pendingApprovals      sync.Map                   // map[string]chan bool（opsctl 审批用）
 	approvalServer        *approval.Server           // opsctl 审批 Unix socket 服务
-	approvedSessions      sync.Map                   // map[string]bool（已批准的 session）
+	approvedSessions      sync.Map                   // map[string]*sessionRules（已批准的 session 规则）
 	sshPool               *sshpool.Pool              // opsctl SSH 连接池
 	sshProxyServer        *sshpool.Server            // SSH 连接池 Unix socket 服务
 	pendingAuthResponses  sync.Map                   // map[string]chan []string（keyboard-interactive 认证响应用）
@@ -99,6 +99,34 @@ type App struct {
 	currentConversationID int64                      // 当前活跃会话ID
 	aiProviderType        string                     // 当前 provider 类型
 	aiModel               string                     // 当前模型
+}
+
+// sessionRules 会话级已批准的命令模式规则
+type sessionRules struct {
+	mu    sync.Mutex
+	rules []ai.ApprovedPattern
+}
+
+// Add 添加规则
+func (s *sessionRules) Add(assetID int64, pattern string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rules = append(s.rules, ai.ApprovedPattern{
+		AssetID: assetID,
+		Pattern: pattern,
+	})
+}
+
+// Match 检查命令是否匹配任一规则
+func (s *sessionRules) Match(assetID int64, command string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.rules {
+		if s.rules[i].Match(assetID, command) {
+			return true
+		}
+	}
+	return false
 }
 
 // NewApp 创建App实例
@@ -121,6 +149,7 @@ func (a *App) SetAIProvider(providerType, apiBase, apiKey, model string) error {
 
 	// 创建共用的命令权限检查器
 	checker := ai.NewCommandPolicyChecker(a.makeCommandConfirmFunc())
+	checker.SetPermissionRequestFunc(a.makePermissionRequestFunc())
 
 	var provider ai.Provider
 	switch providerType {
@@ -178,10 +207,13 @@ func (a *App) startApprovalServer() {
 			return a.handlePlanApproval(req)
 		}
 
-		// session 自动放行
-		if req.SessionID != "" {
-			if _, ok := a.approvedSessions.Load(req.SessionID); ok {
-				return approval.ApprovalResponse{Approved: true}
+		// session 规则匹配：按 assetID + command pattern 自动放行
+		if req.SessionID != "" && req.Command != "" {
+			if v, ok := a.approvedSessions.Load(req.SessionID); ok {
+				rules := v.(*sessionRules)
+				if rules.Match(req.AssetID, req.Command) {
+					return approval.ApprovalResponse{Approved: true, Reason: "session_match"}
+				}
 			}
 		}
 
@@ -456,10 +488,12 @@ func (a *App) RespondPlanApproval(sessionID string, approved bool) {
 	a.RespondOpsctlApproval(sessionID, approved)
 }
 
-// RespondOpsctlApprovalSession 前端响应审批并可选允许整个 session
-func (a *App) RespondOpsctlApprovalSession(confirmID string, approved bool, approveSession bool, sessionID string) {
-	if approved && approveSession && sessionID != "" {
-		a.approvedSessions.Store(sessionID, true)
+// RespondOpsctlApprovalSession 前端响应审批并记住命令模式
+func (a *App) RespondOpsctlApprovalSession(confirmID string, approved bool, sessionID string, assetID int64, commandPattern string) {
+	if approved && sessionID != "" && commandPattern != "" {
+		v, _ := a.approvedSessions.LoadOrStore(sessionID, &sessionRules{})
+		rules := v.(*sessionRules)
+		rules.Add(assetID, commandPattern)
 	}
 	a.RespondOpsctlApproval(confirmID, approved)
 }
@@ -1085,7 +1119,7 @@ func (a *App) ExecuteSQL(assetID int64, sqlText string, database string) (string
 }
 
 // ExecuteRedis 在指定 Redis 资产上执行命令
-func (a *App) ExecuteRedis(assetID int64, command string) (string, error) {
+func (a *App) ExecuteRedis(assetID int64, command string, db int) (string, error) {
 	asset, err := asset_svc.Asset().Get(a.langCtx(), assetID)
 	if err != nil {
 		return "", fmt.Errorf("资产不存在: %w", err)
@@ -1097,6 +1131,7 @@ func (a *App) ExecuteRedis(assetID int64, command string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("获取 Redis 配置失败: %w", err)
 	}
+	cfg.Database = db
 
 	ctx, cancel := context.WithTimeout(a.langCtx(), 30*time.Second)
 	defer cancel()
@@ -1111,6 +1146,36 @@ func (a *App) ExecuteRedis(assetID int64, command string) (string, error) {
 	}
 
 	return ai.ExecuteRedis(ctx, client, command)
+}
+
+// ExecuteRedisArgs 使用预拆分的参数执行 Redis 命令（支持含空格的值）
+func (a *App) ExecuteRedisArgs(assetID int64, args []string, db int) (string, error) {
+	asset, err := asset_svc.Asset().Get(a.langCtx(), assetID)
+	if err != nil {
+		return "", fmt.Errorf("资产不存在: %w", err)
+	}
+	if !asset.IsRedis() {
+		return "", fmt.Errorf("资产不是 Redis 类型")
+	}
+	cfg, err := asset.GetRedisConfig()
+	if err != nil {
+		return "", fmt.Errorf("获取 Redis 配置失败: %w", err)
+	}
+	cfg.Database = db
+
+	ctx, cancel := context.WithTimeout(a.langCtx(), 30*time.Second)
+	defer cancel()
+
+	client, tunnel, err := connpool.DialRedis(ctx, cfg, a.sshPool)
+	if err != nil {
+		return "", fmt.Errorf("连接 Redis 失败: %w", err)
+	}
+	defer client.Close()
+	if tunnel != nil {
+		defer tunnel.Close()
+	}
+
+	return ai.ExecuteRedisRaw(ctx, client, args)
 }
 
 // WriteSSH 向 SSH 终端写入数据（base64 编码）
@@ -1639,6 +1704,10 @@ func (a *App) SendAIMessage(convID int64, messages []ai.Message) error {
 		// 注入审计上下文
 		chatCtx := ai.WithAuditSource(a.ctx, "ai")
 		chatCtx = ai.WithConversationID(chatCtx, convID)
+		// 注入 SSH 连接池，供 Redis/Database SSH 隧道使用
+		if a.sshPool != nil {
+			chatCtx = ai.WithSSHPool(chatCtx, a.sshPool)
+		}
 
 		err := a.aiAgent.Chat(chatCtx, fullMessages, func(event ai.StreamEvent) {
 			wailsRuntime.EventsEmit(a.ctx, eventName, event)
@@ -1754,6 +1823,64 @@ func (a *App) makeCommandConfirmFunc() ai.CommandConfirmFunc {
 			return resp.Behavior != "deny", resp.Behavior == "allowAll"
 		case <-a.ctx.Done():
 			return false, false
+		}
+	}
+}
+
+// PermissionConfirmResponse 权限申请确认响应
+type PermissionConfirmResponse struct {
+	Approved bool
+	Pattern  string // 用户可能编辑后的 pattern
+}
+
+// makePermissionRequestFunc 创建权限申请回调，向 AI 聊天流发送 tool_confirm 事件并阻塞等待
+func (a *App) makePermissionRequestFunc() ai.PermissionRequestFunc {
+	return func(assetName string, assetID int64, commandPattern, reason string) (bool, string) {
+		convID := a.currentConversationID
+		confirmID := fmt.Sprintf("perm_%d_%d", convID, time.Now().UnixNano())
+		eventName := fmt.Sprintf("ai:event:%d", convID)
+
+		// 向 AI 聊天流发送权限申请确认事件
+		wailsRuntime.EventsEmit(a.ctx, eventName, ai.StreamEvent{
+			Type:      "tool_confirm",
+			ToolName:  "request_permission",
+			ToolInput: fmt.Sprintf("[%s] pattern: %s\nreason: %s", assetName, commandPattern, reason),
+			ConfirmID: confirmID,
+		})
+
+		// 阻塞等待前端响应
+		ch := make(chan PermissionConfirmResponse, 1)
+		a.pendingConfirms.Store(confirmID, ch)
+		defer a.pendingConfirms.Delete(confirmID)
+
+		select {
+		case resp := <-ch:
+			// 发送确认结果事件更新 UI 状态
+			behavior := "deny"
+			if resp.Approved {
+				behavior = "allow"
+			}
+			wailsRuntime.EventsEmit(a.ctx, eventName, ai.StreamEvent{
+				Type:      "tool_confirm_result",
+				ConfirmID: confirmID,
+				Content:   behavior,
+			})
+			return resp.Approved, resp.Pattern
+		case <-a.ctx.Done():
+			return false, ""
+		}
+	}
+}
+
+// RespondPermissionRequest 前端响应 request_permission 确认请求
+func (a *App) RespondPermissionRequest(confirmID string, approved bool, pattern string) {
+	if v, ok := a.pendingConfirms.Load(confirmID); ok {
+		if ch, ok := v.(chan PermissionConfirmResponse); ok {
+			select {
+			case ch <- PermissionConfirmResponse{Approved: approved, Pattern: pattern}:
+			default:
+			}
+			return
 		}
 	}
 }
@@ -2274,6 +2401,7 @@ var skillTargetDefs = []struct {
 }{
 	{"Claude Code", ".claude"},
 	{"Codex", ".codex"},
+	{"OpenCode", ".opencode"},
 }
 
 // DetectSkills 检测所有 AI 工具的 Skill 安装状态
@@ -2357,20 +2485,28 @@ type AuditLogListResult struct {
 }
 
 // ListAuditLogs 查询审计日志
-func (a *App) ListAuditLogs(source string, assetID int64, offset, limit int) (*AuditLogListResult, error) {
+func (a *App) ListAuditLogs(source string, assetID int64, startTime, endTime int64, offset, limit int, sessionID string) (*AuditLogListResult, error) {
 	if limit <= 0 {
 		limit = 20
 	}
 	items, total, err := audit_repo.Audit().List(a.langCtx(), audit_repo.ListOptions{
-		Source:  source,
-		AssetID: assetID,
-		Offset:  offset,
-		Limit:   limit,
+		Source:    source,
+		AssetID:   assetID,
+		SessionID: sessionID,
+		StartTime: startTime,
+		EndTime:   endTime,
+		Offset:    offset,
+		Limit:     limit,
 	})
 	if err != nil {
 		return nil, err
 	}
 	return &AuditLogListResult{Items: items, Total: total}, nil
+}
+
+// ListAuditSessions 查询审计日志中的会话列表
+func (a *App) ListAuditSessions(startTime int64) ([]audit_repo.SessionInfo, error) {
+	return audit_repo.Audit().ListSessions(a.langCtx(), startTime)
 }
 
 // --- 更新 ---

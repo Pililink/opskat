@@ -1,5 +1,19 @@
 package audit_entity
 
+// 决策来源常量
+const (
+	DecisionAllow = "allow"
+	DecisionDeny  = "deny"
+
+	SourcePolicyAllow  = "policy_allow"   // 命令策略白名单放行
+	SourcePolicyDeny   = "policy_deny"    // 命令策略黑名单拒绝
+	SourceSessionAllow = "session_allow"  // 会话级模式匹配放行
+	SourceUserAllow    = "user_allow"     // 用户手动允许
+	SourceUserDeny     = "user_deny"      // 用户手动拒绝
+	SourceAutoAllow    = "auto_allow"     // 无策略限制，直接放行
+	SourcePermRequest  = "perm_request"   // request_permission 权限申请
+)
+
 // AuditLog 审计日志实体
 type AuditLog struct {
 	ID             int64  `gorm:"column:id;primaryKey;autoIncrement"`
@@ -14,6 +28,10 @@ type AuditLog struct {
 	Success        int    `gorm:"column:success;default:1"` // 1=成功, 0=失败
 	ConversationID int64  `gorm:"column:conversation_id;default:0"`
 	PlanSessionID  string `gorm:"column:plan_session_id;type:varchar(36)"`
+	SessionID      string `gorm:"column:session_id;type:varchar(64)"`            // opsctl/AI 会话 ID
+	Decision       string `gorm:"column:decision;type:varchar(10)"`              // "allow" | "deny"
+	DecisionSource string `gorm:"column:decision_source;type:varchar(30)"`       // 决策来源
+	MatchedPattern string `gorm:"column:matched_pattern;type:varchar(500)"`      // 匹配的命令模式
 	Createtime     int64  `gorm:"column:createtime;not null"`
 }
 

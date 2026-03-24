@@ -159,6 +159,16 @@ func AllToolDefs() []ToolDef {
 			},
 			Handler: handleExecRedis,
 		},
+		{
+			Name:        "request_permission",
+			Description: "Request permission to execute commands on a remote server BEFORE actually running them. Supports wildcard patterns (e.g. 'cat *', 'systemctl * nginx', '*'). Once approved, subsequent run_command calls matching the pattern will be auto-approved without further prompts. Call this proactively when you plan to run multiple similar commands on the same asset.",
+			Params: []ParamDef{
+				{Name: "asset_id", Type: ParamNumber, Description: "Target server asset ID.", Required: true},
+				{Name: "command_pattern", Type: ParamString, Description: "Command pattern to request permission for. Supports '*' wildcard (e.g. 'cat /var/log/*', 'systemctl *', 'docker logs *').", Required: true},
+				{Name: "reason", Type: ParamString, Description: "Brief explanation of why this permission is needed.", Required: true},
+			},
+			Handler: handleRequestPermission,
+		},
 	}
 }
 
@@ -398,6 +408,26 @@ func handleGetAsset(ctx context.Context, args map[string]any) (string, error) {
 	}
 	data, _ := json.Marshal(toSafeView(asset))
 	return string(data), nil
+}
+
+func handleRequestPermission(ctx context.Context, args map[string]any) (string, error) {
+	assetID := argInt64(args, "asset_id")
+	commandPattern := argString(args, "command_pattern")
+	reason := argString(args, "reason")
+	if assetID == 0 {
+		return "", fmt.Errorf("缺少参数 asset_id")
+	}
+	if commandPattern == "" {
+		return "", fmt.Errorf("缺少参数 command_pattern")
+	}
+
+	checker := GetPolicyChecker(ctx)
+	if checker == nil {
+		return "", fmt.Errorf("权限检查器不可用")
+	}
+
+	result := checker.RequestPermission(ctx, assetID, commandPattern, reason)
+	return result.Message, nil
 }
 
 func handleRunCommand(ctx context.Context, args map[string]any) (string, error) {

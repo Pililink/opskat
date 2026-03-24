@@ -146,6 +146,10 @@ export namespace audit_entity {
 	    Success: number;
 	    ConversationID: number;
 	    PlanSessionID: string;
+	    SessionID: string;
+	    Decision: string;
+	    DecisionSource: string;
+	    MatchedPattern: string;
 	    Createtime: number;
 	
 	    static createFrom(source: any = {}) {
@@ -166,7 +170,34 @@ export namespace audit_entity {
 	        this.Success = source["Success"];
 	        this.ConversationID = source["ConversationID"];
 	        this.PlanSessionID = source["PlanSessionID"];
+	        this.SessionID = source["SessionID"];
+	        this.Decision = source["Decision"];
+	        this.DecisionSource = source["DecisionSource"];
+	        this.MatchedPattern = source["MatchedPattern"];
 	        this.Createtime = source["Createtime"];
+	    }
+	}
+
+}
+
+export namespace audit_repo {
+	
+	export class SessionInfo {
+	    session_id: string;
+	    first_time: number;
+	    last_time: number;
+	    count: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new SessionInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.session_id = source["session_id"];
+	        this.first_time = source["first_time"];
+	        this.last_time = source["last_time"];
+	        this.count = source["count"];
 	    }
 	}
 

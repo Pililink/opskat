@@ -781,7 +781,66 @@ export const useAIStore = create<AIState>((set, get) => {
   };
 });
 
-// 应用启动时自动恢复 AI 配置并打开默认 tab
+// 持久化 AI 标签页状态
+let _aiTabsPersistReady = false;
+
+useAIStore.subscribe((state, prevState) => {
+  if (!_aiTabsPersistReady) return;
+  if (state.openTabs !== prevState.openTabs || state.activeAITabId !== prevState.activeAITabId) {
+    const convIds = state.openTabs
+      .filter((t) => t.conversationId !== null)
+      .map((t) => t.conversationId);
+    localStorage.setItem("ai_open_tabs", JSON.stringify(convIds));
+    const activeTab = state.openTabs.find((t) => t.id === state.activeAITabId);
+    localStorage.setItem(
+      "ai_active_tab_conv",
+      activeTab?.conversationId ? String(activeTab.conversationId) : ""
+    );
+  }
+});
+
+async function _restoreOrOpenAITabs() {
+  const store = useAIStore.getState();
+  const { conversations } = store;
+
+  // 尝试恢复上次打开的标签页
+  const savedTabsJson = localStorage.getItem("ai_open_tabs");
+  let savedConvIds: number[] = [];
+  if (savedTabsJson) {
+    try {
+      savedConvIds = JSON.parse(savedTabsJson);
+    } catch {}
+  }
+  const savedActiveConv = Number(localStorage.getItem("ai_active_tab_conv")) || null;
+
+  // 只恢复仍然存在的会话
+  const validConvIds = savedConvIds.filter((id) =>
+    conversations.some((c) => c.ID === id)
+  );
+
+  if (validConvIds.length > 0) {
+    for (const convId of validConvIds) {
+      await store.openConversationTab(convId).catch(() => {});
+    }
+    // 激活上次活跃的标签页
+    if (savedActiveConv) {
+      const tab = useAIStore.getState().openTabs.find(
+        (t) => t.conversationId === savedActiveConv
+      );
+      if (tab) store.setActiveAITab(tab.id);
+    }
+    return;
+  }
+
+  // 无保存的标签页，使用默认行为
+  if (conversations.length > 0) {
+    store.openConversationTab(conversations[0].ID).catch(() => {});
+  } else {
+    store.openNewConversationTab();
+  }
+}
+
+// 应用启动时自动恢复 AI 配置并打开标签页
 const providerType = localStorage.getItem("ai_provider_type");
 if (providerType) {
   const apiBase = localStorage.getItem("ai_api_base") || "";
@@ -793,16 +852,14 @@ if (providerType) {
     .then(async () => {
       const store = useAIStore.getState();
       await store.fetchConversations();
-      // 自动打开最近的会话或新建一个
-      const { conversations } = useAIStore.getState();
-      if (conversations.length > 0) {
-        store.openConversationTab(conversations[0].ID).catch(() => {});
-      } else {
-        store.openNewConversationTab();
-      }
+      await _restoreOrOpenAITabs();
     })
-    .catch(() => {});
+    .catch(() => {})
+    .finally(() => {
+      _aiTabsPersistReady = true;
+    });
 } else {
   // 未配置也打开一个新 tab（显示未配置提示）
   useAIStore.getState().openNewConversationTab();
+  _aiTabsPersistReady = true;
 }

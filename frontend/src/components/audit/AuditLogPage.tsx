@@ -1,14 +1,21 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { CheckCircle2, XCircle, ChevronLeft, ChevronRight, Info, RefreshCw, Unplug } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Dialog,
   DialogContent,
@@ -16,37 +23,126 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ListAuditLogs, GetSSHPoolConnections } from "../../../wailsjs/go/main/App";
-import { audit_entity, sshpool } from "../../../wailsjs/go/models";
+import { ListAuditLogs, ListAuditSessions, GetSSHPoolConnections } from "../../../wailsjs/go/main/App";
+import { audit_entity, audit_repo, sshpool } from "../../../wailsjs/go/models";
 
 const PAGE_SIZE = 20;
-const SOURCES = ["", "ai", "opsctl", "mcp"] as const;
+
+// 时间范围选项（单位：秒）
+const TIME_RANGES = [
+  { value: "0", seconds: 0 },       // 全部
+  { value: "1h", seconds: 3600 },
+  { value: "3h", seconds: 10800 },
+  { value: "6h", seconds: 21600 },
+  { value: "1d", seconds: 86400 },
+  { value: "7d", seconds: 604800 },
+  { value: "custom", seconds: -1 },  // 自定义
+] as const;
+
+// 决策来源标签样式
+function decisionSourceBadge(source: string): { label: string; className: string } {
+  switch (source) {
+    case "policy_allow":
+      return { label: "policy", className: "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300" };
+    case "policy_deny":
+      return { label: "policy", className: "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300" };
+    case "session_allow":
+      return { label: "session", className: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300" };
+    case "user_allow":
+      return { label: "user", className: "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300" };
+    case "user_deny":
+      return { label: "user", className: "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300" };
+    case "auto_allow":
+      return { label: "auto", className: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300" };
+    case "perm_request":
+      return { label: "perm", className: "bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300" };
+    default:
+      return { label: source || "-", className: "bg-muted" };
+  }
+}
+
+// 将 unix timestamp 按日期分组
+function getSessionGroup(ts: number): "today" | "yesterday" | "thisWeek" | "earlier" {
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000;
+  const yesterdayStart = todayStart - 86400;
+  const weekStart = todayStart - (now.getDay() || 7) * 86400 + 86400; // 本周一
+
+  if (ts >= todayStart) return "today";
+  if (ts >= yesterdayStart) return "yesterday";
+  if (ts >= weekStart) return "thisWeek";
+  return "earlier";
+}
+
+function fromDatetimeLocal(s: string): number {
+  if (!s) return 0;
+  return Math.floor(new Date(s).getTime() / 1000);
+}
 
 export function AuditLogPage() {
   const { t } = useTranslation();
   const [logs, setLogs] = useState<audit_entity.AuditLog[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
-  const [source, setSource] = useState("");
+  const [sessionFilter, setSessionFilter] = useState("");
+  const [timeRange, setTimeRange] = useState("1d");
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
   const [loading, setLoading] = useState(false);
   const [detailLog, setDetailLog] = useState<audit_entity.AuditLog | null>(null);
   const [activeTab, setActiveTab] = useState("logs");
   const [poolEntries, setPoolEntries] = useState<sshpool.PoolEntryInfo[]>([]);
+  const [sessions, setSessions] = useState<audit_repo.SessionInfo[]>([]);
+
+  // 计算实际的 startTime
+  const computeStartTime = useCallback(() => {
+    if (timeRange === "custom") {
+      return fromDatetimeLocal(customStart);
+    }
+    const range = TIME_RANGES.find((r) => r.value === timeRange);
+    return range && range.seconds > 0
+      ? Math.floor(Date.now() / 1000) - range.seconds
+      : 0;
+  }, [timeRange, customStart]);
+
+  const computeEndTime = useCallback(() => {
+    if (timeRange === "custom") {
+      return fromDatetimeLocal(customEnd);
+    }
+    return 0;
+  }, [timeRange, customEnd]);
 
   const fetchLogs = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await ListAuditLogs(source, 0, page * PAGE_SIZE, PAGE_SIZE);
+      const startTime = computeStartTime();
+      const endTime = computeEndTime();
+      const result = await ListAuditLogs("", 0, startTime, endTime, page * PAGE_SIZE, PAGE_SIZE, sessionFilter);
       setLogs(result?.items || []);
       setTotal(result?.total || 0);
     } finally {
       setLoading(false);
     }
-  }, [source, page]);
+  }, [sessionFilter, computeStartTime, computeEndTime, page]);
 
   useEffect(() => {
     fetchLogs();
   }, [fetchLogs]);
+
+  // 加载会话列表
+  const fetchSessions = useCallback(async () => {
+    try {
+      const startTime = computeStartTime();
+      const result = await ListAuditSessions(startTime);
+      setSessions(result || []);
+    } catch {
+      setSessions([]);
+    }
+  }, [computeStartTime]);
+
+  useEffect(() => {
+    fetchSessions();
+  }, [fetchSessions]);
 
   const fetchPool = useCallback(async () => {
     try {
@@ -71,9 +167,35 @@ export function AuditLogPage() {
     return d.toLocaleString();
   };
 
+  const formatTimeShort = (ts: number) => {
+    if (!ts) return "";
+    const d = new Date(ts * 1000);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
   const truncate = (s: string, max = 60) => {
     if (!s) return "-";
     return s.length > max ? s.slice(0, max) + "..." : s;
+  };
+
+  // 按时间分组会话
+  const groupedSessions = useMemo(() => {
+    const groups: Record<string, audit_repo.SessionInfo[]> = {};
+    for (const s of sessions) {
+      const group = getSessionGroup(s.last_time);
+      if (!groups[group]) groups[group] = [];
+      groups[group].push(s);
+    }
+    return groups;
+  }, [sessions]);
+
+  const groupOrder = ["today", "yesterday", "thisWeek", "earlier"] as const;
+  const groupLabels: Record<string, string> = {
+    today: t("audit.sessionGroupToday"),
+    yesterday: t("audit.sessionGroupYesterday"),
+    thisWeek: t("audit.sessionGroupThisWeek"),
+    earlier: t("audit.sessionGroupEarlier"),
   };
 
   return (
@@ -91,24 +213,88 @@ export function AuditLogPage() {
         </Tabs>
         {activeTab === "logs" && (
           <div className="flex items-center gap-2">
+            {/* 会话筛选 */}
             <Select
-              value={source}
+              value={sessionFilter || "all"}
               onValueChange={(v) => {
-                setSource(v === "all" ? "" : v);
+                setSessionFilter(v === "all" ? "" : v);
                 setPage(0);
               }}
             >
-              <SelectTrigger className="w-32 h-8 text-sm">
-                <SelectValue placeholder={t("audit.source")} />
+              <SelectTrigger className="w-44 h-8 text-xs font-mono">
+                <SelectValue placeholder={t("audit.sessionAll")} />
               </SelectTrigger>
               <SelectContent>
-                {SOURCES.map((s) => (
-                  <SelectItem key={s || "all"} value={s || "all"}>
-                    {s ? s.toUpperCase() : t("audit.sourceAll")}
-                  </SelectItem>
-                ))}
+                <SelectItem value="all">{t("audit.sessionAll")}</SelectItem>
+                {groupOrder.map((group) => {
+                  const items = groupedSessions[group];
+                  if (!items || items.length === 0) return null;
+                  return (
+                    <SelectGroup key={group}>
+                      <SelectLabel>{groupLabels[group]}</SelectLabel>
+                      {items.map((s) => (
+                        <SelectItem key={s.session_id} value={s.session_id}>
+                          <span className="truncate">{s.session_id.slice(0, 8)}</span>
+                          <span className="text-muted-foreground ml-1">
+                            {formatTimeShort(s.first_time)} ({t("audit.sessionOps", { count: s.count })})
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  );
+                })}
               </SelectContent>
             </Select>
+            {/* 时间范围 */}
+            <Popover>
+              <Select
+                value={timeRange}
+                onValueChange={(v) => {
+                  setTimeRange(v);
+                  setPage(0);
+                }}
+              >
+                <SelectTrigger className="w-32 h-8 text-sm">
+                  <SelectValue placeholder={t("audit.timeRange")} />
+                </SelectTrigger>
+                <SelectContent>
+                  {TIME_RANGES.map((r) => (
+                    <SelectItem key={r.value || "all"} value={r.value || "all"}>
+                      {r.value === "custom" ? t("audit.timeCustom") : r.value ? t(`audit.time${r.value}`) : t("audit.timeAll")}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {timeRange === "custom" && (
+                <PopoverTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-8 text-xs">
+                    {customStart
+                      ? `${new Date(customStart).toLocaleDateString()} - ${customEnd ? new Date(customEnd).toLocaleDateString() : "..."}`
+                      : t("audit.timeCustom")}
+                  </Button>
+                </PopoverTrigger>
+              )}
+              <PopoverContent className="w-auto p-3 space-y-2" align="end">
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-muted-foreground w-12">{t("audit.timeStart")}</label>
+                  <input
+                    type="datetime-local"
+                    value={customStart}
+                    onChange={(e) => { setCustomStart(e.target.value); setPage(0); }}
+                    className="text-xs border rounded px-2 py-1 bg-background"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-muted-foreground w-12">{t("audit.timeEnd")}</label>
+                  <input
+                    type="datetime-local"
+                    value={customEnd}
+                    onChange={(e) => { setCustomEnd(e.target.value); setPage(0); }}
+                    className="text-xs border rounded px-2 py-1 bg-background"
+                  />
+                </div>
+              </PopoverContent>
+            </Popover>
             <span className="text-xs text-muted-foreground">
               {t("audit.total", { total })}
             </span>
@@ -130,10 +316,10 @@ export function AuditLogPage() {
               <thead className="sticky top-0 bg-background border-b">
                 <tr className="text-left text-muted-foreground">
                   <th className="px-4 py-2 font-medium">{t("audit.time")}</th>
-                  <th className="px-4 py-2 font-medium">{t("audit.source")}</th>
                   <th className="px-4 py-2 font-medium">{t("audit.toolName")}</th>
                   <th className="px-4 py-2 font-medium">{t("audit.assetName")}</th>
                   <th className="px-4 py-2 font-medium">{t("audit.command")}</th>
+                  <th className="px-4 py-2 font-medium">{t("audit.decision")}</th>
                   <th className="px-4 py-2 font-medium w-16 text-center">{t("audit.result")}</th>
                   <th className="px-4 py-2 font-medium w-16"></th>
                 </tr>
@@ -146,43 +332,48 @@ export function AuditLogPage() {
                     </td>
                   </tr>
                 )}
-                {logs.map((log) => (
-                  <tr
-                    key={log.ID}
-                    className="border-b hover:bg-muted/50 transition-colors"
-                  >
-                    <td className="px-4 py-2 text-xs text-muted-foreground whitespace-nowrap">
-                      {formatTime(log.Createtime)}
-                    </td>
-                    <td className="px-4 py-2">
-                      <span className="inline-block px-1.5 py-0.5 text-xs rounded bg-muted font-mono">
-                        {log.Source}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2 font-mono text-xs">{log.ToolName}</td>
-                    <td className="px-4 py-2">{log.AssetName || "-"}</td>
-                    <td className="px-4 py-2 font-mono text-xs max-w-48 truncate" title={log.Command}>
-                      {truncate(log.Command)}
-                    </td>
-                    <td className="px-4 py-2 text-center">
-                      {log.Success === 1 ? (
-                        <CheckCircle2 className="h-4 w-4 text-green-500 mx-auto" />
-                      ) : (
-                        <XCircle className="h-4 w-4 text-destructive mx-auto" />
-                      )}
-                    </td>
-                    <td className="px-4 py-2">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        onClick={() => setDetailLog(log)}
-                      >
-                        <Info className="h-3.5 w-3.5" />
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
+                {logs.map((log) => {
+                  const badge = decisionSourceBadge(log.DecisionSource);
+                  return (
+                    <tr
+                      key={log.ID}
+                      className="border-b hover:bg-muted/50 transition-colors"
+                    >
+                      <td className="px-4 py-2 text-xs text-muted-foreground whitespace-nowrap">
+                        {formatTime(log.Createtime)}
+                      </td>
+                      <td className="px-4 py-2 font-mono text-xs">{log.ToolName}</td>
+                      <td className="px-4 py-2">{log.AssetName || "-"}</td>
+                      <td className="px-4 py-2 font-mono text-xs max-w-48 truncate" title={log.Command}>
+                        {truncate(log.Command)}
+                      </td>
+                      <td className="px-4 py-2">
+                        {log.DecisionSource ? (
+                          <span className={`inline-block px-1.5 py-0.5 text-xs rounded font-mono ${badge.className}`}>
+                            {log.Decision === "allow" ? "\u2713" : "\u2717"} {badge.label}
+                          </span>
+                        ) : "-"}
+                      </td>
+                      <td className="px-4 py-2 text-center">
+                        {log.Success === 1 ? (
+                          <CheckCircle2 className="h-4 w-4 text-green-500 mx-auto" />
+                        ) : (
+                          <XCircle className="h-4 w-4 text-destructive mx-auto" />
+                        )}
+                      </td>
+                      <td className="px-4 py-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => setDetailLog(log)}
+                        >
+                          <Info className="h-3.5 w-3.5" />
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -267,10 +458,6 @@ export function AuditLogPage() {
             <div className="space-y-3 text-sm">
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <span className="text-muted-foreground">{t("audit.source")}:</span>{" "}
-                  <span className="font-mono">{detailLog.Source}</span>
-                </div>
-                <div>
                   <span className="text-muted-foreground">{t("audit.toolName")}:</span>{" "}
                   <span className="font-mono">{detailLog.ToolName}</span>
                 </div>
@@ -286,6 +473,26 @@ export function AuditLogPage() {
                     <span className="text-destructive">{t("audit.failed")}</span>
                   )}
                 </div>
+                <div>
+                  <span className="text-muted-foreground">{t("audit.decision")}:</span>{" "}
+                  <span className="font-mono">{detailLog.Decision || "-"}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">{t("audit.decisionSource")}:</span>{" "}
+                  <span className="font-mono">{detailLog.DecisionSource || "-"}</span>
+                </div>
+                {detailLog.MatchedPattern && (
+                  <div className="col-span-2">
+                    <span className="text-muted-foreground">{t("audit.matchedPattern")}:</span>{" "}
+                    <code className="font-mono bg-muted px-1 rounded">{detailLog.MatchedPattern}</code>
+                  </div>
+                )}
+                {detailLog.SessionID && (
+                  <div className="col-span-2">
+                    <span className="text-muted-foreground">{t("audit.sessionID")}:</span>{" "}
+                    <code className="font-mono text-xs bg-muted px-1 rounded">{detailLog.SessionID}</code>
+                  </div>
+                )}
                 <div className="col-span-2">
                   <span className="text-muted-foreground">{t("audit.time")}:</span>{" "}
                   {formatTime(detailLog.Createtime)}

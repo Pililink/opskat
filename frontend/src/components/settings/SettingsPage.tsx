@@ -65,10 +65,9 @@ import {
   Bot, Palette, Check, HardDrive, Download, Upload, Import,
   Github, LogOut, Loader2, Copy, ExternalLink, Eye, EyeOff, Shuffle, Keyboard,
   Plus, Pencil, Trash2, MonitorDot, RefreshCw, ChevronDown, ChevronUp,
-  Info, Key,
+  Info,
 } from "lucide-react";
 import { ShortcutSettings } from "@/components/settings/ShortcutSettings";
-import { CredentialManager } from "@/components/settings/CredentialManager";
 import { TerminalThemeEditor } from "@/components/settings/TerminalThemeEditor";
 import { useTerminalThemeStore } from "@/stores/terminalThemeStore";
 import { builtinThemes, TerminalTheme } from "@/data/terminalThemes";
@@ -126,19 +125,22 @@ function IntegrationSection() {
   const [skillPreview, setSkillPreview] = useState("");
   const [showPreview, setShowPreview] = useState(false);
   const [dataDir, setDataDir] = useState("");
+  const [appVersion, setAppVersion] = useState("");
 
   const detect = useCallback(async () => {
     try {
-      const [info, skills, dir, dd] = await Promise.all([
+      const [info, skills, dir, dd, ver] = await Promise.all([
         DetectOpsctl(),
         DetectSkills(),
         GetOpsctlInstallDir(),
         GetDataDir(),
+        GetAppVersion(),
       ]);
       setOpsctlInfo(info);
       setSkillTargets(skills || []);
       setInstallDir(dir);
       setDataDir(dd);
+      setAppVersion(ver);
     } catch {}
   }, []);
 
@@ -210,15 +212,42 @@ function IntegrationSection() {
         </CardHeader>
         <CardContent className="space-y-3">
           {opsctlInfo.installed && (
-            <div className="grid gap-1.5 text-sm">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">{t("integration.version")}</span>
-                <span className="font-mono text-xs">{opsctlInfo.version || "unknown"}</span>
+            <div className="space-y-3">
+              <div className="grid gap-1.5 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">{t("integration.version")}</span>
+                  <span className="font-mono text-xs">{opsctlInfo.version || "unknown"}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">{t("integration.path")}</span>
+                  <span className="font-mono text-xs truncate max-w-[300px]">{opsctlInfo.path}</span>
+                </div>
               </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">{t("integration.path")}</span>
-                <span className="font-mono text-xs truncate max-w-[300px]">{opsctlInfo.path}</span>
-              </div>
+              {appVersion && opsctlInfo.version && opsctlInfo.version !== appVersion && (
+                <div className="flex items-center gap-2 rounded-md bg-yellow-50 dark:bg-yellow-950 border border-yellow-200 dark:border-yellow-800 px-3 py-2 text-xs text-yellow-700 dark:text-yellow-300">
+                  <Info className="h-3.5 w-3.5 shrink-0" />
+                  <span>{t("integration.versionMismatch", { appVersion, cliVersion: opsctlInfo.version })}</span>
+                </div>
+              )}
+              {opsctlInfo.embedded && (
+                <div className="space-y-2">
+                  <div className="grid gap-1.5">
+                    <Label className="text-sm">{t("integration.installDir")}</Label>
+                    <Input
+                      value={installDir}
+                      onChange={(e) => setInstallDir(e.target.value)}
+                      className="font-mono text-xs h-8"
+                    />
+                  </div>
+                  <Button onClick={handleInstallCLI} disabled={installing} size="sm" variant="outline">
+                    {installing ? (
+                      <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />{t("integration.installing")}</>
+                    ) : (
+                      t("integration.reinstall")
+                    )}
+                  </Button>
+                </div>
+              )}
             </div>
           )}
 
@@ -848,11 +877,7 @@ export function SettingsPage() {
               <HardDrive className="h-3.5 w-3.5" />
               {t("backup.title")}
             </TabsTrigger>
-            <TabsTrigger value="credentials" className="gap-1">
-              <Key className="h-3.5 w-3.5" />
-              {t("credential.title")}
-            </TabsTrigger>
-            <TabsTrigger value="shortcuts" className="gap-1">
+<TabsTrigger value="shortcuts" className="gap-1">
               <Keyboard className="h-3.5 w-3.5" />
               {t("shortcut.title")}
             </TabsTrigger>
@@ -885,7 +910,7 @@ export function SettingsPage() {
                   <Select value={providerType} onValueChange={setProviderType}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="openai">OpenAI Compatible</SelectItem>
+                      <SelectItem value="openai" disabled>OpenAI Compatible ({t("setup.developing")})</SelectItem>
                       <SelectItem value="local_cli">Local CLI</SelectItem>
                     </SelectContent>
                   </Select>
@@ -1043,18 +1068,6 @@ export function SettingsPage() {
                     </div>
                   </>
                 )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* 密钥管理 */}
-          <TabsContent value="credentials" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">{t("credential.title")}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <CredentialManager />
               </CardContent>
             </Card>
           </TabsContent>

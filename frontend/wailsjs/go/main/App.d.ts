@@ -11,6 +11,7 @@ import {ai} from '../models';
 import {backup_svc} from '../models';
 import {sshpool} from '../models';
 import {import_svc} from '../models';
+import {audit_repo} from '../models';
 import {sftp_svc} from '../models';
 
 export function CancelGitHubAuth():Promise<void>;
@@ -57,7 +58,9 @@ export function EncryptPassword(arg1:string):Promise<string>;
 
 export function ExecuteImportFile(arg1:string,arg2:string):Promise<void>;
 
-export function ExecuteRedis(arg1:number,arg2:string):Promise<string>;
+export function ExecuteRedis(arg1:number,arg2:string,arg3:number):Promise<string>;
+
+export function ExecuteRedisArgs(arg1:number,arg2:Array<string>,arg3:number):Promise<string>;
 
 export function ExecuteSQL(arg1:number,arg2:string,arg3:string):Promise<string>;
 
@@ -111,7 +114,9 @@ export function InstallSkills():Promise<void>;
 
 export function ListAssets(arg1:string,arg2:number):Promise<Array<asset_entity.Asset>>;
 
-export function ListAuditLogs(arg1:string,arg2:number,arg3:number,arg4:number):Promise<main.AuditLogListResult>;
+export function ListAuditLogs(arg1:string,arg2:number,arg3:number,arg4:number,arg5:number,arg6:number,arg7:string):Promise<main.AuditLogListResult>;
+
+export function ListAuditSessions(arg1:number):Promise<Array<audit_repo.SessionInfo>>;
 
 export function ListBackupGists(arg1:string):Promise<Array<backup_svc.GistInfo>>;
 
@@ -145,9 +150,11 @@ export function RespondCommandConfirm(arg1:string,arg2:string):Promise<void>;
 
 export function RespondOpsctlApproval(arg1:string,arg2:boolean):Promise<void>;
 
-export function RespondOpsctlApprovalSession(arg1:string,arg2:boolean,arg3:boolean,arg4:string):Promise<void>;
+export function RespondOpsctlApprovalSession(arg1:string,arg2:boolean,arg3:string,arg4:number,arg5:string):Promise<void>;
 
 export function RespondPermission(arg1:string,arg2:string):Promise<void>;
+
+export function RespondPermissionRequest(arg1:string,arg2:boolean,arg3:string):Promise<void>;
 
 export function RespondPlanApproval(arg1:string,arg2:boolean):Promise<void>;
 

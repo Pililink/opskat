@@ -12,7 +12,8 @@ import {
   XCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { RespondCommandConfirm } from "../../../wailsjs/go/main/App";
+import { Input } from "@/components/ui/input";
+import { RespondCommandConfirm, RespondPermissionRequest } from "../../../wailsjs/go/main/App";
 import type { ContentBlock } from "@/stores/aiStore";
 
 const toolIcons: Record<string, typeof Terminal> = {
@@ -23,18 +24,27 @@ const toolIcons: Record<string, typeof Terminal> = {
   Glob: Search,
   Grep: Search,
   run_command: Terminal,
+  request_permission: Shield,
 };
 
 interface ToolBlockProps {
   block: ContentBlock;
 }
 
+// 从 toolInput 中提取 pattern（格式: "[assetName] pattern: xxx\nreason: yyy"）
+function extractPattern(toolInput: string): string {
+  const match = toolInput.match(/pattern:\s*(.+?)(?:\n|$)/);
+  return match ? match[1].trim() : "";
+}
+
 export function ToolBlock({ block }: ToolBlockProps) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
+  const [editPattern, setEditPattern] = useState("");
   const Icon = toolIcons[block.toolName || ""] || Terminal;
   const isRunning = block.status === "running";
   const isPendingConfirm = block.status === "pending_confirm";
+  const isPermissionRequest = block.toolName === "request_permission";
   const isDenied = block.status === "error" && block.confirmId;
   const hasOutput = block.content && block.content.length > 0;
 
@@ -76,7 +86,7 @@ export function ToolBlock({ block }: ToolBlockProps) {
       </button>
 
       {/* 确认按钮区域 */}
-      {isPendingConfirm && block.confirmId && (
+      {isPendingConfirm && block.confirmId && !isPermissionRequest && (
         <div className="border-t border-border/40 px-2.5 py-2 flex flex-wrap items-center gap-1.5">
           <span className="text-xs text-amber-500 flex items-center gap-1 mr-auto">
             <Shield className="h-3 w-3 shrink-0" />
@@ -111,6 +121,47 @@ export function ToolBlock({ block }: ToolBlockProps) {
               }
             >
               {t("ai.commandConfirmAllow")}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* 权限申请确认区域 */}
+      {isPendingConfirm && block.confirmId && isPermissionRequest && (
+        <div className="border-t border-border/40 px-2.5 py-2 space-y-2">
+          <span className="text-xs text-amber-500 flex items-center gap-1">
+            <Shield className="h-3 w-3 shrink-0" />
+            {t("ai.permissionRequestHint")}
+          </span>
+          <Input
+            value={editPattern || extractPattern(block.toolInput || "")}
+            onChange={(e) => setEditPattern(e.target.value)}
+            placeholder={t("ai.permissionPatternPlaceholder")}
+            className="h-7 font-mono text-xs"
+          />
+          <div className="flex gap-1.5 justify-end">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-6 px-2 text-xs"
+              onClick={() =>
+                RespondPermissionRequest(block.confirmId!, false, "")
+              }
+            >
+              {t("ai.commandConfirmDeny")}
+            </Button>
+            <Button
+              size="sm"
+              className="h-6 px-2 text-xs"
+              onClick={() =>
+                RespondPermissionRequest(
+                  block.confirmId!,
+                  true,
+                  editPattern || extractPattern(block.toolInput || "")
+                )
+              }
+            >
+              {t("ai.permissionApprove")}
             </Button>
           </div>
         </div>

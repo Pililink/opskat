@@ -2,7 +2,7 @@ name: Nightly
 
 on:
   schedule:
-    - cron: "0 18 * * *" # UTC 18:00 = 北京时间凌晨 2:00
+    - cron: "0 18 */3 * *" # UTC 18:00 = 北京时间凌晨 2:00
   push:
     branches:
       - nightly

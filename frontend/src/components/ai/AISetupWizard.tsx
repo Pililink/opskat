@@ -65,13 +65,13 @@ export function AISetupWizard() {
   // Auto-fill CLI path from detected CLIs
   useEffect(() => {
     if (localCLIs.length > 0 && !cliPath) {
-      const claude = localCLIs.find((c) => c.name === "claude");
+      const claude = localCLIs.find((c) => c.type === "claude");
       if (claude) {
         setCliPath(claude.path);
         setCliType("claude");
       } else {
         setCliPath(localCLIs[0].path);
-        setCliType(localCLIs[0].name === "codex" ? "codex" : "claude");
+        setCliType(localCLIs[0].type);
       }
     }
   }, [localCLIs, cliPath]);
@@ -179,12 +179,8 @@ export function AISetupWizard() {
           </button>
 
           <button
-            onClick={() => setProviderType("openai")}
-            className={`rounded-lg border-2 p-4 text-left transition-all hover:border-primary/50 ${
-              providerType === "openai"
-                ? "border-primary bg-primary/5"
-                : "border-border"
-            }`}
+            disabled
+            className="rounded-lg border-2 p-4 text-left border-border opacity-50 cursor-not-allowed"
           >
             <div className="flex items-center gap-2 mb-2">
               <Bot className="h-5 w-5" />
@@ -194,7 +190,7 @@ export function AISetupWizard() {
               {t("setup.openAIDesc")}
             </p>
             <span className="inline-block mt-2 text-xs font-medium text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30 px-2 py-0.5 rounded">
-              {t("setup.notComplete")}
+              {t("setup.developing")}
             </span>
           </button>
         </div>

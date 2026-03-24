@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { Database, RefreshCw, Loader2, Search, Key } from "lucide-react";
+import { Database, RefreshCw, Loader2, Search, Key, AlertCircle } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,7 +21,7 @@ const KEY_ROW_HEIGHT = 28;
 
 export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
   const { t } = useTranslation();
-  const { redisStates, scanKeys, selectRedisDb, selectKey, setKeyFilter } =
+  const { redisStates, scanKeys, selectRedisDb, selectKey, setKeyFilter, loadDbKeyCounts } =
     useQueryStore();
   const state = redisStates[tabId];
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -36,7 +36,8 @@ export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
 
   useEffect(() => {
     scanKeys(tabId, true);
-  }, [tabId, scanKeys]);
+    loadDbKeyCounts(tabId);
+  }, [tabId, scanKeys, loadDbKeyCounts]);
 
   const handleDbChange = useCallback(
     (value: string) => {
@@ -62,7 +63,8 @@ export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
 
   const handleRefresh = useCallback(() => {
     scanKeys(tabId, true);
-  }, [tabId, scanKeys]);
+    loadDbKeyCounts(tabId);
+  }, [tabId, scanKeys, loadDbKeyCounts]);
 
   const handleLoadMore = useCallback(() => {
     scanKeys(tabId, false);
@@ -92,11 +94,19 @@ export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
             <SelectValue placeholder={t("query.selectDb")} />
           </SelectTrigger>
           <SelectContent>
-            {dbOptions.map((db) => (
-              <SelectItem key={db} value={String(db)}>
-                db{db}
-              </SelectItem>
-            ))}
+            {dbOptions.map((db) => {
+              const count = state.dbKeyCounts[db];
+              return (
+                <SelectItem key={db} value={String(db)}>
+                  <span className="flex items-center gap-1.5">
+                    <span>db{db}</span>
+                    {count !== undefined && count > 0 && (
+                      <span className="text-muted-foreground">({count})</span>
+                    )}
+                  </span>
+                </SelectItem>
+              );
+            })}
           </SelectContent>
         </Select>
         <Button
@@ -128,6 +138,14 @@ export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
       <div className="border-b px-2 py-1 text-xs text-muted-foreground">
         {t("query.keyCount", { count: state.keys.length })}
       </div>
+
+      {/* Error message */}
+      {state.error && (
+        <div className="flex items-start gap-2 border-b border-destructive/20 bg-destructive/10 px-2 py-2 text-xs text-destructive">
+          <AlertCircle className="size-3.5 shrink-0 mt-0.5" />
+          <span className="break-all">{state.error}</span>
+        </div>
+      )}
 
       {/* Virtualized key list */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto">

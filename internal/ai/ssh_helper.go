@@ -301,6 +301,32 @@ func CopyBetweenAssets(ctx context.Context, srcAssetID int64, srcPath string, ds
 	return nil
 }
 
+// AIPoolDialer 实现 sshpool.PoolDialer，使用 AI 模块的凭据解析逻辑
+type AIPoolDialer struct{}
+
+func (d *AIPoolDialer) DialAsset(ctx context.Context, assetID int64) (*ssh.Client, []io.Closer, error) {
+	asset, err := asset_svc.Asset().Get(ctx, assetID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("资产不存在: %w", err)
+	}
+	if !asset.IsSSH() {
+		return nil, nil, fmt.Errorf("资产不是SSH类型")
+	}
+	sshCfg, err := asset.GetSSHConfig()
+	if err != nil {
+		return nil, nil, err
+	}
+	password, key, err := resolveAssetCredentials(ctx, sshCfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	client, err := createSSHClient(sshCfg, password, key)
+	if err != nil {
+		return nil, nil, err
+	}
+	return client, nil, nil
+}
+
 // resolveAssetSSHByID 根据资产 ID 解析 SSH 连接所需信息（导出版本）
 func ResolveAssetSSHByID(ctx context.Context, assetID int64) (*asset_entity.SSHConfig, string, string, error) {
 	asset, err := asset_svc.Asset().Get(ctx, assetID)

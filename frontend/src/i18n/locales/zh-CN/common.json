@@ -356,6 +356,7 @@
     "openAIDesc": "使用 OpenAI 兼容的 API 接口",
     "recommended": "推荐",
     "notComplete": "功能未完善",
+    "developing": "开发中",
     "cliConfig": "CLI 配置",
     "integration": "集成组件",
     "autoInstall": "完成时自动安装",
@@ -378,6 +379,9 @@
     "commandConfirmAllow": "允许",
     "commandConfirmAllowAll": "始终允许",
     "commandConfirmDeny": "拒绝",
+    "permissionRequestHint": "AI 正在申请命令执行权限，可编辑模式后批准",
+    "permissionPatternPlaceholder": "命令模式，支持 * 通配符",
+    "permissionApprove": "批准",
     "deleteConversationTitle": "删除对话",
     "deleteConversationDesc": "确定要删除这个对话吗？此操作不可撤销。"
   },
@@ -488,7 +492,9 @@
     "skillInstallSuccess": "技能安装成功",
     "skillPath": "技能文件路径",
     "skillPreview": "预览",
-    "update": "更新"
+    "update": "更新",
+    "reinstall": "覆盖安装",
+    "versionMismatch": "opsctl 版本 ({{cliVersion}}) 与应用版本 ({{appVersion}}) 不一致，建议覆盖安装以保持同步"
   },
   "appUpdate": {
     "title": "关于",
@@ -527,8 +533,11 @@
     "typeCp": "文件传输",
     "typeCreate": "创建资产",
     "typeUpdate": "更新资产",
-    "allowSession": "允许当前会话",
-    "sessionHint": "来自 AI 会话"
+    "remember": "记住此操作",
+    "sessionHint": "来自 AI 会话",
+    "patternLabel": "记住模式（支持 * 通配符）：",
+    "patternPlaceholder": "例如: cat /var/log/*",
+    "patternHint": "后续匹配此模式的命令将自动放行"
   },
   "planApproval": {
     "title": "批量计划审批",
@@ -564,7 +573,27 @@
     "poolRefCount": "活跃会话",
     "poolLastUsed": "最后使用",
     "poolEmpty": "暂无活跃连接",
-    "poolRefresh": "刷新"
+    "poolRefresh": "刷新",
+    "timeRange": "时间范围",
+    "timeAll": "全部",
+    "time1h": "最近 1 小时",
+    "time3h": "最近 3 小时",
+    "time6h": "最近 6 小时",
+    "time1d": "最近 1 天",
+    "time7d": "最近 7 天",
+    "timeCustom": "自定义",
+    "timeStart": "开始时间",
+    "timeEnd": "结束时间",
+    "decision": "决策",
+    "decisionSource": "决策来源",
+    "matchedPattern": "匹配模式",
+    "sessionID": "会话 ID",
+    "sessionAll": "全部会话",
+    "sessionGroupToday": "今天",
+    "sessionGroupYesterday": "昨天",
+    "sessionGroupThisWeek": "本周",
+    "sessionGroupEarlier": "更早",
+    "sessionOps": "{{count}} 条操作"
   },
   "sftp": {
     "upload": "上传文件",
@@ -637,6 +666,19 @@
     "pendingEdits": "{{count}} 处修改待提交",
     "discardEdits": "撤销",
     "submitEdits": "提交修改",
-    "updateSuccess": "成功更新 {{count}} 行"
+    "updateSuccess": "成功更新 {{count}} 行",
+    "deleteKey": "删除 Key",
+    "deleteKeyConfirm": "确定删除此 Key？",
+    "editValue": "编辑",
+    "saveValue": "保存",
+    "cancelEdit": "取消",
+    "addField": "添加字段",
+    "addItem": "添加",
+    "addMember": "添加成员",
+    "newField": "字段名",
+    "newValue": "值",
+    "newScore": "分数",
+    "newMember": "成员",
+    "dbKeyCount": "{{count}} keys"
   }
 }

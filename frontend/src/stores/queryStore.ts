@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { ExecuteSQL, ExecuteRedis } from "../../wailsjs/go/main/App";
+import { ExecuteSQL, ExecuteRedis, ExecuteRedisArgs } from "../../wailsjs/go/main/App";
 import { asset_entity } from "../../wailsjs/go/models";
 
 // --- Types ---
@@ -25,6 +25,7 @@ export interface DatabaseTabState {
   loadingDbs: boolean;
   innerTabs: InnerTab[];
   activeInnerTabId: string | null;
+  error: string | null;
 }
 
 const REDIS_PAGE_SIZE = 100;
@@ -49,6 +50,8 @@ export interface RedisTabState {
   keyInfo: RedisKeyInfo | null;
   loadingKeys: boolean;
   hasMore: boolean;
+  dbKeyCounts: Record<number, number>;
+  error: string | null;
 }
 
 interface QueryState {
@@ -76,6 +79,8 @@ interface QueryState {
   selectKey: (tabId: string, key: string) => Promise<void>;
   loadMoreValues: (tabId: string) => Promise<void>;
   setKeyFilter: (tabId: string, pattern: string) => void;
+  loadDbKeyCounts: (tabId: string) => Promise<void>;
+  removeKey: (tabId: string, key: string) => void;
 }
 
 // --- Helpers ---
@@ -92,6 +97,7 @@ function defaultDbState(): DatabaseTabState {
     loadingDbs: false,
     innerTabs: [],
     activeInnerTabId: null,
+    error: null,
   };
 }
 
@@ -105,6 +111,8 @@ function defaultRedisState(): RedisTabState {
     keyInfo: null,
     loadingKeys: false,
     hasMore: true,
+    dbKeyCounts: {},
+    error: null,
   };
 }
 
@@ -213,14 +221,14 @@ export const useQueryStore = create<QueryState>((set, get) => ({
       set((s) => ({
         dbStates: {
           ...s.dbStates,
-          [tabId]: { ...s.dbStates[tabId], databases, loadingDbs: false },
+          [tabId]: { ...s.dbStates[tabId], databases, loadingDbs: false, error: null },
         },
       }));
-    } catch {
+    } catch (err) {
       set((s) => ({
         dbStates: {
           ...s.dbStates,
-          [tabId]: { ...s.dbStates[tabId], loadingDbs: false },
+          [tabId]: { ...s.dbStates[tabId], loadingDbs: false, error: String(err) },
         },
       }));
     }
@@ -250,7 +258,14 @@ export const useQueryStore = create<QueryState>((set, get) => ({
           },
         },
       }));
-    } catch { /* ignore */ }
+    } catch (err) {
+      set((s) => ({
+        dbStates: {
+          ...s.dbStates,
+          [tabId]: { ...s.dbStates[tabId], error: s.dbStates[tabId]?.error || String(err) },
+        },
+      }));
+    }
   },
 
   toggleDbExpand: (tabId, database) => {
@@ -377,10 +392,9 @@ export const useQueryStore = create<QueryState>((set, get) => ({
 
     try {
       const cmd = `SCAN ${cursor} MATCH ${state.keyFilter || "*"} COUNT 200`;
-      const result = await ExecuteRedis(tab.assetId, cmd);
+      const result = await ExecuteRedis(tab.assetId, cmd, state.currentDb);
       const parsed: RedisResult = JSON.parse(result);
 
-      // SCAN returns [cursor, [keys...]]
       let newCursor = "0";
       let newKeys: string[] = [];
       if (parsed.type === "list" && Array.isArray(parsed.value)) {
@@ -402,14 +416,15 @@ export const useQueryStore = create<QueryState>((set, get) => ({
             keys: allKeys,
             hasMore: newCursor !== "0",
             loadingKeys: false,
+            error: null,
           },
         },
       }));
-    } catch {
+    } catch (err) {
       set((s) => ({
         redisStates: {
           ...s.redisStates,
-          [tabId]: { ...s.redisStates[tabId], loadingKeys: false },
+          [tabId]: { ...s.redisStates[tabId], loadingKeys: false, error: String(err) },
         },
       }));
     }
@@ -419,28 +434,27 @@ export const useQueryStore = create<QueryState>((set, get) => ({
     const tab = get().openTabs.find((t) => t.id === tabId);
     if (!tab) return;
 
-    try {
-      await ExecuteRedis(tab.assetId, `SELECT ${db}`);
-    } catch { /* ignore */ }
-
+    const prev = get().redisStates[tabId];
     set((s) => ({
       redisStates: {
         ...s.redisStates,
         [tabId]: {
           ...defaultRedisState(),
           currentDb: db,
-          keyFilter: s.redisStates[tabId]?.keyFilter || "*",
+          keyFilter: prev?.keyFilter || "*",
+          dbKeyCounts: prev?.dbKeyCounts || {},
         },
       },
     }));
 
-    // Rescan with new DB
     get().scanKeys(tabId, true);
   },
 
   selectKey: async (tabId, key) => {
     const tab = get().openTabs.find((t) => t.id === tabId);
-    if (!tab) return;
+    const state = get().redisStates[tabId];
+    if (!tab || !state) return;
+    const db = state.currentDb;
 
     set((s) => ({
       redisStates: {
@@ -450,12 +464,11 @@ export const useQueryStore = create<QueryState>((set, get) => ({
     }));
 
     try {
-      // Get type + TTL
-      const typeResult = await ExecuteRedis(tab.assetId, `TYPE ${key}`);
+      const typeResult = await ExecuteRedis(tab.assetId, `TYPE ${key}`, db);
       const typeParsed: RedisResult = JSON.parse(typeResult);
       const keyType = String(typeParsed.value || "none");
 
-      const ttlResult = await ExecuteRedis(tab.assetId, `TTL ${key}`);
+      const ttlResult = await ExecuteRedis(tab.assetId, `TTL ${key}`, db);
       const ttlParsed: RedisResult = JSON.parse(ttlResult);
       const ttl = Number(ttlParsed.value) || -1;
 
@@ -467,14 +480,14 @@ export const useQueryStore = create<QueryState>((set, get) => ({
 
       switch (keyType) {
         case "string": {
-          const r = await ExecuteRedis(tab.assetId, `GET ${key}`);
+          const r = await ExecuteRedisArgs(tab.assetId, ["GET", key], db);
           value = JSON.parse(r).value;
           break;
         }
         case "list": {
           const [countR, valR] = await Promise.all([
-            ExecuteRedis(tab.assetId, `LLEN ${key}`),
-            ExecuteRedis(tab.assetId, `LRANGE ${key} 0 ${REDIS_PAGE_SIZE - 1}`),
+            ExecuteRedisArgs(tab.assetId, ["LLEN", key], db),
+            ExecuteRedisArgs(tab.assetId, ["LRANGE", key, "0", String(REDIS_PAGE_SIZE - 1)], db),
           ]);
           total = Number(JSON.parse(countR).value) || 0;
           const items = (JSON.parse(valR).value as string[]) || [];
@@ -485,8 +498,8 @@ export const useQueryStore = create<QueryState>((set, get) => ({
         }
         case "hash": {
           const [countR, scanR] = await Promise.all([
-            ExecuteRedis(tab.assetId, `HLEN ${key}`),
-            ExecuteRedis(tab.assetId, `HSCAN ${key} 0 COUNT ${REDIS_PAGE_SIZE}`),
+            ExecuteRedisArgs(tab.assetId, ["HLEN", key], db),
+            ExecuteRedisArgs(tab.assetId, ["HSCAN", key, "0", "COUNT", String(REDIS_PAGE_SIZE)], db),
           ]);
           total = Number(JSON.parse(countR).value) || 0;
           const scanParsed = JSON.parse(scanR);
@@ -505,8 +518,8 @@ export const useQueryStore = create<QueryState>((set, get) => ({
         }
         case "set": {
           const [countR, scanR] = await Promise.all([
-            ExecuteRedis(tab.assetId, `SCARD ${key}`),
-            ExecuteRedis(tab.assetId, `SSCAN ${key} 0 COUNT ${REDIS_PAGE_SIZE}`),
+            ExecuteRedisArgs(tab.assetId, ["SCARD", key], db),
+            ExecuteRedisArgs(tab.assetId, ["SSCAN", key, "0", "COUNT", String(REDIS_PAGE_SIZE)], db),
           ]);
           total = Number(JSON.parse(countR).value) || 0;
           const scanParsed = JSON.parse(scanR);
@@ -520,8 +533,8 @@ export const useQueryStore = create<QueryState>((set, get) => ({
         }
         case "zset": {
           const [countR, valR] = await Promise.all([
-            ExecuteRedis(tab.assetId, `ZCARD ${key}`),
-            ExecuteRedis(tab.assetId, `ZRANGE ${key} 0 ${REDIS_PAGE_SIZE - 1} WITHSCORES`),
+            ExecuteRedisArgs(tab.assetId, ["ZCARD", key], db),
+            ExecuteRedisArgs(tab.assetId, ["ZRANGE", key, "0", String(REDIS_PAGE_SIZE - 1), "WITHSCORES"], db),
           ]);
           total = Number(JSON.parse(countR).value) || 0;
           const raw = (JSON.parse(valR).value as string[]) || [];
@@ -558,6 +571,7 @@ export const useQueryStore = create<QueryState>((set, get) => ({
 
     const key = state.selectedKey;
     const info = state.keyInfo;
+    const db = state.currentDb;
 
     set((s) => ({
       redisStates: {
@@ -574,7 +588,7 @@ export const useQueryStore = create<QueryState>((set, get) => ({
 
       switch (info.type) {
         case "list": {
-          const r = await ExecuteRedis(tab.assetId, `LRANGE ${key} ${newOffset} ${newOffset + REDIS_PAGE_SIZE - 1}`);
+          const r = await ExecuteRedisArgs(tab.assetId, ["LRANGE", key, String(newOffset), String(newOffset + REDIS_PAGE_SIZE - 1)], db);
           const items = (JSON.parse(r).value as string[]) || [];
           newValue = [...(info.value as string[]), ...items];
           newOffset = (newValue as string[]).length;
@@ -582,7 +596,7 @@ export const useQueryStore = create<QueryState>((set, get) => ({
           break;
         }
         case "hash": {
-          const r = await ExecuteRedis(tab.assetId, `HSCAN ${key} ${newCursor} COUNT ${REDIS_PAGE_SIZE}`);
+          const r = await ExecuteRedisArgs(tab.assetId, ["HSCAN", key, newCursor, "COUNT", String(REDIS_PAGE_SIZE)], db);
           const parsed = JSON.parse(r);
           if (parsed.type === "list" && Array.isArray(parsed.value)) {
             const arr = parsed.value as unknown[];
@@ -598,7 +612,7 @@ export const useQueryStore = create<QueryState>((set, get) => ({
           break;
         }
         case "set": {
-          const r = await ExecuteRedis(tab.assetId, `SSCAN ${key} ${newCursor} COUNT ${REDIS_PAGE_SIZE}`);
+          const r = await ExecuteRedisArgs(tab.assetId, ["SSCAN", key, newCursor, "COUNT", String(REDIS_PAGE_SIZE)], db);
           const parsed = JSON.parse(r);
           if (parsed.type === "list" && Array.isArray(parsed.value)) {
             const arr = parsed.value as unknown[];
@@ -610,7 +624,7 @@ export const useQueryStore = create<QueryState>((set, get) => ({
           break;
         }
         case "zset": {
-          const r = await ExecuteRedis(tab.assetId, `ZRANGE ${key} ${newOffset} ${newOffset + REDIS_PAGE_SIZE - 1} WITHSCORES`);
+          const r = await ExecuteRedisArgs(tab.assetId, ["ZRANGE", key, String(newOffset), String(newOffset + REDIS_PAGE_SIZE - 1), "WITHSCORES"], db);
           const raw = (JSON.parse(r).value as string[]) || [];
           const pairs: [string, string][] = [];
           for (let i = 0; i < raw.length; i += 2) {
@@ -651,6 +665,53 @@ export const useQueryStore = create<QueryState>((set, get) => ({
       redisStates: {
         ...s.redisStates,
         [tabId]: { ...s.redisStates[tabId], keyFilter: pattern || "*" },
+      },
+    }));
+  },
+
+  loadDbKeyCounts: async (tabId) => {
+    const tab = get().openTabs.find((t) => t.id === tabId);
+    if (!tab) return;
+
+    try {
+      const result = await ExecuteRedis(tab.assetId, "INFO keyspace", 0);
+      const parsed: RedisResult = JSON.parse(result);
+      const text = String(parsed.value || "");
+      const counts: Record<number, number> = {};
+      for (const line of text.split(/\r?\n/)) {
+        const m = line.match(/^db(\d+):keys=(\d+)/);
+        if (m) {
+          counts[Number(m[1])] = Number(m[2]);
+        }
+      }
+      set((s) => ({
+        redisStates: {
+          ...s.redisStates,
+          [tabId]: { ...s.redisStates[tabId], dbKeyCounts: counts },
+        },
+      }));
+    } catch (err) {
+      set((s) => ({
+        redisStates: {
+          ...s.redisStates,
+          [tabId]: { ...s.redisStates[tabId], error: s.redisStates[tabId]?.error || String(err) },
+        },
+      }));
+    }
+  },
+
+  removeKey: (tabId, key) => {
+    const state = get().redisStates[tabId];
+    if (!state) return;
+    set((s) => ({
+      redisStates: {
+        ...s.redisStates,
+        [tabId]: {
+          ...s.redisStates[tabId],
+          keys: s.redisStates[tabId].keys.filter((k) => k !== key),
+          selectedKey: s.redisStates[tabId].selectedKey === key ? null : s.redisStates[tabId].selectedKey,
+          keyInfo: s.redisStates[tabId].selectedKey === key ? null : s.redisStates[tabId].keyInfo,
+        },
       },
     }));
   },

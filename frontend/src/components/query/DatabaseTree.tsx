@@ -8,6 +8,7 @@ import {
   Plus,
   RefreshCw,
   Loader2,
+  AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -30,7 +31,7 @@ export function DatabaseTree({ tabId }: DatabaseTreeProps) {
 
   if (!dbState) return null;
 
-  const { databases, tables, expandedDbs, loadingDbs } = dbState;
+  const { databases, tables, expandedDbs, loadingDbs, error } = dbState;
 
   return (
     <div className="flex flex-col h-full">
@@ -60,6 +61,14 @@ export function DatabaseTree({ tabId }: DatabaseTreeProps) {
           </Button>
         </div>
       </div>
+
+      {/* Error message */}
+      {error && (
+        <div className="flex items-start gap-2 border-b border-destructive/20 bg-destructive/10 px-2 py-2 text-xs text-destructive">
+          <AlertCircle className="size-3.5 shrink-0 mt-0.5" />
+          <span className="break-all">{error}</span>
+        </div>
+      )}
 
       {/* Tree */}
       <ScrollArea className="flex-1 min-h-0">

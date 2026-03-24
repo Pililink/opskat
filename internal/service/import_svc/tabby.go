@@ -325,10 +325,6 @@ func ImportTabbySelected(ctx context.Context, data []byte, selectedIndexes []int
 			Host: host, Port: port, Username: username, AuthType: authType,
 			PrivateKeys: privateKeys, Proxy: proxyCfg,
 		}
-		if len(privateKeys) > 0 {
-			sshCfg.KeySource = "file"
-		}
-
 		// 从 vault 中提取密码并加密存储
 		if password, ok := vaultPasswords[profile.ID]; ok && password != "" {
 			encrypted, err := encryptPassword(password)

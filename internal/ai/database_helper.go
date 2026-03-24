@@ -8,6 +8,9 @@ import (
 	"io"
 	"strings"
 
+	"github.com/cago-frame/cago/pkg/logger"
+	"go.uber.org/zap"
+
 	"ops-cat/internal/connpool"
 	"ops-cat/internal/model/entity/asset_entity"
 	"ops-cat/internal/service/asset_svc"
@@ -35,12 +38,16 @@ func NewDatabaseClientCache() *DatabaseClientCache {
 // Close 关闭所有缓存的数据库连接
 func (c *DatabaseClientCache) Close() error {
 	for id, db := range c.clients {
-		_ = db.Close()
+		if err := db.Close(); err != nil {
+			logger.Default().Warn("close cached database connection", zap.Int64("assetID", id), zap.Error(err))
+		}
 		delete(c.clients, id)
 	}
 	for id, closer := range c.closers {
 		if closer != nil {
-			_ = closer.Close()
+			if err := closer.Close(); err != nil {
+				logger.Default().Warn("close database tunnel", zap.Int64("assetID", id), zap.Error(err))
+			}
 		}
 		delete(c.closers, id)
 	}
@@ -116,10 +123,18 @@ func handleExecSQL(ctx context.Context, args map[string]any) (string, error) {
 	// 如果不是缓存连接，使用后关闭
 	if getDatabaseCache(ctx) == nil {
 		if db != nil {
-			defer func() { _ = db.Close() }()
+			defer func() {
+				if err := db.Close(); err != nil {
+					logger.Default().Warn("close database connection", zap.Error(err))
+				}
+			}()
 		}
 		if closer != nil {
-			defer func() { _ = closer.Close() }()
+			defer func() {
+				if err := closer.Close(); err != nil {
+					logger.Default().Warn("close database tunnel", zap.Error(err))
+				}
+			}()
 		}
 	}
 
@@ -150,7 +165,11 @@ func ExecuteSQL(ctx context.Context, db *sql.DB, sqlText string) (string, error)
 		if err != nil {
 			return "", fmt.Errorf("SQL 查询失败: %w", err)
 		}
-		defer func() { _ = rows.Close() }()
+		defer func() {
+			if err := rows.Close(); err != nil {
+				logger.Default().Warn("close SQL rows", zap.Error(err))
+			}
+		}()
 		return formatRowsJSON(rows)
 	}
 

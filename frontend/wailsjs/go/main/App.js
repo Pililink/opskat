@@ -38,6 +38,10 @@ export function CreateGroup(arg1) {
   return window['go']['main']['App']['CreateGroup'](arg1);
 }
 
+export function CreatePasswordCredential(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['CreatePasswordCredential'](arg1, arg2, arg3, arg4);
+}
+
 export function DeleteAsset(arg1) {
   return window['go']['main']['App']['DeleteAsset'](arg1);
 }
@@ -46,16 +50,16 @@ export function DeleteConversation(arg1) {
   return window['go']['main']['App']['DeleteConversation'](arg1);
 }
 
+export function DeleteCredential(arg1) {
+  return window['go']['main']['App']['DeleteCredential'](arg1);
+}
+
 export function DeleteForwardConfig(arg1) {
   return window['go']['main']['App']['DeleteForwardConfig'](arg1);
 }
 
 export function DeleteGroup(arg1, arg2) {
   return window['go']['main']['App']['DeleteGroup'](arg1, arg2);
-}
-
-export function DeleteSSHKey(arg1) {
-  return window['go']['main']['App']['DeleteSSHKey'](arg1);
 }
 
 export function DetectClaudeSkill() {
@@ -82,6 +86,14 @@ export function ExecuteImportFile(arg1, arg2) {
   return window['go']['main']['App']['ExecuteImportFile'](arg1, arg2);
 }
 
+export function ExecuteRedis(arg1, arg2) {
+  return window['go']['main']['App']['ExecuteRedis'](arg1, arg2);
+}
+
+export function ExecuteSQL(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ExecuteSQL'](arg1, arg2, arg3);
+}
+
 export function ExportData() {
   return window['go']['main']['App']['ExportData']();
 }
@@ -106,6 +118,14 @@ export function GetAsset(arg1) {
   return window['go']['main']['App']['GetAsset'](arg1);
 }
 
+export function GetCredentialPublicKey(arg1) {
+  return window['go']['main']['App']['GetCredentialPublicKey'](arg1);
+}
+
+export function GetCredentialUsage(arg1) {
+  return window['go']['main']['App']['GetCredentialUsage'](arg1);
+}
+
 export function GetCurrentConversationID() {
   return window['go']['main']['App']['GetCurrentConversationID']();
 }
@@ -118,6 +138,10 @@ export function GetGitHubUser(arg1) {
   return window['go']['main']['App']['GetGitHubUser'](arg1);
 }
 
+export function GetGroup(arg1) {
+  return window['go']['main']['App']['GetGroup'](arg1);
+}
+
 export function GetInitContext(arg1, arg2) {
   return window['go']['main']['App']['GetInitContext'](arg1, arg2);
 }
@@ -128,14 +152,6 @@ export function GetLanguage() {
 
 export function GetOpsctlInstallDir() {
   return window['go']['main']['App']['GetOpsctlInstallDir']();
-}
-
-export function GetSSHKeyPublicKey(arg1) {
-  return window['go']['main']['App']['GetSSHKeyPublicKey'](arg1);
-}
-
-export function GetSSHKeyUsage(arg1) {
-  return window['go']['main']['App']['GetSSHKeyUsage'](arg1);
 }
 
 export function GetSSHPoolConnections() {
@@ -194,6 +210,14 @@ export function ListConversations() {
   return window['go']['main']['App']['ListConversations']();
 }
 
+export function ListCredentials() {
+  return window['go']['main']['App']['ListCredentials']();
+}
+
+export function ListCredentialsByType(arg1) {
+  return window['go']['main']['App']['ListCredentialsByType'](arg1);
+}
+
 export function ListForwardConfigs() {
   return window['go']['main']['App']['ListForwardConfigs']();
 }
@@ -204,10 +228,6 @@ export function ListGroups() {
 
 export function ListLocalSSHKeys() {
   return window['go']['main']['App']['ListLocalSSHKeys']();
-}
-
-export function ListSSHKeys() {
-  return window['go']['main']['App']['ListSSHKeys']();
 }
 
 export function LoadCredential(arg1) {
@@ -264,6 +284,10 @@ export function RespondPlanApproval(arg1, arg2) {
 
 export function SFTPCancelTransfer(arg1) {
   return window['go']['main']['App']['SFTPCancelTransfer'](arg1);
+}
+
+export function SFTPDelete(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SFTPDelete'](arg1, arg2, arg3);
 }
 
 export function SFTPDownload(arg1, arg2) {
@@ -346,6 +370,14 @@ export function SwitchConversation(arg1) {
   return window['go']['main']['App']['SwitchConversation'](arg1);
 }
 
+export function TestDatabaseConnection(arg1, arg2) {
+  return window['go']['main']['App']['TestDatabaseConnection'](arg1, arg2);
+}
+
+export function TestRedisConnection(arg1, arg2) {
+  return window['go']['main']['App']['TestRedisConnection'](arg1, arg2);
+}
+
 export function TestSSHConnection(arg1, arg2) {
   return window['go']['main']['App']['TestSSHConnection'](arg1, arg2);
 }
@@ -358,16 +390,20 @@ export function UpdateAssetPassword(arg1, arg2) {
   return window['go']['main']['App']['UpdateAssetPassword'](arg1, arg2);
 }
 
+export function UpdateCredential(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['UpdateCredential'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function UpdateCredentialPassword(arg1, arg2) {
+  return window['go']['main']['App']['UpdateCredentialPassword'](arg1, arg2);
+}
+
 export function UpdateForwardConfig(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['UpdateForwardConfig'](arg1, arg2, arg3, arg4);
 }
 
 export function UpdateGroup(arg1) {
   return window['go']['main']['App']['UpdateGroup'](arg1);
-}
-
-export function UpdateSSHKey(arg1, arg2, arg3) {
-  return window['go']['main']['App']['UpdateSSHKey'](arg1, arg2, arg3);
 }
 
 export function WaitGitHubDeviceAuth(arg1, arg2) {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -13,10 +12,10 @@ import (
 	"ops-cat/internal/model/entity/forward_entity"
 	"ops-cat/internal/repository/forward_repo"
 	"ops-cat/internal/service/asset_svc"
-	"ops-cat/internal/service/credential_svc"
-	"ops-cat/internal/service/ssh_key_svc"
 	"ops-cat/internal/service/ssh_svc"
 
+	"github.com/cago-frame/cago/pkg/logger"
+	"go.uber.org/zap"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -53,9 +52,9 @@ type RuleStatus struct {
 // ForwardConfigWithStatus 配置 + 规则 + 运行状态
 type ForwardConfigWithStatus struct {
 	forward_entity.ForwardConfig
-	AssetName  string       `json:"assetName"`
-	Rules      []RuleWithStatus `json:"rules"`
-	Status     string       `json:"status"` // "running" | "partial" | "error" | "stopped"
+	AssetName string           `json:"assetName"`
+	Rules     []RuleWithStatus `json:"rules"`
+	Status    string           `json:"status"` // "running" | "partial" | "error" | "stopped"
 }
 
 // RuleWithStatus 规则 + 运行状态
@@ -111,7 +110,7 @@ func (m *ForwardManager) StartConfig(ctx context.Context, configID int64) error 
 		if startErr != nil {
 			rf.errMsg = startErr.Error()
 			cancel()
-			log.Printf("[Forward] rule %d failed: %s", rule.ID, startErr)
+			logger.Default().Error("rule failed", zap.Int64("ruleID", rule.ID), zap.Error(startErr))
 		}
 		m.running[rule.ID] = rf
 		atomic.AddInt32(&fc.refs, 1)
@@ -146,9 +145,13 @@ func (m *ForwardManager) StopAll() {
 		delete(m.running, ruleID)
 	}
 	for assetID, fc := range m.clients {
-		fc.client.Close()
+		if err := fc.client.Close(); err != nil {
+			logger.Default().Warn("close SSH client", zap.Int64("assetID", assetID), zap.Error(err))
+		}
 		for _, c := range fc.closers {
-			c.Close()
+			if err := c.Close(); err != nil {
+				logger.Default().Warn("close closer", zap.Int64("assetID", assetID), zap.Error(err))
+			}
 		}
 		delete(m.clients, assetID)
 	}
@@ -224,19 +227,7 @@ func (m *ForwardManager) getOrDialLocked(ctx context.Context, assetID int64) (*f
 	}
 
 	// 解析凭证
-	password, key := "", ""
-	if sshCfg.AuthType == "password" && sshCfg.Password != "" {
-		decrypted, err := credential_svc.Default().Decrypt(sshCfg.Password)
-		if err == nil {
-			password = decrypted
-		}
-	}
-	if sshCfg.AuthType == "key" && sshCfg.KeySource == "managed" && sshCfg.KeyID > 0 {
-		privKey, err := ssh_key_svc.GetPrivateKey(ctx, sshCfg.KeyID)
-		if err == nil {
-			key = privKey
-		}
-	}
+	password, key := m.app.resolveSSHCredentials(sshCfg)
 
 	dialCfg := ssh_svc.ConnectConfig{
 		Host:        sshCfg.Host,
@@ -274,9 +265,13 @@ func (m *ForwardManager) releaseClientLocked(assetID int64) {
 		return
 	}
 	if atomic.AddInt32(&fc.refs, -1) <= 0 {
-		fc.client.Close()
+		if err := fc.client.Close(); err != nil {
+			logger.Default().Warn("close SSH client", zap.Int64("assetID", assetID), zap.Error(err))
+		}
 		for _, c := range fc.closers {
-			c.Close()
+			if err := c.Close(); err != nil {
+				logger.Default().Warn("close closer", zap.Int64("assetID", assetID), zap.Error(err))
+			}
 		}
 		delete(m.clients, assetID)
 	}
@@ -290,6 +285,8 @@ func startForwardRule(ctx context.Context, client *ssh.Client, rule *forward_ent
 		return startLocalForward(ctx, client, rule)
 	case "remote":
 		return startRemoteForward(ctx, client, rule)
+	case "dynamic":
+		return startDynamicForward(ctx, client, rule)
 	default:
 		return fmt.Errorf("unsupported type: %s", rule.Type)
 	}
@@ -304,7 +301,9 @@ func startLocalForward(ctx context.Context, client *ssh.Client, rule *forward_en
 
 	go func() {
 		<-ctx.Done()
-		listener.Close()
+		if err := listener.Close(); err != nil {
+			logger.Default().Warn("close listener", zap.Error(err))
+		}
 	}()
 
 	go func() {
@@ -317,7 +316,9 @@ func startLocalForward(ctx context.Context, client *ssh.Client, rule *forward_en
 				remote := fmt.Sprintf("%s:%d", rule.RemoteHost, rule.RemotePort)
 				rconn, err := client.Dial("tcp", remote)
 				if err != nil {
-					conn.Close()
+					if closeErr := conn.Close(); closeErr != nil {
+						logger.Default().Warn("close conn", zap.Error(closeErr))
+					}
 					return
 				}
 				pipeConns(conn, rconn)
@@ -337,7 +338,9 @@ func startRemoteForward(ctx context.Context, client *ssh.Client, rule *forward_e
 
 	go func() {
 		<-ctx.Done()
-		listener.Close()
+		if err := listener.Close(); err != nil {
+			logger.Default().Warn("close listener", zap.Error(err))
+		}
 	}()
 
 	go func() {
@@ -350,7 +353,9 @@ func startRemoteForward(ctx context.Context, client *ssh.Client, rule *forward_e
 				local := net.JoinHostPort(rule.LocalHost, fmt.Sprintf("%d", rule.LocalPort))
 				lconn, err := net.Dial("tcp", local)
 				if err != nil {
-					conn.Close()
+					if closeErr := conn.Close(); closeErr != nil {
+						logger.Default().Warn("close conn", zap.Error(closeErr))
+					}
 					return
 				}
 				pipeConns(conn, lconn)
@@ -361,13 +366,136 @@ func startRemoteForward(ctx context.Context, client *ssh.Client, rule *forward_e
 	return nil
 }
 
+// startDynamicForward SOCKS5 代理：本地监听，通过 SSH 隧道代理所有连接
+func startDynamicForward(ctx context.Context, client *ssh.Client, rule *forward_entity.ForwardRule) error {
+	addr := fmt.Sprintf("%s:%d", rule.LocalHost, rule.LocalPort)
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("listen %s: %w", addr, err)
+	}
+
+	go func() {
+		<-ctx.Done()
+		if err := listener.Close(); err != nil {
+			logger.Default().Warn("close listener", zap.Error(err))
+		}
+	}()
+
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go handleSOCKS5(conn, client)
+		}
+	}()
+
+	return nil
+}
+
+// handleSOCKS5 处理一个 SOCKS5 CONNECT 请求
+func handleSOCKS5(conn net.Conn, client *ssh.Client) {
+	defer func() {
+		if err := conn.Close(); err != nil {
+			logger.Default().Warn("close SOCKS5 conn", zap.Error(err))
+		}
+	}()
+
+	// 1. 握手：读取客户端支持的认证方法
+	buf := make([]byte, 258)
+	if _, err := io.ReadFull(conn, buf[:2]); err != nil {
+		return
+	}
+	if buf[0] != 0x05 { // SOCKS5
+		return
+	}
+	nMethods := int(buf[1])
+	if _, err := io.ReadFull(conn, buf[:nMethods]); err != nil {
+		return
+	}
+	// 回复：无需认证
+	if _, err := conn.Write([]byte{0x05, 0x00}); err != nil {
+		logger.Default().Warn("SOCKS5 auth reply", zap.Error(err))
+		return
+	}
+
+	// 2. 读取连接请求
+	if _, err := io.ReadFull(conn, buf[:4]); err != nil {
+		return
+	}
+	if buf[1] != 0x01 { // 只支持 CONNECT
+		if _, err := conn.Write([]byte{0x05, 0x07, 0x00, 0x01, 0, 0, 0, 0, 0, 0}); err != nil {
+			logger.Default().Warn("SOCKS5 write command-not-supported", zap.Error(err))
+		}
+		return
+	}
+
+	var host string
+	switch buf[3] { // address type
+	case 0x01: // IPv4
+		if _, err := io.ReadFull(conn, buf[:4]); err != nil {
+			return
+		}
+		host = net.IP(buf[:4]).String()
+	case 0x03: // Domain
+		if _, err := io.ReadFull(conn, buf[:1]); err != nil {
+			return
+		}
+		domainLen := int(buf[0])
+		if _, err := io.ReadFull(conn, buf[:domainLen]); err != nil {
+			return
+		}
+		host = string(buf[:domainLen])
+	case 0x04: // IPv6
+		if _, err := io.ReadFull(conn, buf[:16]); err != nil {
+			return
+		}
+		host = net.IP(buf[:16]).String()
+	default:
+		if _, err := conn.Write([]byte{0x05, 0x08, 0x00, 0x01, 0, 0, 0, 0, 0, 0}); err != nil {
+			logger.Default().Warn("SOCKS5 write addr-type-not-supported", zap.Error(err))
+		}
+		return
+	}
+
+	// 读端口（2 字节大端）
+	if _, err := io.ReadFull(conn, buf[:2]); err != nil {
+		return
+	}
+	port := int(buf[0])<<8 | int(buf[1])
+	target := net.JoinHostPort(host, fmt.Sprintf("%d", port))
+
+	// 3. 通过 SSH 隧道连接目标
+	rconn, err := client.Dial("tcp", target)
+	if err != nil {
+		if _, err := conn.Write([]byte{0x05, 0x05, 0x00, 0x01, 0, 0, 0, 0, 0, 0}); err != nil {
+			logger.Default().Warn("SOCKS5 write connection-refused", zap.Error(err))
+		}
+		return
+	}
+
+	// 4. 回复成功
+	if _, err := conn.Write([]byte{0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0}); err != nil {
+		logger.Default().Warn("SOCKS5 write success reply", zap.Error(err))
+		return
+	}
+
+	// 5. 双向转发
+	pipeConns(conn, rconn)
+}
+
 func pipeConns(a, b net.Conn) {
 	var wg sync.WaitGroup
 	wg.Add(2)
 	cp := func(dst, src net.Conn) {
 		defer wg.Done()
-		io.Copy(dst, src)
-		dst.Close()
+		if _, err := io.Copy(dst, src); err != nil {
+			logger.Default().Warn("pipe copy", zap.Error(err))
+		}
+		if err := dst.Close(); err != nil {
+			logger.Default().Warn("pipe close", zap.Error(err))
+		}
 	}
 	go cp(a, b)
 	go cp(b, a)

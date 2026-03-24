@@ -6,12 +6,17 @@ import (
 	"fmt"
 	"io"
 	"os"
+
 	"time"
 
+	"github.com/cago-frame/cago/pkg/logger"
+	"go.uber.org/zap"
+
 	"ops-cat/internal/model/entity/asset_entity"
+	"ops-cat/internal/model/entity/credential_entity"
 	"ops-cat/internal/service/asset_svc"
+	"ops-cat/internal/service/credential_mgr_svc"
 	"ops-cat/internal/service/credential_svc"
-	"ops-cat/internal/service/ssh_key_svc"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
@@ -19,6 +24,28 @@ import (
 
 // resolveAssetCredentials 从资产配置中解析凭据（自动解密密码/获取密钥）
 func resolveAssetCredentials(ctx context.Context, cfg *asset_entity.SSHConfig) (password, key string, err error) {
+	// 优先使用统一凭证
+	if cfg.CredentialID > 0 {
+		cred, err := credential_mgr_svc.Get(ctx, cfg.CredentialID)
+		if err != nil {
+			return "", "", fmt.Errorf("获取凭证失败: %w", err)
+		}
+		switch cred.Type {
+		case credential_entity.TypePassword:
+			decrypted, err := credential_svc.Default().Decrypt(cred.Password)
+			if err != nil {
+				return "", "", fmt.Errorf("解密密码失败: %w", err)
+			}
+			return decrypted, "", nil
+		case credential_entity.TypeSSHKey:
+			privKey, err := credential_mgr_svc.GetDecryptedPrivateKey(ctx, cfg.CredentialID)
+			if err != nil {
+				return "", "", fmt.Errorf("获取密钥失败: %w", err)
+			}
+			return "", privKey, nil
+		}
+	}
+	// 向后兼容：内联密码
 	if cfg.AuthType == "password" && cfg.Password != "" {
 		decrypted, err := credential_svc.Default().Decrypt(cfg.Password)
 		if err != nil {
@@ -26,21 +53,13 @@ func resolveAssetCredentials(ctx context.Context, cfg *asset_entity.SSHConfig) (
 		}
 		return decrypted, "", nil
 	}
-	if cfg.AuthType == "key" {
-		if cfg.KeySource == "managed" && cfg.KeyID > 0 {
-			privKey, err := ssh_key_svc.GetPrivateKey(ctx, cfg.KeyID)
-			if err != nil {
-				return "", "", fmt.Errorf("获取密钥失败: %w", err)
-			}
-			return "", privKey, nil
+	// 向后兼容：本地密钥文件
+	if cfg.AuthType == "key" && len(cfg.PrivateKeys) > 0 {
+		data, err := os.ReadFile(cfg.PrivateKeys[0])
+		if err != nil {
+			return "", "", fmt.Errorf("读取私钥文件失败: %w", err)
 		}
-		if cfg.KeySource == "file" && len(cfg.PrivateKeys) > 0 {
-			data, err := os.ReadFile(cfg.PrivateKeys[0])
-			if err != nil {
-				return "", "", fmt.Errorf("读取私钥文件失败: %w", err)
-			}
-			return "", string(data), nil
-		}
+		return "", string(data), nil
 	}
 	return "", "", nil
 }
@@ -87,7 +106,11 @@ func executeSSHCommand(cfg *asset_entity.SSHConfig, password, key string, comman
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = client.Close() }()
+	defer func() {
+		if err := client.Close(); err != nil {
+			logger.Default().Warn("close SSH client", zap.Error(err))
+		}
+	}()
 
 	return runSSHCommand(client, command)
 }
@@ -98,7 +121,11 @@ func runSSHCommand(client *ssh.Client, command string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("创建会话失败: %w", err)
 	}
-	defer func() { _ = session.Close() }()
+	defer func() {
+		if err := session.Close(); err != nil {
+			logger.Default().Warn("close SSH session", zap.Error(err))
+		}
+	}()
 
 	var stdout, stderr bytes.Buffer
 	session.Stdout = &stdout
@@ -124,13 +151,21 @@ func executeWithSFTP(cfg *asset_entity.SSHConfig, password, key string, fn func(
 	if err != nil {
 		return err
 	}
-	defer func() { _ = client.Close() }()
+	defer func() {
+		if err := client.Close(); err != nil {
+			logger.Default().Warn("close SFTP SSH client", zap.Error(err))
+		}
+	}()
 
 	sftpClient, err := sftp.NewClient(client)
 	if err != nil {
 		return fmt.Errorf("创建SFTP客户端失败: %w", err)
 	}
-	defer func() { _ = sftpClient.Close() }()
+	defer func() {
+		if err := sftpClient.Close(); err != nil {
+			logger.Default().Warn("close SFTP client", zap.Error(err))
+		}
+	}()
 
 	return fn(sftpClient)
 }
@@ -155,13 +190,21 @@ func ExecWithStdio(ctx context.Context, assetID int64, command string, stdin io.
 	if err != nil {
 		return err
 	}
-	defer func() { _ = client.Close() }()
+	defer func() {
+		if err := client.Close(); err != nil {
+			logger.Default().Warn("close ExecWithStdio SSH client", zap.Error(err))
+		}
+	}()
 
 	session, err := client.NewSession()
 	if err != nil {
 		return fmt.Errorf("创建会话失败: %w", err)
 	}
-	defer func() { _ = session.Close() }()
+	defer func() {
+		if err := session.Close(); err != nil {
+			logger.Default().Warn("close ExecWithStdio SSH session", zap.Error(err))
+		}
+	}()
 
 	if stdin != nil {
 		session.Stdin = stdin
@@ -193,39 +236,63 @@ func CopyBetweenAssets(ctx context.Context, srcAssetID int64, srcPath string, ds
 	if err != nil {
 		return fmt.Errorf("源资产SSH连接失败: %w", err)
 	}
-	defer func() { _ = srcClient.Close() }()
+	defer func() {
+		if err := srcClient.Close(); err != nil {
+			logger.Default().Warn("close source SSH client", zap.Error(err))
+		}
+	}()
 
 	dstClient, err := createSSHClient(dstCfg, dstPassword, dstKey)
 	if err != nil {
 		return fmt.Errorf("目标资产SSH连接失败: %w", err)
 	}
-	defer func() { _ = dstClient.Close() }()
+	defer func() {
+		if err := dstClient.Close(); err != nil {
+			logger.Default().Warn("close destination SSH client", zap.Error(err))
+		}
+	}()
 
 	// 创建 SFTP 客户端
 	srcSFTP, err := sftp.NewClient(srcClient)
 	if err != nil {
 		return fmt.Errorf("源资产SFTP连接失败: %w", err)
 	}
-	defer func() { _ = srcSFTP.Close() }()
+	defer func() {
+		if err := srcSFTP.Close(); err != nil {
+			logger.Default().Warn("close source SFTP client", zap.Error(err))
+		}
+	}()
 
 	dstSFTP, err := sftp.NewClient(dstClient)
 	if err != nil {
 		return fmt.Errorf("目标资产SFTP连接失败: %w", err)
 	}
-	defer func() { _ = dstSFTP.Close() }()
+	defer func() {
+		if err := dstSFTP.Close(); err != nil {
+			logger.Default().Warn("close destination SFTP client", zap.Error(err))
+		}
+	}()
 
 	// 流式传输
 	srcFile, err := srcSFTP.Open(srcPath)
 	if err != nil {
 		return fmt.Errorf("打开源文件失败: %w", err)
 	}
-	defer func() { _ = srcFile.Close() }()
+	defer func() {
+		if err := srcFile.Close(); err != nil {
+			logger.Default().Warn("close source file", zap.String("path", srcPath), zap.Error(err))
+		}
+	}()
 
 	dstFile, err := dstSFTP.Create(dstPath)
 	if err != nil {
 		return fmt.Errorf("创建目标文件失败: %w", err)
 	}
-	defer func() { _ = dstFile.Close() }()
+	defer func() {
+		if err := dstFile.Close(); err != nil {
+			logger.Default().Warn("close destination file", zap.String("path", dstPath), zap.Error(err))
+		}
+	}()
 
 	if _, err := io.Copy(dstFile, srcFile); err != nil {
 		return fmt.Errorf("文件传输失败: %w", err)

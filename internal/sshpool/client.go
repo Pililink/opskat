@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"io"
 	"net"
+
+	"github.com/cago-frame/cago/pkg/logger"
+	"go.uber.org/zap"
 )
 
 // Client 连接到 SSH 代理 socket 的客户端
@@ -24,7 +27,9 @@ func (c *Client) IsAvailable() bool {
 	if err != nil {
 		return false
 	}
-	_ = conn.Close()
+	if err := conn.Close(); err != nil {
+		logger.Default().Warn("close availability check connection", zap.Error(err))
+	}
 	return true
 }
 
@@ -35,18 +40,25 @@ func (c *Client) Exec(req ProxyRequest, stdin io.Reader, stdout, stderr io.Write
 	if err != nil {
 		return -1, err
 	}
-	defer func() { _ = conn.Close() }()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			logger.Default().Warn("close exec connection", zap.Error(err))
+		}
+	}()
 
 	// 发送 stdin 帧
 	if stdin != nil {
 		go func() {
 			buf := make([]byte, 32*1024)
 			for {
-				n, err := stdin.Read(buf)
+				n, readErr := stdin.Read(buf)
 				if n > 0 {
-					_ = WriteFrame(conn, FrameStdin, buf[:n])
+					if writeErr := WriteFrame(conn, FrameStdin, buf[:n]); writeErr != nil {
+						logger.Default().Warn("write stdin frame", zap.Error(writeErr))
+						return
+					}
 				}
-				if err != nil {
+				if readErr != nil {
 					return
 				}
 			}
@@ -66,17 +78,24 @@ func (c *Client) InteractiveSSH(req ProxyRequest, stdin io.Reader, stdout io.Wri
 	if err != nil {
 		return -1, err
 	}
-	defer func() { _ = conn.Close() }()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			logger.Default().Warn("close interactive ssh connection", zap.Error(err))
+		}
+	}()
 
 	// stdin → FrameStdin
 	go func() {
 		buf := make([]byte, 32*1024)
 		for {
-			n, err := stdin.Read(buf)
+			n, readErr := stdin.Read(buf)
 			if n > 0 {
-				_ = WriteFrame(conn, FrameStdin, buf[:n])
+				if writeErr := WriteFrame(conn, FrameStdin, buf[:n]); writeErr != nil {
+					logger.Default().Warn("write interactive stdin frame", zap.Error(writeErr))
+					return
+				}
 			}
-			if err != nil {
+			if readErr != nil {
 				return
 			}
 		}
@@ -86,7 +105,9 @@ func (c *Client) InteractiveSSH(req ProxyRequest, stdin io.Reader, stdout io.Wri
 	if resizeCh != nil {
 		go func() {
 			for size := range resizeCh {
-				_ = WriteResize(conn, size[0], size[1])
+				if err := WriteResize(conn, size[0], size[1]); err != nil {
+					logger.Default().Warn("write resize frame", zap.Error(err))
+				}
 			}
 		}()
 	}
@@ -102,7 +123,11 @@ func (c *Client) Upload(req ProxyRequest, localFile io.Reader) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = conn.Close() }()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			logger.Default().Warn("close upload connection", zap.Error(err))
+		}
+	}()
 
 	// 分块发送文件数据
 	buf := make([]byte, 32*1024)
@@ -148,7 +173,11 @@ func (c *Client) Download(req ProxyRequest, localFile io.Writer) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = conn.Close() }()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			logger.Default().Warn("close download connection", zap.Error(err))
+		}
+	}()
 
 	// 读取文件数据帧
 	for {
@@ -178,7 +207,11 @@ func (c *Client) Copy(req ProxyRequest) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = conn.Close() }()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			logger.Default().Warn("close copy connection", zap.Error(err))
+		}
+	}()
 
 	// 等待完成
 	frameType, payload, err := ReadFrame(reader)
@@ -205,12 +238,16 @@ func (c *Client) handshake(req ProxyRequest) (net.Conn, *bufio.Reader, error) {
 	// 发送 JSON 请求
 	data, err := json.Marshal(req)
 	if err != nil {
-		_ = conn.Close()
+		if closeErr := conn.Close(); closeErr != nil {
+			logger.Default().Warn("close connection after marshal error", zap.Error(closeErr))
+		}
 		return nil, nil, fmt.Errorf("marshal request: %w", err)
 	}
 	data = append(data, '\n')
 	if _, err := conn.Write(data); err != nil {
-		_ = conn.Close()
+		if closeErr := conn.Close(); closeErr != nil {
+			logger.Default().Warn("close connection after write error", zap.Error(closeErr))
+		}
 		return nil, nil, fmt.Errorf("send request: %w", err)
 	}
 
@@ -218,18 +255,24 @@ func (c *Client) handshake(req ProxyRequest) (net.Conn, *bufio.Reader, error) {
 	reader := bufio.NewReader(conn)
 	respLine, err := reader.ReadBytes('\n')
 	if err != nil {
-		_ = conn.Close()
+		if closeErr := conn.Close(); closeErr != nil {
+			logger.Default().Warn("close connection after read error", zap.Error(closeErr))
+		}
 		return nil, nil, fmt.Errorf("read response: %w", err)
 	}
 
 	var resp ProxyResponse
 	if err := json.Unmarshal(respLine, &resp); err != nil {
-		_ = conn.Close()
+		if closeErr := conn.Close(); closeErr != nil {
+			logger.Default().Warn("close connection after unmarshal error", zap.Error(closeErr))
+		}
 		return nil, nil, fmt.Errorf("unmarshal response: %w", err)
 	}
 
 	if !resp.OK {
-		_ = conn.Close()
+		if closeErr := conn.Close(); closeErr != nil {
+			logger.Default().Warn("close connection after proxy error", zap.Error(closeErr))
+		}
 		return nil, nil, fmt.Errorf("proxy error: %s", resp.Error)
 	}
 
@@ -249,11 +292,15 @@ func (c *Client) readOutputFrames(reader *bufio.Reader, stdout, stderr io.Writer
 		switch frameType {
 		case FrameStdout:
 			if stdout != nil {
-				_, _ = stdout.Write(payload)
+				if _, err := stdout.Write(payload); err != nil {
+					logger.Default().Warn("write stdout", zap.Error(err))
+				}
 			}
 		case FrameStderr:
 			if stderr != nil {
-				_, _ = stderr.Write(payload)
+				if _, err := stderr.Write(payload); err != nil {
+					logger.Default().Warn("write stderr", zap.Error(err))
+				}
 			}
 		case FrameExitCode:
 			code, err := ParseExitCode(payload)

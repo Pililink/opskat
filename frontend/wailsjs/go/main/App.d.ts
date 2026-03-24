@@ -6,9 +6,9 @@ import {asset_entity} from '../models';
 import {conversation_entity} from '../models';
 import {forward_entity} from '../models';
 import {group_entity} from '../models';
+import {credential_entity} from '../models';
 import {ai} from '../models';
 import {backup_svc} from '../models';
-import {ssh_key_entity} from '../models';
 import {sshpool} from '../models';
 import {import_svc} from '../models';
 import {sftp_svc} from '../models';
@@ -31,15 +31,17 @@ export function CreateForwardConfig(arg1:string,arg2:number,arg3:Array<forward_e
 
 export function CreateGroup(arg1:group_entity.Group):Promise<void>;
 
+export function CreatePasswordCredential(arg1:string,arg2:string,arg3:string,arg4:string):Promise<credential_entity.Credential>;
+
 export function DeleteAsset(arg1:number):Promise<void>;
 
 export function DeleteConversation(arg1:number):Promise<void>;
 
+export function DeleteCredential(arg1:number):Promise<void>;
+
 export function DeleteForwardConfig(arg1:number):Promise<void>;
 
 export function DeleteGroup(arg1:number,arg2:boolean):Promise<void>;
-
-export function DeleteSSHKey(arg1:number):Promise<void>;
 
 export function DetectClaudeSkill():Promise<main.SkillInfo>;
 
@@ -53,17 +55,25 @@ export function DownloadAndInstallUpdate():Promise<void>;
 
 export function ExecuteImportFile(arg1:string,arg2:string):Promise<void>;
 
+export function ExecuteRedis(arg1:number,arg2:string):Promise<string>;
+
+export function ExecuteSQL(arg1:number,arg2:string,arg3:string):Promise<string>;
+
 export function ExportData():Promise<string>;
 
 export function ExportToFile(arg1:string):Promise<void>;
 
 export function ExportToGist(arg1:string,arg2:string,arg3:string):Promise<backup_svc.GistInfo>;
 
-export function GenerateSSHKey(arg1:string,arg2:string,arg3:string,arg4:number):Promise<ssh_key_entity.SSHKey>;
+export function GenerateSSHKey(arg1:string,arg2:string,arg3:string,arg4:number):Promise<credential_entity.Credential>;
 
 export function GetAppVersion():Promise<string>;
 
 export function GetAsset(arg1:number):Promise<asset_entity.Asset>;
+
+export function GetCredentialPublicKey(arg1:number):Promise<string>;
+
+export function GetCredentialUsage(arg1:number):Promise<Array<string>>;
 
 export function GetCurrentConversationID():Promise<number>;
 
@@ -71,15 +81,13 @@ export function GetDataDir():Promise<string>;
 
 export function GetGitHubUser(arg1:string):Promise<backup_svc.GitHubUser>;
 
+export function GetGroup(arg1:number):Promise<group_entity.Group>;
+
 export function GetInitContext(arg1:number,arg2:number):Promise<string>;
 
 export function GetLanguage():Promise<string>;
 
 export function GetOpsctlInstallDir():Promise<string>;
-
-export function GetSSHKeyPublicKey(arg1:number):Promise<string>;
-
-export function GetSSHKeyUsage(arg1:number):Promise<Array<string>>;
 
 export function GetSSHPoolConnections():Promise<Array<sshpool.PoolEntryInfo>>;
 
@@ -91,9 +99,9 @@ export function ImportFromGist(arg1:string,arg2:string,arg3:string):Promise<void
 
 export function ImportSSHConfigSelected(arg1:Array<number>,arg2:boolean):Promise<import_svc.ImportResult>;
 
-export function ImportSSHKeyFile(arg1:string,arg2:string):Promise<ssh_key_entity.SSHKey>;
+export function ImportSSHKeyFile(arg1:string,arg2:string):Promise<credential_entity.Credential>;
 
-export function ImportSSHKeyPEM(arg1:string,arg2:string,arg3:string):Promise<ssh_key_entity.SSHKey>;
+export function ImportSSHKeyPEM(arg1:string,arg2:string,arg3:string):Promise<credential_entity.Credential>;
 
 export function ImportTabbySelected(arg1:Array<number>,arg2:string,arg3:boolean):Promise<import_svc.ImportResult>;
 
@@ -109,13 +117,15 @@ export function ListBackupGists(arg1:string):Promise<Array<backup_svc.GistInfo>>
 
 export function ListConversations():Promise<Array<conversation_entity.Conversation>>;
 
+export function ListCredentials():Promise<Array<credential_entity.Credential>>;
+
+export function ListCredentialsByType(arg1:string):Promise<Array<credential_entity.Credential>>;
+
 export function ListForwardConfigs():Promise<Array<main.ForwardConfigWithStatus>>;
 
 export function ListGroups():Promise<Array<group_entity.Group>>;
 
 export function ListLocalSSHKeys():Promise<Array<main.LocalSSHKeyInfo>>;
-
-export function ListSSHKeys():Promise<Array<ssh_key_entity.SSHKey>>;
 
 export function LoadCredential(arg1:string):Promise<string>;
 
@@ -144,6 +154,8 @@ export function RespondPermission(arg1:string,arg2:string):Promise<void>;
 export function RespondPlanApproval(arg1:string,arg2:boolean):Promise<void>;
 
 export function SFTPCancelTransfer(arg1:string):Promise<void>;
+
+export function SFTPDelete(arg1:string,arg2:string,arg3:boolean):Promise<void>;
 
 export function SFTPDownload(arg1:string,arg2:string):Promise<string>;
 
@@ -185,17 +197,23 @@ export function StopForwardConfig(arg1:number):Promise<void>;
 
 export function SwitchConversation(arg1:number):Promise<Array<main.ConversationDisplayMessage>>;
 
+export function TestDatabaseConnection(arg1:string,arg2:string):Promise<void>;
+
+export function TestRedisConnection(arg1:string,arg2:string):Promise<void>;
+
 export function TestSSHConnection(arg1:string,arg2:string):Promise<void>;
 
 export function UpdateAsset(arg1:asset_entity.Asset):Promise<void>;
 
 export function UpdateAssetPassword(arg1:number,arg2:string):Promise<void>;
 
+export function UpdateCredential(arg1:number,arg2:string,arg3:string,arg4:string,arg5:string):Promise<credential_entity.Credential>;
+
+export function UpdateCredentialPassword(arg1:number,arg2:string):Promise<void>;
+
 export function UpdateForwardConfig(arg1:number,arg2:string,arg3:number,arg4:Array<forward_entity.ForwardRule>):Promise<forward_entity.ForwardConfig>;
 
 export function UpdateGroup(arg1:group_entity.Group):Promise<void>;
-
-export function UpdateSSHKey(arg1:number,arg2:string,arg3:string):Promise<ssh_key_entity.SSHKey>;
 
 export function WaitGitHubDeviceAuth(arg1:string,arg2:number):Promise<string>;
 

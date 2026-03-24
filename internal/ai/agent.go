@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+
+	"github.com/cago-frame/cago/pkg/logger"
+	"go.uber.org/zap"
 )
 
 // ToolExecutor 执行 tool 调用的接口
@@ -34,7 +37,11 @@ func NewAgent(provider Provider, executor ToolExecutor, checker *CommandPolicyCh
 func (a *Agent) Chat(ctx context.Context, messages []Message, onEvent func(StreamEvent)) error {
 	// Chat 结束后关闭 executor 持有的资源（如缓存的 SSH 连接）
 	if closer, ok := a.executor.(io.Closer); ok {
-		defer func() { _ = closer.Close() }()
+		defer func() {
+			if err := closer.Close(); err != nil {
+				logger.Default().Warn("close tool executor", zap.Error(err))
+			}
+		}()
 	}
 
 	// 注入 PolicyChecker 到 context

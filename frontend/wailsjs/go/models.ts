@@ -282,6 +282,45 @@ export namespace conversation_entity {
 
 }
 
+export namespace credential_entity {
+	
+	export class Credential {
+	    id: number;
+	    name: string;
+	    type: string;
+	    username?: string;
+	    publicKey?: string;
+	    keyType?: string;
+	    keySize?: number;
+	    fingerprint?: string;
+	    comment?: string;
+	    description?: string;
+	    createtime: number;
+	    updatetime: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Credential(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.type = source["type"];
+	        this.username = source["username"];
+	        this.publicKey = source["publicKey"];
+	        this.keyType = source["keyType"];
+	        this.keySize = source["keySize"];
+	        this.fingerprint = source["fingerprint"];
+	        this.comment = source["comment"];
+	        this.description = source["description"];
+	        this.createtime = source["createtime"];
+	        this.updatetime = source["updatetime"];
+	    }
+	}
+
+}
+
 export namespace forward_entity {
 	
 	export class ForwardConfig {
@@ -338,6 +377,7 @@ export namespace group_entity {
 	    Name: string;
 	    ParentID: number;
 	    Icon: string;
+	    Description: string;
 	    CmdPolicy: string;
 	    SortOrder: number;
 	    Createtime: number;
@@ -353,6 +393,7 @@ export namespace group_entity {
 	        this.Name = source["Name"];
 	        this.ParentID = source["ParentID"];
 	        this.Icon = source["Icon"];
+	        this.Description = source["Description"];
 	        this.CmdPolicy = source["CmdPolicy"];
 	        this.SortOrder = source["SortOrder"];
 	        this.Createtime = source["Createtime"];
@@ -739,39 +780,6 @@ export namespace sftp_svc {
 	        this.size = source["size"];
 	        this.isDir = source["isDir"];
 	        this.modTime = source["modTime"];
-	    }
-	}
-
-}
-
-export namespace ssh_key_entity {
-	
-	export class SSHKey {
-	    id: number;
-	    name: string;
-	    comment: string;
-	    keyType: string;
-	    keySize: number;
-	    publicKey: string;
-	    fingerprint: string;
-	    createtime: number;
-	    updatetime: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new SSHKey(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.id = source["id"];
-	        this.name = source["name"];
-	        this.comment = source["comment"];
-	        this.keyType = source["keyType"];
-	        this.keySize = source["keySize"];
-	        this.publicKey = source["publicKey"];
-	        this.fingerprint = source["fingerprint"];
-	        this.createtime = source["createtime"];
-	        this.updatetime = source["updatetime"];
 	    }
 	}
 

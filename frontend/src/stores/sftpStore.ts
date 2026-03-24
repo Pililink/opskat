@@ -42,11 +42,11 @@ interface SFTPState {
   cancelTransfer: (transferId: string) => void;
   clearTransfer: (transferId: string) => void;
   clearCompleted: () => void;
+  clearCompletedForSession: (sessionId: string) => void;
   getSessionTransfers: (sessionId: string) => SFTPTransfer[];
 
   toggleFileManager: (tabId: string) => void;
   setFileManagerWidth: (width: number) => void;
-  isFileManagerOpen: (tabId: string) => boolean;
 }
 
 function subscribeProgress(
@@ -212,6 +212,18 @@ export const useSFTPStore = create<SFTPState>((set, get) => ({
     });
   },
 
+  clearCompletedForSession: (sessionId) => {
+    set((state) => {
+      const kept: Record<string, SFTPTransfer> = {};
+      for (const [id, t] of Object.entries(state.transfers)) {
+        if (t.sessionId !== sessionId || t.status === "active") {
+          kept[id] = t;
+        }
+      }
+      return { transfers: kept };
+    });
+  },
+
   getSessionTransfers: (sessionId) => {
     return Object.values(get().transfers).filter(
       (t) => t.sessionId === sessionId
@@ -234,9 +246,5 @@ export const useSFTPStore = create<SFTPState>((set, get) => ({
         Math.min(MAX_FILE_MANAGER_WIDTH, width)
       ),
     });
-  },
-
-  isFileManagerOpen: (tabId) => {
-    return !!get().fileManagerOpenTabs[tabId];
   },
 }));

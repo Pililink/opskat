@@ -17,7 +17,7 @@ type AssetRepo interface {
 	Delete(ctx context.Context, id int64) error
 	MoveToGroup(ctx context.Context, fromGroupID, toGroupID int64) error
 	DeleteByGroupID(ctx context.Context, groupID int64) error
-	FindBySSHKeyID(ctx context.Context, keyID int64) ([]*asset_entity.Asset, error)
+	FindByCredentialID(ctx context.Context, credentialID int64) ([]*asset_entity.Asset, error)
 	UpdateSortOrder(ctx context.Context, id int64, sortOrder int) error
 }
 
@@ -102,9 +102,9 @@ func (r *assetRepo) UpdateSortOrder(ctx context.Context, id int64, sortOrder int
 	return db.Ctx(ctx).Model(&asset_entity.Asset{}).Where("id = ?", id).Update("sort_order", sortOrder).Error
 }
 
-func (r *assetRepo) FindBySSHKeyID(ctx context.Context, keyID int64) ([]*asset_entity.Asset, error) {
+func (r *assetRepo) FindByCredentialID(ctx context.Context, credentialID int64) ([]*asset_entity.Asset, error) {
 	var assets []*asset_entity.Asset
-	if err := db.Ctx(ctx).Where("status = ? AND json_extract(config, '$.key_id') = ?", asset_entity.StatusActive, keyID).
+	if err := db.Ctx(ctx).Where("status = ? AND json_extract(config, '$.credential_id') = ?", asset_entity.StatusActive, credentialID).
 		Find(&assets).Error; err != nil {
 		return nil, err
 	}

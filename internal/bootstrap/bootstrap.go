@@ -12,6 +12,7 @@ import (
 	"ops-cat/internal/repository/forward_repo"
 	"ops-cat/internal/repository/group_repo"
 	"ops-cat/internal/repository/plan_repo"
+	"ops-cat/internal/repository/credential_repo"
 	"ops-cat/internal/repository/ssh_key_repo"
 	"ops-cat/internal/service/credential_svc"
 	"ops-cat/migrations"
@@ -84,6 +85,7 @@ func Init(ctx context.Context, opts Options) error {
 	group_repo.RegisterGroup(group_repo.NewGroup())
 	plan_repo.RegisterPlan(plan_repo.NewPlan())
 	ssh_key_repo.RegisterSSHKey(ssh_key_repo.NewSSHKey())
+	credential_repo.RegisterCredential(credential_repo.NewCredential())
 	forward_repo.RegisterForward(forward_repo.NewForward())
 
 	if err := migrations.RunMigrations(db.Default()); err != nil {

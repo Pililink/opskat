@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { FolderOpen } from "lucide-react";
+import { FolderOpen, Folder } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useSFTPStore } from "@/stores/sftpStore";
 import { useTerminalStore } from "@/stores/terminalStore";
@@ -15,9 +15,9 @@ export function TerminalToolbar({ tabId }: TerminalToolbarProps) {
   const isOpen = useSFTPStore((s) => s.fileManagerOpenTabs[tabId]);
 
   if (!tab) return null;
-
-  // 连接中的 tab 没有有效的 pane，不显示工具栏
   if (Object.keys(tab.panes).length === 0) return null;
+
+  const Icon = isOpen ? FolderOpen : Folder;
 
   return (
     <div className="flex items-center gap-1 px-2 py-1 border-t bg-background shrink-0">
@@ -28,7 +28,7 @@ export function TerminalToolbar({ tabId }: TerminalToolbarProps) {
         title={t("sftp.fileManager")}
         onClick={() => toggleFileManager(tabId)}
       >
-        <FolderOpen className="h-3.5 w-3.5" />
+        <Icon className="h-3.5 w-3.5" />
       </Button>
     </div>
   );

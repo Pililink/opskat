@@ -99,19 +99,19 @@ func (mr *MockAssetRepoMockRecorder) Find(ctx, id any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Find", reflect.TypeOf((*MockAssetRepo)(nil).Find), ctx, id)
 }
 
-// FindBySSHKeyID mocks base method.
-func (m *MockAssetRepo) FindBySSHKeyID(ctx context.Context, keyID int64) ([]*asset_entity.Asset, error) {
+// FindByCredentialID mocks base method.
+func (m *MockAssetRepo) FindByCredentialID(ctx context.Context, credentialID int64) ([]*asset_entity.Asset, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FindBySSHKeyID", ctx, keyID)
+	ret := m.ctrl.Call(m, "FindByCredentialID", ctx, credentialID)
 	ret0, _ := ret[0].([]*asset_entity.Asset)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// FindBySSHKeyID indicates an expected call of FindBySSHKeyID.
-func (mr *MockAssetRepoMockRecorder) FindBySSHKeyID(ctx, keyID any) *gomock.Call {
+// FindByCredentialID indicates an expected call of FindByCredentialID.
+func (mr *MockAssetRepoMockRecorder) FindByCredentialID(ctx, credentialID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FindBySSHKeyID", reflect.TypeOf((*MockAssetRepo)(nil).FindBySSHKeyID), ctx, keyID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FindByCredentialID", reflect.TypeOf((*MockAssetRepo)(nil).FindByCredentialID), ctx, credentialID)
 }
 
 // List mocks base method.

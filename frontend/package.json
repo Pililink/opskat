@@ -9,6 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@iconify-icons/simple-icons": "^1.2.74",
+    "@iconify/react": "^6.0.2",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.0",
     "i18next": "^25.0.0",

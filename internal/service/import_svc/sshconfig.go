@@ -168,10 +168,6 @@ func ImportSSHConfigSelected(ctx context.Context, data []byte, selectedIndexes [
 			AuthType:    authType,
 			PrivateKeys: privateKeys,
 		}
-		if len(privateKeys) > 0 {
-			sshCfg.KeySource = "file"
-		}
-
 		// 使用 SSH Config 的 Host alias 作为分组依据时不分组，直接放根目录
 		groupID := int64(0)
 		_ = groupCache // 预留分组逻辑

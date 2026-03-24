@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
-import { Trash2, Eye, EyeOff, FolderOpen, Loader2, Folder, Server, PlugZap } from "lucide-react";
+import { Trash2, Eye, EyeOff, FolderOpen, Loader2, PlugZap } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -20,17 +20,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { TreeSelect, type TreeNode } from "@/components/ui/tree-select";
+import { Switch } from "@/components/ui/switch";
 import { IconPicker } from "@/components/asset/IconPicker";
+import { AssetSelect } from "@/components/asset/AssetSelect";
+import { GroupSelect } from "@/components/asset/GroupSelect";
 import { useAssetStore } from "@/stores/assetStore";
-import { asset_entity, ssh_key_entity } from "../../../wailsjs/go/models";
+import { asset_entity, credential_entity } from "../../../wailsjs/go/models";
 import {
   SaveCredential,
   LoadCredential,
-  ListSSHKeys,
+  ListCredentialsByType,
   ListLocalSSHKeys,
   SelectSSHKeyFile,
   TestSSHConnection,
+  TestDatabaseConnection,
+  TestRedisConnection,
 } from "../../../wailsjs/go/main/App";
 import { main } from "../../../wailsjs/go/models";
 
@@ -55,12 +59,50 @@ interface SSHConfig {
   username: string;
   auth_type: string;
   password?: string;
-  key_id?: number;
-  key_source?: string;
+  credential_id?: number;
   private_keys?: string[];
   jump_host_id?: number;
   proxy?: ProxyConfig | null;
 }
+
+interface DatabaseConfig {
+  driver: string;
+  host: string;
+  port: number;
+  username: string;
+  password?: string;
+  database?: string;
+  ssl_mode?: string;
+  params?: string;
+  read_only?: boolean;
+  ssh_asset_id?: number;
+}
+
+interface RedisConfig {
+  host: string;
+  port: number;
+  username?: string;
+  password?: string;
+  database?: number;
+  tls?: boolean;
+  ssh_asset_id?: number;
+}
+
+type AssetType = "ssh" | "database" | "redis";
+
+const DEFAULT_PORTS: Record<string, number> = {
+  ssh: 22,
+  mysql: 3306,
+  postgresql: 5432,
+  redis: 6379,
+};
+
+const DEFAULT_ICONS: Record<string, string> = {
+  ssh: "server",
+  mysql: "mysql",
+  postgresql: "postgresql",
+  redis: "redis",
+};
 
 export function AssetForm({
   open,
@@ -69,7 +111,10 @@ export function AssetForm({
   defaultGroupId = 0,
 }: AssetFormProps) {
   const { t } = useTranslation();
-  const { createAsset, updateAsset, groups, assets } = useAssetStore();
+  const { createAsset, updateAsset } = useAssetStore();
+
+  // Asset type
+  const [assetType, setAssetType] = useState<AssetType>("ssh");
 
   // Basic fields
   const [name, setName] = useState("");
@@ -83,7 +128,7 @@ export function AssetForm({
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
 
-  // Connection type
+  // Connection type (SSH only)
   const [connectionType, setConnectionType] = useState<"direct" | "jumphost" | "proxy">("direct");
 
   // Auth fields
@@ -91,8 +136,8 @@ export function AssetForm({
   const [showPassword, setShowPassword] = useState(false);
   const [encryptedPassword, setEncryptedPassword] = useState("");
   const [keySource, setKeySource] = useState<"managed" | "file">("managed");
-  const [keyId, setKeyId] = useState(0);
-  const [managedKeys, setManagedKeys] = useState<ssh_key_entity.SSHKey[]>([]);
+  const [credentialId, setCredentialId] = useState(0);
+  const [managedKeys, setManagedKeys] = useState<credential_entity.Credential[]>([]);
 
   // SSH fields - local key
   const [localKeys, setLocalKeys] = useState<main.LocalSSHKeyInfo[]>([]);
@@ -105,66 +150,26 @@ export function AssetForm({
   const [proxyUsername, setProxyUsername] = useState("");
   const [proxyPassword, setProxyPassword] = useState("");
 
-  // SSH assets for jump host selection (exclude self)
-  const sshAssets = assets.filter(
-    (a) => a.Type === "ssh" && a.ID !== editAsset?.ID
-  );
+  // Database fields
+  const [driver, setDriver] = useState("mysql");
+  const [database, setDatabase] = useState("");
+  const [sslMode, setSslMode] = useState("disable");
+  const [readOnly, setReadOnly] = useState(false);
+  const [dbSshAssetId, setDbSshAssetId] = useState(0);
+  const [params, setParams] = useState("");
 
-  const folderIcon = <Folder className="h-3.5 w-3.5 text-muted-foreground" />;
-  const serverIcon = <Server className="h-3.5 w-3.5 text-muted-foreground" />;
+  // Redis fields
+  const [redisDatabase, setRedisDatabase] = useState(0);
+  const [tls, setTls] = useState(false);
+  const [redisSshAssetId, setRedisSshAssetId] = useState(0);
 
-  // Build group tree for TreeSelect
-  const buildGroupTree = (): TreeNode[] => {
-    const buildChildren = (parentId: number): TreeNode[] => {
-      return groups
-        .filter((g) => (g.ParentID || 0) === parentId)
-        .map((g) => ({
-          id: g.ID,
-          label: g.Name,
-          icon: folderIcon,
-          children: buildChildren(g.ID),
-        }));
-    };
-    return buildChildren(0);
-  };
-  const groupTree = buildGroupTree();
+  // Exclude self from jump host / SSH tunnel selection
+  const jumpHostExcludeIds = editAsset?.ID ? [editAsset.ID] : undefined;
 
-  // Build jump host tree: groups (non-selectable) containing SSH assets (selectable)
-  const buildJumpHostTree = (): TreeNode[] => {
-    const nodes: TreeNode[] = [];
-    // Grouped assets
-    const buildGroupWithAssets = (parentId: number): TreeNode[] => {
-      return groups
-        .filter((g) => (g.ParentID || 0) === parentId)
-        .map((g) => {
-          const childGroups = buildGroupWithAssets(g.ID);
-          const childAssets: TreeNode[] = sshAssets
-            .filter((a) => a.GroupID === g.ID)
-            .map((a) => ({ id: a.ID, label: a.Name, icon: serverIcon }));
-          return {
-            id: -g.ID, // negative to avoid collision with asset IDs
-            label: g.Name,
-            icon: folderIcon,
-            selectable: false,
-            children: [...childGroups, ...childAssets],
-          };
-        })
-        .filter((g) => g.children && g.children.length > 0);
-    };
-    nodes.push(...buildGroupWithAssets(0));
-    // Ungrouped assets
-    const ungrouped = sshAssets.filter((a) => !a.GroupID || a.GroupID === 0);
-    for (const a of ungrouped) {
-      nodes.push({ id: a.ID, label: a.Name, icon: serverIcon });
-    }
-    return nodes;
-  };
-  const jumpHostTree = buildJumpHostTree();
-
-  // Load managed keys and scan local keys when dialog opens
+  // Load managed keys and scan local keys when dialog opens (for SSH type)
   useEffect(() => {
     if (open) {
-      ListSSHKeys()
+      ListCredentialsByType("ssh_key")
         .then((keys) => setManagedKeys(keys || []))
         .catch(() => setManagedKeys([]));
       setScanningKeys(true);
@@ -178,67 +183,133 @@ export function AssetForm({
   useEffect(() => {
     if (open) {
       if (editAsset) {
+        const editType = (editAsset.Type || "ssh") as AssetType;
+        setAssetType(editType);
         setName(editAsset.Name);
         setGroupId(editAsset.GroupID);
-        setIcon(editAsset.Icon || "server");
+        setIcon(editAsset.Icon || DEFAULT_ICONS[editType] || "server");
         setDescription(editAsset.Description);
-        try {
-          const cfg: SSHConfig = JSON.parse(editAsset.Config || "{}");
-          setHost(cfg.host || "");
-          setPort(cfg.port || 22);
-          setUsername(cfg.username || "root");
-          setAuthType(cfg.auth_type || "password");
 
-          // Auth fields
-          setEncryptedPassword(cfg.password || "");
-          if (cfg.password) {
-            LoadCredential(cfg.password)
-              .then((p) => setPassword(p))
-              .catch(() => setPassword(""));
-          } else {
-            setPassword("");
-          }
-          setKeySource((cfg.key_source === "file" || cfg.key_source === "local") ? "file" : "managed");
-          setKeyId(cfg.key_id || 0);
-
-          setSelectedKeyPaths(cfg.private_keys || []);
-          setJumpHostId(cfg.jump_host_id || 0);
-
-          // Derive connection type
-          if (cfg.jump_host_id) {
-            setConnectionType("jumphost");
-          } else if (cfg.proxy) {
-            setConnectionType("proxy");
-          } else {
-            setConnectionType("direct");
-          }
-
-          if (cfg.proxy) {
-            setProxyType(cfg.proxy.type || "socks5");
-            setProxyHost(cfg.proxy.host || "");
-            setProxyPort(cfg.proxy.port || 1080);
-            setProxyUsername(cfg.proxy.username || "");
-            setProxyPassword(cfg.proxy.password || "");
-          } else {
-            setProxyType("socks5");
-            setProxyHost("");
-            setProxyPort(1080);
-            setProxyUsername("");
-            setProxyPassword("");
-          }
-
-        } catch {
-          resetSSHFields();
+        if (editType === "ssh") {
+          loadSSHConfig(editAsset);
+        } else if (editType === "database") {
+          loadDatabaseConfig(editAsset);
+        } else if (editType === "redis") {
+          loadRedisConfig(editAsset);
         }
       } else {
+        setAssetType("ssh");
         setName("");
         setGroupId(defaultGroupId);
         setIcon("server");
         setDescription("");
         resetSSHFields();
+        resetDatabaseFields();
+        resetRedisFields();
       }
     }
   }, [open, editAsset, defaultGroupId]);
+
+  const loadSSHConfig = (asset: asset_entity.Asset) => {
+    try {
+      const cfg: SSHConfig = JSON.parse(asset.Config || "{}");
+      setHost(cfg.host || "");
+      setPort(cfg.port || 22);
+      setUsername(cfg.username || "root");
+      setAuthType(cfg.auth_type || "password");
+
+      setEncryptedPassword(cfg.password || "");
+      if (cfg.password) {
+        LoadCredential(cfg.password)
+          .then((p) => setPassword(p))
+          .catch(() => setPassword(""));
+      } else {
+        setPassword("");
+      }
+      // 向后兼容：如果有 private_keys 字段则是文件模式，否则是托管模式
+      setKeySource(cfg.private_keys && cfg.private_keys.length > 0 ? "file" : "managed");
+      setCredentialId(cfg.credential_id || 0);
+      setSelectedKeyPaths(cfg.private_keys || []);
+      setJumpHostId(cfg.jump_host_id || 0);
+
+      if (cfg.jump_host_id) {
+        setConnectionType("jumphost");
+      } else if (cfg.proxy) {
+        setConnectionType("proxy");
+      } else {
+        setConnectionType("direct");
+      }
+
+      if (cfg.proxy) {
+        setProxyType(cfg.proxy.type || "socks5");
+        setProxyHost(cfg.proxy.host || "");
+        setProxyPort(cfg.proxy.port || 1080);
+        setProxyUsername(cfg.proxy.username || "");
+        setProxyPassword(cfg.proxy.password || "");
+      } else {
+        resetProxyFields();
+      }
+    } catch {
+      resetSSHFields();
+    }
+  };
+
+  const loadDatabaseConfig = (asset: asset_entity.Asset) => {
+    try {
+      const cfg: DatabaseConfig = JSON.parse(asset.Config || "{}");
+      setHost(cfg.host || "");
+      setPort(cfg.port || 3306);
+      setUsername(cfg.username || "");
+      setDriver(cfg.driver || "mysql");
+      setDatabase(cfg.database || "");
+      setSslMode(cfg.ssl_mode || "disable");
+      setReadOnly(cfg.read_only || false);
+      setDbSshAssetId(cfg.ssh_asset_id || 0);
+      setParams(cfg.params || "");
+
+      setEncryptedPassword(cfg.password || "");
+      if (cfg.password) {
+        LoadCredential(cfg.password)
+          .then((p) => setPassword(p))
+          .catch(() => setPassword(""));
+      } else {
+        setPassword("");
+      }
+    } catch {
+      resetDatabaseFields();
+    }
+  };
+
+  const loadRedisConfig = (asset: asset_entity.Asset) => {
+    try {
+      const cfg: RedisConfig = JSON.parse(asset.Config || "{}");
+      setHost(cfg.host || "");
+      setPort(cfg.port || 6379);
+      setUsername(cfg.username || "");
+      setRedisDatabase(cfg.database || 0);
+      setTls(cfg.tls || false);
+      setRedisSshAssetId(cfg.ssh_asset_id || 0);
+
+      setEncryptedPassword(cfg.password || "");
+      if (cfg.password) {
+        LoadCredential(cfg.password)
+          .then((p) => setPassword(p))
+          .catch(() => setPassword(""));
+      } else {
+        setPassword("");
+      }
+    } catch {
+      resetRedisFields();
+    }
+  };
+
+  const resetProxyFields = () => {
+    setProxyType("socks5");
+    setProxyHost("");
+    setProxyPort(1080);
+    setProxyUsername("");
+    setProxyPassword("");
+  };
 
   const resetSSHFields = () => {
     setHost("");
@@ -249,15 +320,69 @@ export function AssetForm({
     setShowPassword(false);
     setEncryptedPassword("");
     setKeySource("managed");
-    setKeyId(0);
+    setCredentialId(0);
     setSelectedKeyPaths([]);
     setConnectionType("direct");
     setJumpHostId(0);
-    setProxyType("socks5");
-    setProxyHost("");
-    setProxyPort(1080);
-    setProxyUsername("");
-    setProxyPassword("");
+    resetProxyFields();
+  };
+
+  const resetDatabaseFields = () => {
+    setHost("");
+    setPort(3306);
+    setUsername("");
+    setPassword("");
+    setShowPassword(false);
+    setEncryptedPassword("");
+    setDriver("mysql");
+    setDatabase("");
+    setSslMode("disable");
+    setReadOnly(false);
+    setDbSshAssetId(0);
+    setParams("");
+  };
+
+  const resetRedisFields = () => {
+    setHost("");
+    setPort(6379);
+    setUsername("");
+    setPassword("");
+    setShowPassword(false);
+    setEncryptedPassword("");
+    setRedisDatabase(0);
+    setTls(false);
+    setRedisSshAssetId(0);
+  };
+
+  const handleTypeChange = (newType: AssetType) => {
+    if (newType === assetType) return;
+    setAssetType(newType);
+    setPassword("");
+    setShowPassword(false);
+    setEncryptedPassword("");
+
+    if (newType === "ssh") {
+      setPort(22);
+      setUsername("root");
+      setIcon(DEFAULT_ICONS.ssh);
+    } else if (newType === "database") {
+      setPort(DEFAULT_PORTS[driver] || 3306);
+      setUsername("");
+      setIcon(DEFAULT_ICONS[driver] || "mysql");
+    } else if (newType === "redis") {
+      setPort(6379);
+      setUsername("");
+      setIcon(DEFAULT_ICONS.redis);
+    }
+  };
+
+  const handleDriverChange = (newDriver: string) => {
+    setDriver(newDriver);
+    setPort(DEFAULT_PORTS[newDriver] || 3306);
+    setIcon(DEFAULT_ICONS[newDriver] || "mysql");
+    if (newDriver !== "postgresql") {
+      setSslMode("disable");
+    }
   };
 
   const handleTestConnection = async () => {
@@ -268,8 +393,7 @@ export function AssetForm({
       auth_type: authType,
     };
     if (authType === "key") {
-      sshConfig.key_source = keySource;
-      if (keySource === "managed" && keyId > 0) sshConfig.key_id = keyId;
+      if (keySource === "managed" && credentialId > 0) sshConfig.credential_id = credentialId;
       if (keySource === "file" && selectedKeyPaths.length > 0) sshConfig.private_keys = selectedKeyPaths;
     }
     if (connectionType === "jumphost" && jumpHostId > 0) sshConfig.jump_host_id = jumpHostId;
@@ -287,58 +411,123 @@ export function AssetForm({
     }
   };
 
-  const handleSubmit = async () => {
-    const sshConfig: SSHConfig = {
-      host,
-      port,
-      username,
-      auth_type: authType,
-    };
+  const handleTestDatabaseConnection = async () => {
+    const cfg: DatabaseConfig = { driver, host, port, username };
+    if (database) cfg.database = database;
+    if (driver === "postgresql" && sslMode !== "disable") cfg.ssl_mode = sslMode;
+    if (readOnly) cfg.read_only = true;
+    if (dbSshAssetId > 0) cfg.ssh_asset_id = dbSshAssetId;
+    if (params) cfg.params = params;
+    setTesting(true);
+    try {
+      await TestDatabaseConnection(JSON.stringify(cfg), password);
+      toast.success(t("asset.testConnectionSuccess"));
+    } catch (e) {
+      toast.error(`${t("asset.testConnectionFailed")}: ${String(e)}`);
+    } finally {
+      setTesting(false);
+    }
+  };
 
-    // Save password (encrypt it)
-    if (authType === "password" && password) {
+  const handleTestRedisConnection = async () => {
+    const cfg: RedisConfig = { host, port };
+    if (username) cfg.username = username;
+    if (redisDatabase > 0) cfg.database = redisDatabase;
+    if (tls) cfg.tls = true;
+    if (redisSshAssetId > 0) cfg.ssh_asset_id = redisSshAssetId;
+    setTesting(true);
+    try {
+      await TestRedisConnection(JSON.stringify(cfg), password);
+      toast.success(t("asset.testConnectionSuccess"));
+    } catch (e) {
+      toast.error(`${t("asset.testConnectionFailed")}: ${String(e)}`);
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const encryptPassword = async (): Promise<string | undefined> => {
+    if (password) {
       try {
-        const encrypted = await SaveCredential(password);
-        sshConfig.password = encrypted;
+        return await SaveCredential(password);
       } catch {
         toast.error("Failed to encrypt password");
-        return;
+        return undefined;
       }
-    } else if (authType === "password" && encryptedPassword && !password) {
-      // Keep existing encrypted password if user didn't change it
     }
+    // Keep existing encrypted password if user didn't change it
+    if (encryptedPassword) return encryptedPassword;
+    return "";
+  };
 
-    // Save key config
-    if (authType === "key") {
-      sshConfig.key_source = keySource;
-      if (keySource === "managed" && keyId > 0) {
-        sshConfig.key_id = keyId;
-      }
-      if (keySource === "file" && selectedKeyPaths.length > 0) {
-        sshConfig.private_keys = selectedKeyPaths;
-      }
-    }
+  const handleSubmit = async () => {
+    let config = "";
 
-    // Connection type specific fields
-    if (connectionType === "jumphost" && jumpHostId > 0) {
-      sshConfig.jump_host_id = jumpHostId;
-    }
-    if (connectionType === "proxy" && proxyHost) {
-      sshConfig.proxy = {
-        type: proxyType,
-        host: proxyHost,
-        port: proxyPort,
-        username: proxyUsername || undefined,
-        password: proxyPassword || undefined,
+    if (assetType === "ssh") {
+      const sshConfig: SSHConfig = {
+        host,
+        port,
+        username,
+        auth_type: authType,
       };
-    }
 
-    const config = JSON.stringify(sshConfig);
+      if (authType === "password" && password) {
+        const encrypted = await encryptPassword();
+        if (encrypted === undefined) return;
+        sshConfig.password = encrypted;
+      }
+
+      if (authType === "key") {
+        if (keySource === "managed" && credentialId > 0) sshConfig.credential_id = credentialId;
+        if (keySource === "file" && selectedKeyPaths.length > 0) sshConfig.private_keys = selectedKeyPaths;
+      }
+
+      if (connectionType === "jumphost" && jumpHostId > 0) sshConfig.jump_host_id = jumpHostId;
+      if (connectionType === "proxy" && proxyHost) {
+        sshConfig.proxy = {
+          type: proxyType,
+          host: proxyHost,
+          port: proxyPort,
+          username: proxyUsername || undefined,
+          password: proxyPassword || undefined,
+        };
+      }
+      config = JSON.stringify(sshConfig);
+    } else if (assetType === "database") {
+      const encrypted = await encryptPassword();
+      if (encrypted === undefined) return;
+      const dbConfig: DatabaseConfig = {
+        driver,
+        host,
+        port,
+        username,
+      };
+      if (encrypted) dbConfig.password = encrypted;
+      if (database) dbConfig.database = database;
+      if (driver === "postgresql" && sslMode !== "disable") dbConfig.ssl_mode = sslMode;
+      if (readOnly) dbConfig.read_only = true;
+      if (dbSshAssetId > 0) dbConfig.ssh_asset_id = dbSshAssetId;
+      if (params) dbConfig.params = params;
+      config = JSON.stringify(dbConfig);
+    } else if (assetType === "redis") {
+      const encrypted = await encryptPassword();
+      if (encrypted === undefined) return;
+      const redisConfig: RedisConfig = {
+        host,
+        port,
+      };
+      if (username) redisConfig.username = username;
+      if (encrypted) redisConfig.password = encrypted;
+      if (redisDatabase > 0) redisConfig.database = redisDatabase;
+      if (tls) redisConfig.tls = true;
+      if (redisSshAssetId > 0) redisConfig.ssh_asset_id = redisSshAssetId;
+      config = JSON.stringify(redisConfig);
+    }
 
     const asset = new asset_entity.Asset({
       ...(editAsset || {}),
       Name: name,
-      Type: "ssh",
+      Type: assetType,
       GroupID: groupId,
       Icon: icon,
       Description: description,
@@ -361,23 +550,41 @@ export function AssetForm({
     }
   };
 
+  const typeLabel = assetType === "ssh" ? t("asset.typeSSH") : assetType === "database" ? t("asset.typeDatabase") : t("asset.typeRedis");
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
-            {editAsset ? t("action.edit") : t("action.add")} SSH{" "}
-            {t("asset.title")}
+            {editAsset ? t("action.edit") : t("action.add")} {typeLabel}
           </DialogTitle>
         </DialogHeader>
         <div className="grid gap-4 py-2">
+          {/* Asset Type */}
+          {!editAsset && (
+            <div className="grid gap-2">
+              <Label>{t("asset.type")}</Label>
+              <Select value={assetType} onValueChange={(v) => handleTypeChange(v as AssetType)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ssh">{t("asset.typeSSH")}</SelectItem>
+                  <SelectItem value="database">{t("asset.typeDatabase")}</SelectItem>
+                  <SelectItem value="redis">{t("asset.typeRedis")}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
           {/* Name */}
           <div className="grid gap-2">
             <Label>{t("asset.name")}</Label>
             <Input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="web-01"
+              placeholder={assetType === "ssh" ? "web-01" : assetType === "database" ? "prod-db" : "cache-01"}
             />
           </div>
 
@@ -387,54 +594,93 @@ export function AssetForm({
             <IconPicker value={icon} onChange={setIcon} type="asset" />
           </div>
 
-          {/* Connection Type + Host + Port */}
-          <div className="grid gap-2">
-            <Label>{t("asset.host")}</Label>
-            <div className="flex gap-2">
-              <Select
-                value={connectionType}
-                onValueChange={(v) => setConnectionType(v as "direct" | "jumphost" | "proxy")}
-              >
-                <SelectTrigger className="w-[100px] shrink-0">
+          {/* Database Driver (database only, before host) */}
+          {assetType === "database" && (
+            <div className="grid gap-2">
+              <Label>{t("asset.driver")}</Label>
+              <Select value={driver} onValueChange={handleDriverChange}>
+                <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="direct">{t("asset.connectionDirect")}</SelectItem>
-                  <SelectItem value="jumphost">{t("asset.connectionJumpHost")}</SelectItem>
-                  <SelectItem value="proxy">{t("asset.connectionProxy")}</SelectItem>
+                  <SelectItem value="mysql">{t("asset.driverMySQL")}</SelectItem>
+                  <SelectItem value="postgresql">{t("asset.driverPostgreSQL")}</SelectItem>
                 </SelectContent>
               </Select>
-              <Input
-                className="flex-1"
-                value={host}
-                onChange={(e) => setHost(e.target.value)}
-                placeholder="192.168.1.1"
-              />
-              <Input
-                className="w-[80px] shrink-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                type="number"
-                value={port}
-                onChange={(e) => setPort(Number(e.target.value))}
-              />
             </div>
-          </div>
+          )}
 
-          {/* Jump Host selector (when connectionType is jumphost) */}
-          {connectionType === "jumphost" && (
+          {/* SSH: Connection Type + Host + Port */}
+          {assetType === "ssh" && (
+            <div className="grid gap-2">
+              <Label>{t("asset.host")}</Label>
+              <div className="flex gap-2">
+                <Select
+                  value={connectionType}
+                  onValueChange={(v) => setConnectionType(v as "direct" | "jumphost" | "proxy")}
+                >
+                  <SelectTrigger className="w-[100px] shrink-0">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="direct">{t("asset.connectionDirect")}</SelectItem>
+                    <SelectItem value="jumphost">{t("asset.connectionJumpHost")}</SelectItem>
+                    <SelectItem value="proxy">{t("asset.connectionProxy")}</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Input
+                  className="flex-1"
+                  value={host}
+                  onChange={(e) => setHost(e.target.value)}
+                  placeholder="192.168.1.1"
+                />
+                <Input
+                  className="w-[80px] shrink-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                  type="number"
+                  value={port}
+                  onChange={(e) => setPort(Number(e.target.value))}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Database / Redis: Host + Port */}
+          {(assetType === "database" || assetType === "redis") && (
+            <div className="grid gap-2">
+              <Label>{t("asset.host")}</Label>
+              <div className="flex gap-2">
+                <Input
+                  className="flex-1"
+                  value={host}
+                  onChange={(e) => setHost(e.target.value)}
+                  placeholder="192.168.1.1"
+                />
+                <Input
+                  className="w-[80px] shrink-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                  type="number"
+                  value={port}
+                  onChange={(e) => setPort(Number(e.target.value))}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* SSH: Jump Host selector */}
+          {assetType === "ssh" && connectionType === "jumphost" && (
             <div className="grid gap-2">
               <Label>{t("asset.selectJumpHost")}</Label>
-              <TreeSelect
+              <AssetSelect
                 value={jumpHostId}
                 onValueChange={setJumpHostId}
-                nodes={jumpHostTree}
+                filterType="ssh"
+                excludeIds={jumpHostExcludeIds}
                 placeholder={t("asset.jumpHostNone")}
-                placeholderIcon={serverIcon}
               />
             </div>
           )}
 
-          {/* Proxy config (when connectionType is proxy) */}
-          {connectionType === "proxy" && (
+          {/* SSH: Proxy config */}
+          {assetType === "ssh" && connectionType === "proxy" && (
             <div className="grid gap-3 border rounded-lg p-3">
               <div className="grid grid-cols-3 gap-2">
                 <div className="grid gap-1">
@@ -490,33 +736,47 @@ export function AssetForm({
             </div>
           )}
 
-          {/* Username + AuthType */}
-          <div className="grid grid-cols-2 gap-4">
+          {/* SSH: Username + AuthType */}
+          {assetType === "ssh" && (
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label>{t("asset.username")}</Label>
+                <Input
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label>{t("asset.authType")}</Label>
+                <Select value={authType} onValueChange={setAuthType}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="password">
+                      {t("asset.authPassword")}
+                    </SelectItem>
+                    <SelectItem value="key">{t("asset.authKey")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          )}
+
+          {/* Database / Redis: Username */}
+          {(assetType === "database" || assetType === "redis") && (
             <div className="grid gap-2">
               <Label>{t("asset.username")}</Label>
               <Input
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
+                placeholder={assetType === "redis" ? t("asset.username") + " (" + t("asset.databasePlaceholder").split("（")[0] + ")" : ""}
               />
             </div>
-            <div className="grid gap-2">
-              <Label>{t("asset.authType")}</Label>
-              <Select value={authType} onValueChange={setAuthType}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="password">
-                    {t("asset.authPassword")}
-                  </SelectItem>
-                  <SelectItem value="key">{t("asset.authKey")}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+          )}
 
-          {/* Auth-type specific fields */}
-          {authType === "password" && (
+          {/* SSH: Password (when auth_type=password) */}
+          {assetType === "ssh" && authType === "password" && (
             <div className="grid gap-2">
               <Label>{t("asset.password")}</Label>
               <div className="relative">
@@ -544,7 +804,36 @@ export function AssetForm({
             </div>
           )}
 
-          {authType === "key" && (
+          {/* Database / Redis: Password */}
+          {(assetType === "database" || assetType === "redis") && (
+            <div className="grid gap-2">
+              <Label>{t("asset.password")}</Label>
+              <div className="relative">
+                <Input
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="pr-9"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
+                  onClick={() => setShowPassword(!showPassword)}
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-3.5 w-3.5" />
+                  ) : (
+                    <Eye className="h-3.5 w-3.5" />
+                  )}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* SSH: Key config */}
+          {assetType === "ssh" && authType === "key" && (
             <div className="grid gap-3 border rounded-lg p-3">
               <div className="grid gap-2">
                 <Label>{t("asset.keySource")}</Label>
@@ -571,8 +860,8 @@ export function AssetForm({
                   <Label>{t("asset.selectKey")}</Label>
                   {managedKeys.length > 0 ? (
                     <Select
-                      value={String(keyId)}
-                      onValueChange={(v) => setKeyId(Number(v))}
+                      value={String(credentialId)}
+                      onValueChange={(v) => setCredentialId(Number(v))}
                     >
                       <SelectTrigger>
                         <SelectValue
@@ -585,7 +874,7 @@ export function AssetForm({
                         </SelectItem>
                         {managedKeys.map((k) => (
                           <SelectItem key={k.id} value={String(k.id)}>
-                            {k.name} ({k.keyType.toUpperCase()})
+                            {k.name} ({(k.keyType || "").toUpperCase()})
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -640,7 +929,6 @@ export function AssetForm({
                     <p className="text-xs text-muted-foreground">{t("asset.noLocalKeys")}</p>
                   )}
 
-                  {/* 已选的非发现密钥（手动浏览添加的） */}
                   {selectedKeyPaths
                     .filter((p) => !localKeys.some((k) => k.path === p))
                     .map((path) => (
@@ -651,7 +939,7 @@ export function AssetForm({
                           variant="ghost"
                           size="icon"
                           className="h-5 w-5 shrink-0"
-                          onClick={() => setSelectedKeyPaths(selectedKeyPaths.filter((p) => p !== path))}
+                          onClick={() => setSelectedKeyPaths(selectedKeyPaths.filter((p2) => p2 !== path))}
                         >
                           <Trash2 className="h-3 w-3" />
                         </Button>
@@ -685,12 +973,101 @@ export function AssetForm({
             </div>
           )}
 
+          {/* Database: extra fields */}
+          {assetType === "database" && (
+            <>
+              <div className="grid gap-2">
+                <Label>{t("asset.database")}</Label>
+                <Input
+                  value={database}
+                  onChange={(e) => setDatabase(e.target.value)}
+                  placeholder={t("asset.databasePlaceholder")}
+                />
+              </div>
+
+              {driver === "postgresql" && (
+                <div className="grid gap-2">
+                  <Label>{t("asset.sslMode")}</Label>
+                  <Select value={sslMode} onValueChange={setSslMode}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="disable">disable</SelectItem>
+                      <SelectItem value="require">require</SelectItem>
+                      <SelectItem value="verify-ca">verify-ca</SelectItem>
+                      <SelectItem value="verify-full">verify-full</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              <div className="grid gap-2">
+                <Label>{t("asset.params")}</Label>
+                <Input
+                  value={params}
+                  onChange={(e) => setParams(e.target.value)}
+                  placeholder={t("asset.paramsPlaceholder")}
+                />
+              </div>
+
+              <div className="flex items-center justify-between">
+                <Label>{t("asset.readOnly")}</Label>
+                <Switch checked={readOnly} onCheckedChange={setReadOnly} />
+              </div>
+
+              <div className="grid gap-2">
+                <Label>{t("asset.sshTunnel")}</Label>
+                <AssetSelect
+                  value={dbSshAssetId}
+                  onValueChange={setDbSshAssetId}
+                  filterType="ssh"
+                  placeholder={t("asset.sshTunnelNone")}
+                />
+              </div>
+            </>
+          )}
+
+          {/* Redis: extra fields */}
+          {assetType === "redis" && (
+            <>
+              <div className="grid gap-2">
+                <Label>{t("asset.redisDatabase")}</Label>
+                <Input
+                  type="number"
+                  value={redisDatabase}
+                  onChange={(e) => setRedisDatabase(Number(e.target.value))}
+                  className="[&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                />
+              </div>
+
+              <div className="flex items-center justify-between">
+                <Label>{t("asset.tls")}</Label>
+                <Switch checked={tls} onCheckedChange={setTls} />
+              </div>
+
+              <div className="grid gap-2">
+                <Label>{t("asset.sshTunnel")}</Label>
+                <AssetSelect
+                  value={redisSshAssetId}
+                  onValueChange={setRedisSshAssetId}
+                  filterType="ssh"
+                  placeholder={t("asset.sshTunnelNone")}
+                />
+              </div>
+            </>
+          )}
+
           {/* Test Connection */}
           <Button
             type="button"
             variant="outline"
             size="sm"
-            onClick={handleTestConnection}
+            onClick={
+              assetType === "ssh" ? handleTestConnection
+                : assetType === "database" ? handleTestDatabaseConnection
+                : handleTestRedisConnection
+            }
             disabled={testing || !host}
             className="gap-1 w-fit"
           >
@@ -701,12 +1078,9 @@ export function AssetForm({
           {/* Group - Tree Selector */}
           <div className="grid gap-2">
             <Label>{t("asset.group")}</Label>
-            <TreeSelect
+            <GroupSelect
               value={groupId}
               onValueChange={setGroupId}
-              nodes={groupTree}
-              placeholder={t("asset.ungrouped")}
-              placeholderIcon={folderIcon}
             />
           </div>
 

@@ -187,6 +187,7 @@ interface AIState {
   openNewConversationTab: () => string;
   closeConversationTab: (tabId: string) => void;
   setActiveAITab: (tabId: string | null) => void;
+  reorderOpenTabs: (fromIndex: number, toIndex: number) => void;
   clear: () => void;
 
   // 会话管理
@@ -412,6 +413,16 @@ export const useAIStore = create<AIState>((set, get) => {
     setActiveAITab: (tabId: string | null) => {
       set({ activeAITabId: tabId });
       syncCompat(tabId);
+    },
+
+    reorderOpenTabs: (fromIndex: number, toIndex: number) => {
+      set((state) => {
+        if (fromIndex === toIndex) return state;
+        const newTabs = [...state.openTabs];
+        const [moved] = newTabs.splice(fromIndex, 1);
+        newTabs.splice(toIndex, 0, moved);
+        return { openTabs: newTabs };
+      });
     },
 
     // === 向后兼容 ===

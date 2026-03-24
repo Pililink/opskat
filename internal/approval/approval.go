@@ -7,6 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/cago-frame/cago/pkg/logger"
+	"go.uber.org/zap"
 )
 
 // ApprovalRequest is sent from opsctl to the desktop app.
@@ -72,11 +75,15 @@ func (s *Server) Start(socketPath string) error {
 		// Try to connect - if successful, another instance is running
 		conn, err := net.Dial("unix", socketPath)
 		if err == nil {
-			_ = conn.Close()
+			if err := conn.Close(); err != nil {
+				logger.Default().Warn("close connection check", zap.Error(err))
+			}
 			return fmt.Errorf("another instance is already listening on %s", socketPath)
 		}
 		// Stale socket, remove it
-		_ = os.Remove(socketPath)
+		if err := os.Remove(socketPath); err != nil {
+			logger.Default().Warn("remove stale socket", zap.String("path", socketPath), zap.Error(err))
+		}
 	}
 
 	listener, err := net.Listen("unix", socketPath)
@@ -95,7 +102,9 @@ func (s *Server) Start(socketPath string) error {
 func (s *Server) Stop() {
 	close(s.done)
 	if s.listener != nil {
-		_ = s.listener.Close()
+		if err := s.listener.Close(); err != nil {
+			logger.Default().Warn("close listener", zap.Error(err))
+		}
 	}
 	s.wg.Wait()
 }
@@ -119,18 +128,26 @@ func (s *Server) acceptLoop() {
 
 func (s *Server) handleConn(conn net.Conn) {
 	defer s.wg.Done()
-	defer func() { _ = conn.Close() }()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			logger.Default().Warn("close client connection", zap.Error(err))
+		}
+	}()
 
 	var req ApprovalRequest
 	decoder := json.NewDecoder(conn)
 	if err := decoder.Decode(&req); err != nil {
 		resp := ApprovalResponse{Approved: false, Reason: "invalid request"}
-		_ = json.NewEncoder(conn).Encode(resp)
+		if err := json.NewEncoder(conn).Encode(resp); err != nil {
+			logger.Default().Warn("encode error response", zap.Error(err))
+		}
 		return
 	}
 
 	resp := s.handler(req)
-	_ = json.NewEncoder(conn).Encode(resp)
+	if err := json.NewEncoder(conn).Encode(resp); err != nil {
+		logger.Default().Warn("encode approval response", zap.Error(err))
+	}
 }
 
 // --- Client ---
@@ -142,7 +159,11 @@ func RequestApproval(socketPath string, req ApprovalRequest) (ApprovalResponse, 
 	if err != nil {
 		return ApprovalResponse{}, fmt.Errorf("cannot connect to desktop app (is it running?): %w", err)
 	}
-	defer func() { _ = conn.Close() }()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			logger.Default().Warn("close request connection", zap.Error(err))
+		}
+	}()
 
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
 		return ApprovalResponse{}, fmt.Errorf("send request: %w", err)

@@ -8,7 +8,7 @@ import { useAssetStore } from "@/stores/assetStore";
 import { group_entity } from "../../../wailsjs/go/models";
 import { UpdateGroup } from "../../../wailsjs/go/main/App";
 import { toast } from "sonner";
-import { getIconComponent } from "@/components/asset/IconPicker";
+import { getIconComponent, getIconColor } from "@/components/asset/IconPicker";
 
 interface GroupDetailProps {
   group: group_entity.Group;
@@ -71,7 +71,7 @@ export function GroupDetail({ group }: GroupDetailProps) {
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-2 px-4 py-3 border-b">
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
-          <GroupIcon className="h-4 w-4 text-primary" />
+          <GroupIcon className="h-4 w-4 text-primary" style={group.Icon ? { color: getIconColor(group.Icon) } : undefined} />
         </div>
         <div>
           <h2 className="font-semibold leading-tight">{group.Name}</h2>
@@ -106,6 +106,14 @@ export function GroupDetail({ group }: GroupDetailProps) {
               <p className="mt-0.5">{assetCount}</p>
             </div>
           </div>
+          {group.Description && (
+            <div className="mt-3 pt-3 border-t">
+              <span className="text-xs text-muted-foreground">
+                {t("asset.description")}
+              </span>
+              <p className="mt-0.5 text-sm whitespace-pre-wrap">{group.Description}</p>
+            </div>
+          )}
         </div>
 
         {/* Command Policy */}

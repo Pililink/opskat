@@ -24,9 +24,10 @@ Assets can be referenced by:
 
 | Command | Description |
 |---------|-------------|
-| `list assets [--type ssh\|database\|redis] [--group-id N]` | List assets with optional filters |
-| `list groups` | List all asset groups |
-| `get asset <asset>` | Get asset details (SSH config, etc.) |
+| `list assets [--type ssh\|database\|redis] [--group-id N]` | List assets with optional filters (no description) |
+| `list groups` | List all asset groups (no description) |
+| `get asset <asset>` | Get asset details including description and SSH config |
+| `get group <group>` | Get group details including description |
 | `create asset --type ssh --name X --host X --username X [--port N] [--auth-type key\|password] [--group-id N]` | Create SSH asset (needs approval) |
 | `create asset --type database --driver mysql\|postgresql --name X --host X --username X [--port N] [--read-only] [--ssh-asset ID]` | Create database asset |
 | `create asset --type redis --name X --host X [--port N] [--ssh-asset ID]` | Create Redis asset |

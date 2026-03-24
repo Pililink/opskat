@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"log"
 	"time"
+
+	"github.com/cago-frame/cago/pkg/logger"
+	"go.uber.org/zap"
 
 	"ops-cat/internal/model/entity/audit_entity"
 	"ops-cat/internal/repository/asset_repo"
@@ -128,7 +130,7 @@ func (a *AuditingExecutor) writeAuditLog(ctx context.Context, name string, argsJ
 
 	if repo := audit_repo.Audit(); repo != nil {
 		if err := repo.Create(context.Background(), entry); err != nil {
-			log.Printf("audit log write failed: %v", err)
+			logger.Default().Error("audit log write failed", zap.Error(err))
 		}
 	}
 }
@@ -166,7 +168,7 @@ func WriteAuditLog(ctx context.Context, entry *audit_entity.AuditLog) {
 	}
 	if repo := audit_repo.Audit(); repo != nil {
 		if err := repo.Create(context.Background(), entry); err != nil {
-			log.Printf("audit log write failed: %v", err)
+			logger.Default().Error("audit log write failed", zap.Error(err))
 		}
 	}
 }

@@ -13,6 +13,11 @@ import {
   ArrowUp,
   ArrowDown,
   ChevronsUp,
+  Pencil,
+  Copy,
+  Trash2,
+  TerminalSquare,
+  ExternalLink,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -35,7 +40,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import { getIconComponent } from "@/components/asset/IconPicker";
+import { getIconComponent, getIconColor } from "@/components/asset/IconPicker";
 import { useAssetStore } from "@/stores/assetStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { MoveAsset, MoveGroup } from "../../../wailsjs/go/main/App";
@@ -53,6 +58,7 @@ interface AssetTreeProps {
   onCopyAsset: (asset: asset_entity.Asset) => void;
   onConnectAsset: (asset: asset_entity.Asset) => void;
   onSelectAsset: (asset: asset_entity.Asset) => void;
+  onOpenInfoTab?: (type: 'asset' | 'group', id: number, name: string, icon?: string) => void;
 }
 
 export function AssetTree({
@@ -67,6 +73,7 @@ export function AssetTree({
   onCopyAsset,
   onConnectAsset,
   onSelectAsset,
+  onOpenInfoTab,
 }: AssetTreeProps) {
   const { t } = useTranslation();
   const isFullscreen = useFullscreen();
@@ -210,6 +217,8 @@ export function AssetTree({
         </div>
       </div>
       <ScrollArea className="flex-1 min-h-0">
+        <ContextMenu>
+        <ContextMenuTrigger className="block min-h-full">
         <div className="p-2 space-y-0.5">
           {childGroups(0).map((group) => (
             <GroupItem
@@ -233,6 +242,7 @@ export function AssetTree({
               onDeleteAsset={(asset: asset_entity.Asset) => setDeleteAssetConfirm(asset)}
               onMoveAsset={handleMoveAsset}
               onMoveGroup={handleMoveGroup}
+              onOpenInfoTab={onOpenInfoTab}
               depth={0}
               t={t}
             />
@@ -263,6 +273,7 @@ export function AssetTree({
               onDeleteAsset={(asset) => setDeleteAssetConfirm(asset)}
               onMoveAsset={handleMoveAsset}
               onMoveGroup={handleMoveGroup}
+              onOpenInfoTab={onOpenInfoTab}
               depth={0}
               t={t}
             />
@@ -273,6 +284,18 @@ export function AssetTree({
             </p>
           )}
         </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent>
+          <ContextMenuItem onClick={() => onAddAsset()}>
+            <Plus className="h-3.5 w-3.5 mr-1.5" />
+            {t("asset.addAsset")}
+          </ContextMenuItem>
+          <ContextMenuItem onClick={() => onAddGroup()}>
+            <FolderPlus className="h-3.5 w-3.5 mr-1.5" />
+            {t("asset.addGroup")}
+          </ContextMenuItem>
+        </ContextMenuContent>
+        </ContextMenu>
       </ScrollArea>
       <AlertDialog
         open={!!deleteConfirm}
@@ -350,6 +373,7 @@ function GroupItem({
   onDeleteAsset,
   onMoveAsset,
   onMoveGroup,
+  onOpenInfoTab,
   depth,
   t,
 }: {
@@ -372,6 +396,7 @@ function GroupItem({
   onDeleteAsset: (asset: asset_entity.Asset) => void;
   onMoveAsset: (id: number, direction: string) => void;
   onMoveGroup: (id: number, direction: string) => void;
+  onOpenInfoTab?: (type: 'asset' | 'group', id: number, name: string, icon?: string) => void;
   depth: number;
   t: (key: string) => string;
 }) {
@@ -392,7 +417,7 @@ function GroupItem({
       ) : (
         <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       )}
-      <GroupIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      <GroupIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" style={group.Icon ? { color: getIconColor(group.Icon) } : undefined} />
       <span className="truncate text-sidebar-foreground">{group.Name}</span>
       <span className="ml-auto text-xs text-muted-foreground">
         {totalCount}
@@ -406,10 +431,23 @@ function GroupItem({
         <ContextMenu>
           <ContextMenuTrigger>{groupRow}</ContextMenuTrigger>
           <ContextMenuContent>
+            <ContextMenuItem onClick={() => onAddAsset()}>
+              <Plus className="h-3.5 w-3.5 mr-1.5" />
+              {t("asset.addAsset")}
+            </ContextMenuItem>
+            <ContextMenuSeparator />
             <ContextMenuItem onClick={() => onGroupDetail(group)}>
+              <Eye className="h-3.5 w-3.5 mr-1.5" />
               {t("asset.groupDetail")}
             </ContextMenuItem>
+            {onOpenInfoTab && (
+              <ContextMenuItem onClick={() => onOpenInfoTab('group', group.ID, group.Name, group.Icon)}>
+                <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
+                {t("action.openInTab")}
+              </ContextMenuItem>
+            )}
             <ContextMenuItem onClick={() => onEditGroup(group)}>
+              <Pencil className="h-3.5 w-3.5 mr-1.5" />
               {t("action.edit")}
             </ContextMenuItem>
             <ContextMenuSeparator />
@@ -430,6 +468,7 @@ function GroupItem({
               className="text-destructive"
               onClick={() => onDeleteGroup(group.ID)}
             >
+              <Trash2 className="h-3.5 w-3.5 mr-1.5" />
               {t("action.delete")}
             </ContextMenuItem>
           </ContextMenuContent>
@@ -464,6 +503,7 @@ function GroupItem({
               onDeleteAsset={onDeleteAsset}
               onMoveAsset={onMoveAsset}
               onMoveGroup={onMoveGroup}
+              onOpenInfoTab={onOpenInfoTab}
               depth={depth + 1}
               t={t}
             />
@@ -493,13 +533,15 @@ function GroupItem({
                         clearTimeout(clickTimerRef.current);
                         clickTimerRef.current = null;
                       }
-                      if (!isConnecting) onConnectAsset(asset);
+                      if (asset.Type === "ssh" && !isConnecting) onConnectAsset(asset);
+                      else if (asset.Type === "database" || asset.Type === "redis") onConnectAsset(asset);
+                      else onSelectAsset(asset);
                     }}
                   >
                     {isConnecting ? (
                       <Loader2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground animate-spin" />
                     ) : (
-                      <AssetIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <AssetIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" style={asset.Icon ? { color: getIconColor(asset.Icon) } : undefined} />
                     )}
                     {connectedAssetIds.has(asset.ID) && (
                       <span className="h-1.5 w-1.5 rounded-full bg-success shrink-0" />
@@ -510,14 +552,24 @@ function GroupItem({
                   </div>
                 </ContextMenuTrigger>
                 <ContextMenuContent>
-                  <ContextMenuItem onClick={() => onConnectAsset(asset)} disabled={isConnecting}>
-                    {isConnecting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                    {t("asset.connect")}
-                  </ContextMenuItem>
+                  {asset.Type === "ssh" && (
+                    <ContextMenuItem onClick={() => onConnectAsset(asset)} disabled={isConnecting}>
+                      {isConnecting ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <TerminalSquare className="h-3.5 w-3.5 mr-1.5" />}
+                      {t("asset.connect")}
+                    </ContextMenuItem>
+                  )}
+                  {onOpenInfoTab && (
+                    <ContextMenuItem onClick={() => onOpenInfoTab('asset', asset.ID, asset.Name, asset.Icon)}>
+                      <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
+                      {t("action.openInTab")}
+                    </ContextMenuItem>
+                  )}
                   <ContextMenuItem onClick={() => onEditAsset(asset)}>
+                    <Pencil className="h-3.5 w-3.5 mr-1.5" />
                     {t("action.edit")}
                   </ContextMenuItem>
                   <ContextMenuItem onClick={() => onCopyAsset(asset)}>
+                    <Copy className="h-3.5 w-3.5 mr-1.5" />
                     {t("action.copy")}
                   </ContextMenuItem>
                   <ContextMenuSeparator />
@@ -538,6 +590,7 @@ function GroupItem({
                     className="text-destructive"
                     onClick={() => onDeleteAsset(asset)}
                   >
+                    <Trash2 className="h-3.5 w-3.5 mr-1.5" />
                     {t("action.delete")}
                   </ContextMenuItem>
                 </ContextMenuContent>

@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"sync"
+
 	"sync/atomic"
 	"time"
+
+	"github.com/cago-frame/cago/pkg/logger"
+	"go.uber.org/zap"
 )
 
 // Codex App Server JSON-RPC 2.0 适配器
@@ -264,7 +267,7 @@ func (item *codexItem) mcpResultText() string {
 func (s *CodexAppServer) handleNotification(msg codexJSONRPC, onEvent func(StreamEvent)) bool {
 	method := msg.Method
 	params := msg.Params
-	log.Printf("[Codex] notification: method=%s params=%s", method, string(params))
+	logger.Default().Debug("codex notification", zap.String("method", method), zap.String("params", string(params)))
 	switch method {
 	// ── 文本流式输出 ──
 	case "codex/event/agent_message_delta":
@@ -332,7 +335,7 @@ func (s *CodexAppServer) handleNotification(msg codexJSONRPC, onEvent func(Strea
 		s.handleUserInputRequest(msg.ID, params, onEvent)
 
 	case "codex/event/request_user_input":
-		log.Printf("[Codex] request_user_input (codex/event): params=%s", string(params))
+		logger.Default().Debug("codex request_user_input (codex/event)", zap.String("params", string(params)))
 
 	// ── 本地命令执行审批 ──
 	case "item/commandExecution/requestApproval":
@@ -419,7 +422,7 @@ func (s *CodexAppServer) handleNotification(msg codexJSONRPC, onEvent func(Strea
 		// 忽略
 
 	default:
-		log.Printf("[Codex] unhandled event: method=%s params=%s", method, string(params))
+		logger.Default().Debug("codex unhandled event", zap.String("method", method), zap.String("params", string(params)))
 	}
 
 	return false
@@ -564,13 +567,12 @@ func (s *CodexAppServer) handleUserInputRequest(requestID *int64, params json.Ra
 		Questions []codexUserInputQuestion `json:"questions"`
 	}
 	if err := json.Unmarshal(params, &req); err != nil || len(req.Questions) == 0 {
-		log.Printf("[Codex] handleUserInputRequest: parse failed or no questions, err=%v, params=%s", err, string(params))
+		logger.Default().Warn("codex handleUserInputRequest: parse failed or no questions", zap.Error(err), zap.String("params", string(params)))
 		return
 	}
 
 	q := req.Questions[0]
-	log.Printf("[Codex] handleUserInputRequest: questionID=%s header=%q question=%q options=%+v requestID=%v",
-		q.ID, q.Header, q.Question, q.Options, requestID)
+	logger.Default().Debug("codex handleUserInputRequest", zap.String("questionID", q.ID), zap.String("header", q.Header), zap.String("question", q.Question), zap.Any("options", q.Options), zap.Any("requestID", requestID))
 
 	// 不发 tool_start 事件：item/started 已在 requestUserInput 之前触发，由 handleItemStarted 处理
 	// 自动选择 "Approve this Session"（第二个选项）
@@ -580,7 +582,7 @@ func (s *CodexAppServer) handleUserInputRequest(requestID *int64, params json.Ra
 	} else if len(q.Options) > 0 {
 		answer = q.Options[0].Label // fallback: "Approve Once"
 	}
-	log.Printf("[Codex] handleUserInputRequest: auto-approve answer=%q", answer)
+	logger.Default().Debug("codex handleUserInputRequest: auto-approve", zap.String("answer", answer))
 
 	// Codex 期望的 response 格式: {"answers": {"questionId": {"answers": ["Allow"]}}}
 	responseResult := map[string]any{
@@ -598,7 +600,7 @@ func (s *CodexAppServer) handleUserInputRequest(requestID *int64, params json.Ra
 			Result: resultData,
 		}
 		if err := s.proc.WriteJSON(replyMsg); err != nil {
-			log.Printf("[Codex] resolveUserInput response write failed: %v", err)
+			logger.Default().Error("codex resolveUserInput response write failed", zap.Error(err))
 		}
 	} else {
 		_ = s.sendNotification("item/tool/resolveUserInput", map[string]any{
@@ -624,11 +626,11 @@ func (s *CodexAppServer) handleCommandApproval(requestID *int64, params json.Raw
 		Command  string `json:"command"`
 	}
 	if err := json.Unmarshal(params, &req); err != nil {
-		log.Printf("[Codex] handleCommandApproval: parse failed: %v, params=%s", err, string(params))
+		logger.Default().Warn("codex handleCommandApproval: parse failed", zap.Error(err), zap.String("params", string(params)))
 		return
 	}
 
-	log.Printf("[Codex] handleCommandApproval: itemID=%s reason=%q command=%q", req.ItemID, req.Reason, req.Command)
+	logger.Default().Debug("codex handleCommandApproval", zap.String("itemID", req.ItemID), zap.String("reason", req.Reason), zap.String("command", req.Command))
 
 	// 记录已审批的 item ID，避免 item/started 重复创建 tool block
 	s.approvedItems.Store(req.ItemID, struct{}{})
@@ -667,7 +669,7 @@ func (s *CodexAppServer) handleCommandApproval(requestID *int64, params json.Raw
 		s.approvedItems.Delete(req.ItemID)
 	}
 
-	log.Printf("[Codex] handleCommandApproval: decision=%s", decision)
+	logger.Default().Debug("codex handleCommandApproval: decision", zap.String("decision", decision))
 
 	// 回复审批决策
 	response := map[string]any{
@@ -684,11 +686,11 @@ func (s *CodexAppServer) handleCommandApproval(requestID *int64, params json.Raw
 			Result: resultData,
 		}
 		if err := s.proc.WriteJSON(replyMsg); err != nil {
-			log.Printf("[Codex] handleCommandApproval response write failed: %v", err)
+			logger.Default().Error("codex handleCommandApproval response write failed", zap.Error(err))
 		}
 	} else {
 		if err := s.sendNotification("item/commandExecution/resolveApproval", response); err != nil {
-			log.Printf("[Codex] handleCommandApproval notification failed: %v", err)
+			logger.Default().Error("codex handleCommandApproval notification failed", zap.Error(err))
 		}
 	}
 }

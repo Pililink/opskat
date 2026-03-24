@@ -33,6 +33,7 @@ export interface TerminalTab {
   id: string; // tab id (connectionId initially, then sessionId)
   assetId: number;
   assetName: string;
+  assetIcon: string;
   host: string;
   port: number;
   username: string;
@@ -133,16 +134,26 @@ function setRatioAtPath(
   return tree;
 }
 
+export interface InfoTab {
+  id: string;
+  type: 'asset' | 'group';
+  targetId: number;
+  name: string;
+  icon?: string;
+}
+
 interface TerminalState {
   tabs: TerminalTab[];
   activeTabId: string | null;
   assetInfoOpen: boolean;
+  infoTabs: InfoTab[];
   connectingAssetIds: Set<number>;
   connections: Record<string, ConnectionState>;
 
   connect: (
     assetId: number,
     assetName: string,
+    assetIcon: string,
     password: string,
     cols: number,
     rows: number,
@@ -152,9 +163,15 @@ interface TerminalState {
   disconnect: (sessionId: string) => void;
   setActiveTab: (id: string | null) => void;
   removeTab: (id: string) => void;
+  removeOtherTabs: (id: string) => void;
+  removeLeftTabs: (id: string) => void;
+  removeRightTabs: (id: string) => void;
+  reorderTabs: (fromIndex: number, toIndex: number) => void;
   markClosed: (id: string) => void;
   openAssetInfo: () => void;
   closeAssetInfo: () => void;
+  openInfoTab: (type: 'asset' | 'group', targetId: number, name: string, icon?: string) => void;
+  closeInfoTab: (id: string) => void;
 
   // Connection progress actions
   retryConnect: (connectionId: string, password?: string) => void;
@@ -175,10 +192,11 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   tabs: [],
   activeTabId: null,
   assetInfoOpen: false,
+  infoTabs: [],
   connectingAssetIds: new Set(),
   connections: {},
 
-  connect: async (assetId, assetName, password, cols, rows, metadata) => {
+  connect: async (assetId, assetName, assetIcon, password, cols, rows, metadata) => {
     // 如果已有正在连接或连接失败的 tab，直接切换过去
     const existingTab = get().tabs.find((t) => {
       if (t.assetId !== assetId) return false;
@@ -211,6 +229,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         id: connectionId,
         assetId,
         assetName,
+        assetIcon,
         host: metadata?.host || "",
         port: metadata?.port || 22,
         username: metadata?.username || "",
@@ -584,7 +603,8 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
     // 重新连接
     const newPassword = password !== undefined ? password : conn.password;
-    get().connect(conn.assetId, conn.assetName, newPassword, 80, 24, metadata);
+    const tab = get().tabs.find((t) => t.id === connectionId);
+    get().connect(conn.assetId, conn.assetName, tab?.assetIcon || "", newPassword, 80, 24, metadata);
 
     // 如果提供了新密码，保存到资产
     if (password && password !== conn.password) {
@@ -663,6 +683,39 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     });
   },
 
+  openInfoTab: (type, targetId, name, icon) => {
+    const { infoTabs } = get();
+    const existing = infoTabs.find((t) => t.type === type && t.targetId === targetId);
+    if (existing) {
+      set({ activeTabId: existing.id });
+      return;
+    }
+    const id = `info:${type}:${targetId}`;
+    set({
+      infoTabs: [...infoTabs, { id, type, targetId, name, icon }],
+      activeTabId: id,
+    });
+  },
+
+  closeInfoTab: (id) => {
+    const { infoTabs, activeTabId, tabs } = get();
+    const idx = infoTabs.findIndex((t) => t.id === id);
+    const newInfoTabs = infoTabs.filter((t) => t.id !== id);
+    let newActiveId = activeTabId;
+    if (activeTabId === id) {
+      // activate neighbor info tab, then terminal tab, then null
+      const neighbor = infoTabs[idx + 1] || infoTabs[idx - 1];
+      if (neighbor) {
+        newActiveId = neighbor.id;
+      } else if (tabs.length > 0) {
+        newActiveId = tabs[tabs.length - 1].id;
+      } else {
+        newActiveId = null;
+      }
+    }
+    set({ infoTabs: newInfoTabs, activeTabId: newActiveId });
+  },
+
   removeTab: (id) => {
     const tab = get().tabs.find((t) => t.id === id);
     if (tab) {
@@ -695,6 +748,45 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
             : null
           : state.activeTabId;
       return { tabs, activeTabId };
+    });
+  },
+
+  removeOtherTabs: (id) => {
+    const state = get();
+    const tabsToRemove = state.tabs.filter((t) => t.id !== id);
+    for (const tab of tabsToRemove) {
+      get().removeTab(tab.id);
+    }
+    set({ activeTabId: id });
+  },
+
+  removeLeftTabs: (id) => {
+    const state = get();
+    const idx = state.tabs.findIndex((t) => t.id === id);
+    if (idx <= 0) return;
+    const tabsToRemove = state.tabs.slice(0, idx);
+    for (const tab of tabsToRemove) {
+      get().removeTab(tab.id);
+    }
+  },
+
+  removeRightTabs: (id) => {
+    const state = get();
+    const idx = state.tabs.findIndex((t) => t.id === id);
+    if (idx < 0 || idx >= state.tabs.length - 1) return;
+    const tabsToRemove = state.tabs.slice(idx + 1);
+    for (const tab of tabsToRemove) {
+      get().removeTab(tab.id);
+    }
+  },
+
+  reorderTabs: (fromIndex, toIndex) => {
+    set((state) => {
+      if (fromIndex === toIndex) return state;
+      const newTabs = [...state.tabs];
+      const [moved] = newTabs.splice(fromIndex, 1);
+      newTabs.splice(toIndex, 0, moved);
+      return { tabs: newTabs };
     });
   },
 

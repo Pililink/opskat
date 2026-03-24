@@ -60,8 +60,10 @@ function ContextMenuTrigger({
     <span
       data-slot="context-menu-trigger"
       {...props}
+      className={cn("select-none", props.className)}
       onContextMenu={(e) => {
         e.preventDefault()
+        e.stopPropagation()
         ctx.setPosition({ x: e.clientX, y: e.clientY })
         ctx.onOpenChange(true)
       }}

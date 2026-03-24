@@ -4,10 +4,11 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"sync"
 	"time"
 
+	"github.com/cago-frame/cago/pkg/logger"
+	"go.uber.org/zap"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -70,9 +71,13 @@ func (e *poolEntry) close() {
 		return
 	}
 	e.closed = true
-	_ = e.client.Close()
+	if err := e.client.Close(); err != nil {
+		logger.Default().Warn("close ssh client", zap.Int64("assetID", e.assetID), zap.Error(err))
+	}
 	for _, c := range e.closers {
-		_ = c.Close()
+		if err := c.Close(); err != nil {
+			logger.Default().Warn("close intermediate connection", zap.Int64("assetID", e.assetID), zap.Error(err))
+		}
 	}
 }
 
@@ -141,9 +146,13 @@ func (p *Pool) Get(ctx context.Context, assetID int64) (*ssh.Client, error) {
 	if existing, ok := p.entries[assetID]; ok {
 		p.mu.Unlock()
 		// 关闭我们刚创建的，使用已存在的
-		_ = client.Close()
+		if err := client.Close(); err != nil {
+			logger.Default().Warn("close duplicate ssh client", zap.Int64("assetID", assetID), zap.Error(err))
+		}
 		for _, c := range closers {
-			_ = c.Close()
+			if err := c.Close(); err != nil {
+				logger.Default().Warn("close duplicate intermediate connection", zap.Int64("assetID", assetID), zap.Error(err))
+			}
 		}
 		if existing.isAlive() {
 			existing.acquire()
@@ -240,7 +249,7 @@ func (p *Pool) cleanupIdle() {
 		if entry, ok := p.entries[id]; ok {
 			delete(p.entries, id)
 			entry.close()
-			log.Printf("sshpool: closed idle connection for asset %d", id)
+			logger.Default().Info("closed idle connection", zap.Int64("assetID", id))
 		}
 	}
 	p.mu.Unlock()

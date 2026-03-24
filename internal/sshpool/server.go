@@ -6,13 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"os"
 	"path/filepath"
 	"sync"
 
+	"github.com/cago-frame/cago/pkg/logger"
 	"github.com/pkg/sftp"
+	"go.uber.org/zap"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -62,10 +63,14 @@ func (s *Server) Start(socketPath string) error {
 	if _, err := os.Stat(socketPath); err == nil {
 		conn, err := net.Dial("unix", socketPath)
 		if err == nil {
-			_ = conn.Close()
+			if closeErr := conn.Close(); closeErr != nil {
+				logger.Default().Warn("close probe connection", zap.String("path", socketPath), zap.Error(closeErr))
+			}
 			return fmt.Errorf("another instance is already listening on %s", socketPath)
 		}
-		_ = os.Remove(socketPath)
+		if err := os.Remove(socketPath); err != nil {
+			logger.Default().Warn("remove stale socket", zap.String("path", socketPath), zap.Error(err))
+		}
 	}
 
 	listener, err := net.Listen("unix", socketPath)
@@ -77,7 +82,7 @@ func (s *Server) Start(socketPath string) error {
 	s.wg.Add(1)
 	go s.acceptLoop()
 
-	log.Printf("sshpool: server listening on %s", socketPath)
+	logger.Default().Info("server listening", zap.String("path", socketPath))
 	return nil
 }
 
@@ -85,7 +90,9 @@ func (s *Server) Start(socketPath string) error {
 func (s *Server) Stop() {
 	close(s.done)
 	if s.listener != nil {
-		_ = s.listener.Close()
+		if err := s.listener.Close(); err != nil {
+			logger.Default().Warn("close listener", zap.Error(err))
+		}
 	}
 	s.wg.Wait()
 }
@@ -109,7 +116,11 @@ func (s *Server) acceptLoop() {
 
 func (s *Server) handleConn(conn net.Conn) {
 	defer s.wg.Done()
-	defer func() { _ = conn.Close() }()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			logger.Default().Warn("close client connection", zap.Error(err))
+		}
+	}()
 
 	reader := bufio.NewReader(conn)
 
@@ -155,7 +166,11 @@ func (s *Server) handleExec(conn net.Conn, reader *bufio.Reader, req ProxyReques
 		writeJSONResponse(conn, false, fmt.Sprintf("create session: %v", err))
 		return
 	}
-	defer func() { _ = session.Close() }()
+	defer func() {
+		if err := session.Close(); err != nil {
+			logger.Default().Warn("close ssh session", zap.Int64("assetID", req.AssetID), zap.Error(err))
+		}
+	}()
 
 	// 如果需要 PTY
 	if req.PTY {
@@ -218,7 +233,10 @@ func (s *Server) handleExec(conn net.Conn, reader *bufio.Reader, req ProxyReques
 		for {
 			n, err := stdout.Read(buf)
 			if n > 0 {
-				_ = WriteFrame(conn, FrameStdout, buf[:n])
+				if writeErr := WriteFrame(conn, FrameStdout, buf[:n]); writeErr != nil {
+					logger.Default().Warn("write stdout frame", zap.Int64("assetID", req.AssetID), zap.Error(writeErr))
+					break
+				}
 			}
 			if err != nil {
 				break
@@ -232,7 +250,10 @@ func (s *Server) handleExec(conn net.Conn, reader *bufio.Reader, req ProxyReques
 		for {
 			n, err := stderr.Read(buf)
 			if n > 0 {
-				_ = WriteFrame(conn, FrameStderr, buf[:n])
+				if writeErr := WriteFrame(conn, FrameStderr, buf[:n]); writeErr != nil {
+					logger.Default().Warn("write stderr frame", zap.Int64("assetID", req.AssetID), zap.Error(writeErr))
+					break
+				}
 			}
 			if err != nil {
 				break
@@ -246,15 +267,21 @@ func (s *Server) handleExec(conn net.Conn, reader *bufio.Reader, req ProxyReques
 		for {
 			frameType, payload, err := ReadFrame(reader)
 			if err != nil {
-				_ = stdin.Close()
+				if closeErr := stdin.Close(); closeErr != nil {
+					logger.Default().Warn("close stdin pipe", zap.Int64("assetID", req.AssetID), zap.Error(closeErr))
+				}
 				return
 			}
 			switch frameType {
 			case FrameStdin:
-				_, _ = stdin.Write(payload)
+				if _, writeErr := stdin.Write(payload); writeErr != nil {
+					logger.Default().Warn("write to stdin", zap.Int64("assetID", req.AssetID), zap.Error(writeErr))
+				}
 			case FrameResize:
-				if cols, rows, err := ParseResize(payload); err == nil {
-					_ = session.WindowChange(int(rows), int(cols))
+				if cols, rows, parseErr := ParseResize(payload); parseErr == nil {
+					if resizeErr := session.WindowChange(int(rows), int(cols)); resizeErr != nil {
+						logger.Default().Warn("window change", zap.Int64("assetID", req.AssetID), zap.Error(resizeErr))
+					}
 				}
 			}
 		}
@@ -266,12 +293,16 @@ func (s *Server) handleExec(conn net.Conn, reader *bufio.Reader, req ProxyReques
 		if exitErr, ok := err.(*ssh.ExitError); ok {
 			exitCode = exitErr.ExitStatus()
 		} else {
-			_ = WriteError(conn, err.Error())
+			if writeErr := WriteError(conn, err.Error()); writeErr != nil {
+				logger.Default().Warn("write error frame", zap.Int64("assetID", req.AssetID), zap.Error(writeErr))
+			}
 			return
 		}
 	}
 
-	_ = WriteExitCode(conn, exitCode)
+	if err := WriteExitCode(conn, exitCode); err != nil {
+		logger.Default().Warn("write exit code frame", zap.Int64("assetID", req.AssetID), zap.Error(err))
+	}
 	// 等待客户端读循环结束（连接关闭时自然退出）
 	<-done
 }
@@ -291,35 +322,53 @@ func (s *Server) handleUpload(conn net.Conn, reader *bufio.Reader, req ProxyRequ
 		writeJSONResponse(conn, false, fmt.Sprintf("create sftp client: %v", err))
 		return
 	}
-	defer func() { _ = sftpClient.Close() }()
+	defer func() {
+		if err := sftpClient.Close(); err != nil {
+			logger.Default().Warn("close sftp client for upload", zap.Int64("assetID", req.AssetID), zap.Error(err))
+		}
+	}()
 
 	writeJSONResponse(conn, true, "")
 
 	remoteFile, err := sftpClient.Create(req.DstPath)
 	if err != nil {
-		_ = WriteFrame(conn, FrameFileErr, []byte(fmt.Sprintf("create remote file: %v", err)))
+		if writeErr := WriteFrame(conn, FrameFileErr, []byte(fmt.Sprintf("create remote file: %v", err))); writeErr != nil {
+			logger.Default().Warn("write file error frame for upload", zap.Int64("assetID", req.AssetID), zap.Error(writeErr))
+		}
 		return
 	}
-	defer func() { _ = remoteFile.Close() }()
+	defer func() {
+		if err := remoteFile.Close(); err != nil {
+			logger.Default().Warn("close remote file for upload", zap.Int64("assetID", req.AssetID), zap.String("path", req.DstPath), zap.Error(err))
+		}
+	}()
 
 	// 读取 FileData 帧直到 FileEOF
 	for {
 		frameType, payload, err := ReadFrame(reader)
 		if err != nil {
-			_ = WriteFrame(conn, FrameFileErr, []byte(fmt.Sprintf("read frame: %v", err)))
+			if writeErr := WriteFrame(conn, FrameFileErr, []byte(fmt.Sprintf("read frame: %v", err))); writeErr != nil {
+				logger.Default().Warn("write file error frame for upload", zap.Int64("assetID", req.AssetID), zap.Error(writeErr))
+			}
 			return
 		}
 		switch frameType {
 		case FrameFileData:
 			if _, err := remoteFile.Write(payload); err != nil {
-				_ = WriteFrame(conn, FrameFileErr, []byte(fmt.Sprintf("write remote file: %v", err)))
+				if writeErr := WriteFrame(conn, FrameFileErr, []byte(fmt.Sprintf("write remote file: %v", err))); writeErr != nil {
+					logger.Default().Warn("write file error frame for upload", zap.Int64("assetID", req.AssetID), zap.Error(writeErr))
+				}
 				return
 			}
 		case FrameFileEOF:
-			_ = WriteFrame(conn, FrameOK, nil)
+			if writeErr := WriteFrame(conn, FrameOK, nil); writeErr != nil {
+				logger.Default().Warn("write ok frame for upload", zap.Int64("assetID", req.AssetID), zap.Error(writeErr))
+			}
 			return
 		default:
-			_ = WriteFrame(conn, FrameFileErr, []byte(fmt.Sprintf("unexpected frame type: 0x%02x", frameType)))
+			if writeErr := WriteFrame(conn, FrameFileErr, []byte(fmt.Sprintf("unexpected frame type: 0x%02x", frameType))); writeErr != nil {
+				logger.Default().Warn("write file error frame for upload", zap.Int64("assetID", req.AssetID), zap.Error(writeErr))
+			}
 			return
 		}
 	}
@@ -340,14 +389,22 @@ func (s *Server) handleDownload(conn net.Conn, req ProxyRequest) {
 		writeJSONResponse(conn, false, fmt.Sprintf("create sftp client: %v", err))
 		return
 	}
-	defer func() { _ = sftpClient.Close() }()
+	defer func() {
+		if err := sftpClient.Close(); err != nil {
+			logger.Default().Warn("close sftp client for download", zap.Int64("assetID", req.AssetID), zap.Error(err))
+		}
+	}()
 
 	remoteFile, err := sftpClient.Open(req.SrcPath)
 	if err != nil {
 		writeJSONResponse(conn, false, fmt.Sprintf("open remote file: %v", err))
 		return
 	}
-	defer func() { _ = remoteFile.Close() }()
+	defer func() {
+		if err := remoteFile.Close(); err != nil {
+			logger.Default().Warn("close remote file for download", zap.Int64("assetID", req.AssetID), zap.String("path", req.SrcPath), zap.Error(err))
+		}
+	}()
 
 	writeJSONResponse(conn, true, "")
 
@@ -361,11 +418,15 @@ func (s *Server) handleDownload(conn net.Conn, req ProxyRequest) {
 			}
 		}
 		if err == io.EOF {
-			_ = WriteFrame(conn, FrameFileEOF, nil)
+			if writeErr := WriteFrame(conn, FrameFileEOF, nil); writeErr != nil {
+				logger.Default().Warn("write file eof frame for download", zap.Int64("assetID", req.AssetID), zap.Error(writeErr))
+			}
 			return
 		}
 		if err != nil {
-			_ = WriteFrame(conn, FrameFileErr, []byte(fmt.Sprintf("read remote file: %v", err)))
+			if writeErr := WriteFrame(conn, FrameFileErr, []byte(fmt.Sprintf("read remote file: %v", err))); writeErr != nil {
+				logger.Default().Warn("write file error frame for download", zap.Int64("assetID", req.AssetID), zap.Error(writeErr))
+			}
 			return
 		}
 	}
@@ -393,7 +454,11 @@ func (s *Server) handleCopy(conn net.Conn, req ProxyRequest) {
 		writeJSONResponse(conn, false, fmt.Sprintf("create source sftp: %v", err))
 		return
 	}
-	defer func() { _ = srcSFTP.Close() }()
+	defer func() {
+		if err := srcSFTP.Close(); err != nil {
+			logger.Default().Warn("close source sftp client for copy", zap.Int64("assetID", req.SrcAssetID), zap.Error(err))
+		}
+	}()
 
 	dstSFTP, err := sftp.NewClient(dstClient)
 	if err != nil {
@@ -401,30 +466,46 @@ func (s *Server) handleCopy(conn net.Conn, req ProxyRequest) {
 		writeJSONResponse(conn, false, fmt.Sprintf("create destination sftp: %v", err))
 		return
 	}
-	defer func() { _ = dstSFTP.Close() }()
+	defer func() {
+		if err := dstSFTP.Close(); err != nil {
+			logger.Default().Warn("close destination sftp client for copy", zap.Int64("assetID", req.AssetID), zap.Error(err))
+		}
+	}()
 
 	srcFile, err := srcSFTP.Open(req.SrcPath)
 	if err != nil {
 		writeJSONResponse(conn, false, fmt.Sprintf("open source file: %v", err))
 		return
 	}
-	defer func() { _ = srcFile.Close() }()
+	defer func() {
+		if err := srcFile.Close(); err != nil {
+			logger.Default().Warn("close source file for copy", zap.String("path", req.SrcPath), zap.Error(err))
+		}
+	}()
 
 	dstFile, err := dstSFTP.Create(req.DstPath)
 	if err != nil {
 		writeJSONResponse(conn, false, fmt.Sprintf("create destination file: %v", err))
 		return
 	}
-	defer func() { _ = dstFile.Close() }()
+	defer func() {
+		if err := dstFile.Close(); err != nil {
+			logger.Default().Warn("close destination file for copy", zap.String("path", req.DstPath), zap.Error(err))
+		}
+	}()
 
 	writeJSONResponse(conn, true, "")
 
 	if _, err := io.Copy(dstFile, srcFile); err != nil {
-		_ = WriteFrame(conn, FrameError, []byte(fmt.Sprintf("copy: %v", err)))
+		if writeErr := WriteFrame(conn, FrameError, []byte(fmt.Sprintf("copy: %v", err))); writeErr != nil {
+			logger.Default().Warn("write error frame for copy", zap.Error(writeErr))
+		}
 		return
 	}
 
-	_ = WriteFrame(conn, FrameOK, nil)
+	if writeErr := WriteFrame(conn, FrameOK, nil); writeErr != nil {
+		logger.Default().Warn("write ok frame for copy", zap.Error(writeErr))
+	}
 }
 
 // handleSSHError 处理 SSH 连接错误，移除可能已断开的连接
@@ -451,7 +532,13 @@ func isConnectionError(err error) bool {
 
 func writeJSONResponse(conn net.Conn, ok bool, errMsg string) {
 	resp := ProxyResponse{OK: ok, Error: errMsg}
-	data, _ := json.Marshal(resp)
+	data, err := json.Marshal(resp)
+	if err != nil {
+		logger.Default().Warn("marshal JSON response", zap.Error(err))
+		return
+	}
 	data = append(data, '\n')
-	_, _ = conn.Write(data)
+	if _, err := conn.Write(data); err != nil {
+		logger.Default().Warn("write JSON response", zap.Error(err))
+	}
 }

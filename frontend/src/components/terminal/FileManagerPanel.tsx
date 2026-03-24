@@ -18,6 +18,7 @@ import {
   Upload,
   Download,
   FolderDown,
+  Trash2,
   X,
   CheckCircle2,
   XCircle,
@@ -26,8 +27,18 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
-import { SFTPListDir, SFTPGetwd } from "../../../wailsjs/go/main/App";
+import { SFTPListDir, SFTPGetwd, SFTPDelete } from "../../../wailsjs/go/main/App";
 import { OnFileDrop, OnFileDropOff } from "../../../wailsjs/runtime/runtime";
 import { useSFTPStore } from "@/stores/sftpStore";
 import { sftp_svc } from "../../../wailsjs/go/models";
@@ -48,6 +59,8 @@ function formatDate(timestamp: number): string {
     day: "2-digit",
   });
 }
+
+const HANDLE_PX = 4;
 
 // --- Context Menu ---
 
@@ -111,9 +124,20 @@ function FloatingMenu({
     };
   }, [onClose]);
 
-  const item = (action: string, icon: React.ReactNode, label: string) => (
+  const item = (
+    action: string,
+    icon: React.ReactNode,
+    label: string,
+    variant?: "destructive"
+  ) => (
     <div
-      className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm cursor-default hover:bg-accent hover:text-accent-foreground select-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground"
+      key={action}
+      className={cn(
+        "flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm cursor-default select-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        variant === "destructive"
+          ? "text-destructive hover:bg-destructive/10 [&_svg]:text-destructive"
+          : "hover:bg-accent hover:text-accent-foreground [&_svg:not([class*='text-'])]:text-muted-foreground"
+      )}
       onClick={() => onAction(action)}
     >
       {icon}
@@ -140,14 +164,16 @@ function FloatingMenu({
         ctx.entry.isDir ? (
           <>
             {item("open", <FolderOpen />, t("sftp.openFolder"))}
-            {item(
-              "downloadDir",
-              <FolderDown />,
-              t("sftp.downloadDir")
-            )}
+            {item("downloadDir", <FolderDown />, t("sftp.downloadDir"))}
+            <div className="-mx-1 my-1 h-px bg-border" />
+            {item("delete", <Trash2 />, t("action.delete"), "destructive")}
           </>
         ) : (
-          item("download", <Download />, t("sftp.download"))
+          <>
+            {item("download", <Download />, t("sftp.download"))}
+            <div className="-mx-1 my-1 h-px bg-border" />
+            {item("delete", <Trash2 />, t("action.delete"), "destructive")}
+          </>
         )
       ) : (
         <>
@@ -192,7 +218,6 @@ function TransferRow({
 
   return (
     <div className="flex items-center gap-1.5 text-[11px]">
-      {/* Icon */}
       <div className="shrink-0">
         {transfer.status === "active" && (
           <Loader2 className="h-3 w-3 animate-spin text-primary" />
@@ -205,7 +230,6 @@ function TransferRow({
         )}
       </div>
 
-      {/* Info */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1">
           {transfer.direction === "upload" ? (
@@ -238,7 +262,6 @@ function TransferRow({
         )}
       </div>
 
-      {/* Action */}
       <Button
         variant="ghost"
         size="icon-xs"
@@ -260,12 +283,14 @@ function TransferRow({
 interface FileManagerPanelProps {
   tabId: string;
   sessionId: string;
+  isOpen: boolean;
   width: number;
   onWidthChange: (width: number) => void;
 }
 
 export function FileManagerPanel({
   sessionId,
+  isOpen,
   width,
   onWidthChange,
 }: FileManagerPanelProps) {
@@ -282,12 +307,25 @@ export function FileManagerPanel({
   // Context menu
   const [ctxMenu, setCtxMenu] = useState<CtxMenuState | null>(null);
 
+  // Delete confirmation
+  const [deleteTarget, setDeleteTarget] = useState<{
+    path: string;
+    name: string;
+    isDir: boolean;
+  } | null>(null);
+
+  // Drag overlay
+  const [isDragOver, setIsDragOver] = useState(false);
+
   // Resize
   const [isResizing, setIsResizing] = useState(false);
 
+  // Track whether initial load happened
+  const loadedRef = useRef(false);
+  const lastSessionRef = useRef<string | null>(null);
+
   // Refs
   const panelRef = useRef<HTMLDivElement>(null);
-  const lastPathRef = useRef<Record<string, string>>({});
   const currentPathRef = useRef(currentPath);
   currentPathRef.current = currentPath;
 
@@ -298,7 +336,9 @@ export function FileManagerPanel({
   const startDownload = useSFTPStore((s) => s.startDownload);
   const startDownloadDir = useSFTPStore((s) => s.startDownloadDir);
   const allTransfers = useSFTPStore((s) => s.transfers);
-  const clearCompleted = useSFTPStore((s) => s.clearCompleted);
+  const clearCompletedForSession = useSFTPStore(
+    (s) => s.clearCompletedForSession
+  );
 
   const sessionTransfers = useMemo(
     () => Object.values(allTransfers).filter((t) => t.sessionId === sessionId),
@@ -316,7 +356,6 @@ export function FileManagerPanel({
         setEntries(result || []);
         setCurrentPath(dirPath);
         setPathInput(dirPath);
-        lastPathRef.current[sessionId] = dirPath;
       } catch (e) {
         setError(String(e));
       } finally {
@@ -326,18 +365,20 @@ export function FileManagerPanel({
     [sessionId]
   );
 
-  // Load initial directory on session change
+  // Load directory only once on first open, or when session changes
   useEffect(() => {
     if (!sessionId) return;
-    const lastPath = lastPathRef.current[sessionId];
-    if (lastPath) {
-      loadDir(lastPath);
-    } else {
-      SFTPGetwd(sessionId)
-        .then((home) => loadDir(home || "/"))
-        .catch(() => loadDir("/"));
+    if (lastSessionRef.current !== sessionId) {
+      lastSessionRef.current = sessionId;
+      loadedRef.current = false;
     }
-  }, [sessionId, loadDir]);
+    if (!isOpen || loadedRef.current) return;
+    loadedRef.current = true;
+
+    SFTPGetwd(sessionId)
+      .then((home) => loadDir(home || "/"))
+      .catch(() => loadDir("/"));
+  }, [sessionId, isOpen, loadDir]);
 
   // Auto-refresh after upload completes
   const doneUploadCount = sessionTransfers.filter(
@@ -373,9 +414,11 @@ export function FileManagerPanel({
       .catch(() => loadDir("/"));
   };
 
-  // === Drag and drop (Wails native) ===
+  // === Drag and drop (Wails native) — only when panel is open ===
   useEffect(() => {
+    if (!isOpen) return;
     const handler = (_x: number, _y: number, paths: string[]) => {
+      setIsDragOver(false);
       for (const path of paths) {
         startUploadFile(sessionId, path, currentPathRef.current + "/");
       }
@@ -384,15 +427,28 @@ export function FileManagerPanel({
     return () => {
       OnFileDropOff();
     };
-  }, [sessionId, startUploadFile]);
+  }, [isOpen, sessionId, startUploadFile]);
 
-  // === Resize handle ===
+  // Track Wails drop-target class via MutationObserver for drag overlay
+  useEffect(() => {
+    const el = panelRef.current;
+    if (!el || !isOpen) return;
+    const observer = new MutationObserver(() => {
+      setIsDragOver(el.classList.contains("wails-drop-target-active"));
+    });
+    observer.observe(el, { attributes: true, attributeFilter: ["class"] });
+    return () => observer.disconnect();
+  }, [isOpen]);
+
+  // === Resize handle (with body cursor lock) ===
   const handleResizeStart = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
       setIsResizing(true);
       const startX = e.clientX;
       const startWidth = width;
+      const prevCursor = document.body.style.cursor;
+      document.body.style.cursor = "col-resize";
 
       const onMove = (e: MouseEvent) => {
         const delta = startX - e.clientX;
@@ -400,6 +456,7 @@ export function FileManagerPanel({
       };
       const onUp = () => {
         setIsResizing(false);
+        document.body.style.cursor = prevCursor;
         document.removeEventListener("mousemove", onMove);
         document.removeEventListener("mouseup", onUp);
       };
@@ -408,6 +465,19 @@ export function FileManagerPanel({
     },
     [width, onWidthChange]
   );
+
+  // === Delete ===
+  const handleDelete = useCallback(async () => {
+    if (!deleteTarget) return;
+    try {
+      await SFTPDelete(sessionId, deleteTarget.path, deleteTarget.isDir);
+      loadDir(currentPath);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setDeleteTarget(null);
+    }
+  }, [deleteTarget, sessionId, currentPath, loadDir]);
 
   // === Context menu actions ===
   const handleCtxAction = useCallback(
@@ -427,10 +497,25 @@ export function FileManagerPanel({
           if (entry) startDownloadDir(sessionId, getFullPath(entry));
           break;
         case "upload":
-          startUpload(sessionId, currentPath.endsWith("/") ? currentPath : currentPath + "/");
+          startUpload(
+            sessionId,
+            currentPath.endsWith("/") ? currentPath : currentPath + "/"
+          );
           break;
         case "uploadDir":
-          startUploadDir(sessionId, currentPath.endsWith("/") ? currentPath : currentPath + "/");
+          startUploadDir(
+            sessionId,
+            currentPath.endsWith("/") ? currentPath : currentPath + "/"
+          );
+          break;
+        case "delete":
+          if (entry) {
+            setDeleteTarget({
+              path: getFullPath(entry),
+              name: entry.name,
+              isDir: entry.isDir,
+            });
+          }
           break;
         case "refresh":
           loadDir(currentPath);
@@ -461,195 +546,216 @@ export function FileManagerPanel({
     [entries]
   );
 
+  const totalWidth = width + HANDLE_PX;
+
   return (
-    <div className="flex shrink-0">
-      {/* Resize handle */}
+    <>
+      {/* Animated outer wrapper */}
       <div
-        className={cn(
-          "w-1 cursor-col-resize hover:bg-primary/20 transition-colors shrink-0",
-          isResizing && "bg-primary/30"
-        )}
-        onMouseDown={handleResizeStart}
-      />
-
-      {/* Panel */}
-      <div
-        ref={panelRef}
-        className="group/drop flex flex-col border-l bg-background relative overflow-hidden"
-        style={
-          {
-            width: width,
-            "--wails-drop-target": "drop",
-          } as React.CSSProperties
-        }
+        className="shrink-0 overflow-hidden transition-[width] duration-200 ease-out"
+        style={{
+          width: isOpen ? totalWidth : 0,
+          pointerEvents: isOpen ? "auto" : "none",
+        }}
       >
-        {/* Drop overlay */}
-        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center opacity-0 group-[.wails-drop-target-active]/drop:opacity-100 bg-primary/5 border-2 border-dashed border-primary/30 rounded transition-opacity">
-          <div className="flex flex-col items-center gap-1 text-primary/60">
-            <Upload className="h-5 w-5" />
-            <span className="text-xs">{t("sftp.dropToUpload")}</span>
-          </div>
-        </div>
-
-        {/* Path bar */}
-        <div className="flex items-center gap-0.5 px-1 py-1 border-b shrink-0">
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            onClick={goUp}
-            disabled={currentPath === "/"}
-            title={t("sftp.parentDir")}
-          >
-            <ArrowUp className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            onClick={goHome}
-            title={t("sftp.home")}
-          >
-            <Home className="h-3.5 w-3.5" />
-          </Button>
-          <Input
-            className="h-6 text-xs flex-1 min-w-0"
-            value={pathInput}
-            onChange={(e) => setPathInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") loadDir(pathInput.trim());
-            }}
-          />
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            onClick={() => loadDir(currentPath)}
-            title={t("sftp.refresh")}
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-
-        {/* File list */}
-        <ScrollArea className="flex-1 min-h-0">
+        <div className="flex h-full" style={{ minWidth: totalWidth }}>
+          {/* Resize handle */}
           <div
-            className="text-xs select-none"
-            onContextMenu={(e) => {
-              e.preventDefault();
-              setCtxMenu({ x: e.clientX, y: e.clientY, entry: null });
-            }}
-          >
-            {loading && (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-              </div>
+            className={cn(
+              "w-1 cursor-col-resize hover:bg-primary/20 transition-colors shrink-0",
+              isResizing && "bg-primary/30"
             )}
-            {error && !loading && (
-              <div className="flex flex-col items-center justify-center py-8 gap-1 px-2">
-                <span className="text-destructive text-center text-xs">
-                  {t("sftp.loadError")}
-                </span>
-                <span className="text-muted-foreground text-center break-all text-[10px]">
-                  {error}
-                </span>
-                <Button
-                  variant="outline"
-                  size="xs"
-                  onClick={() => loadDir(currentPath)}
-                  className="mt-1"
-                >
-                  {t("sftp.retry")}
-                </Button>
-              </div>
-            )}
-            {!loading && !error && entries.length === 0 && (
-              <div className="flex items-center justify-center py-8">
-                <span className="text-muted-foreground">{t("sftp.empty")}</span>
-              </div>
-            )}
-            {!loading && !error && (
-              <>
-                {currentPath !== "/" && (
-                  <div
-                    className="flex items-center gap-1.5 px-2 py-1 cursor-pointer hover:bg-muted/50"
-                    onDoubleClick={goUp}
-                  >
-                    <Folder className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                    <span className="flex-1 truncate">..</span>
-                  </div>
-                )}
-                {sortedEntries.map((entry) => {
-                  const fullPath = getFullPath(entry);
-                  const isSelected = selected === fullPath;
-                  return (
-                    <div
-                      key={entry.name}
-                      className={cn(
-                        "flex items-center gap-1.5 px-2 py-1 cursor-pointer transition-colors",
-                        isSelected
-                          ? "bg-primary/10 text-primary"
-                          : "hover:bg-muted/50"
-                      )}
-                      onClick={() => setSelected(fullPath)}
-                      onDoubleClick={() => {
-                        if (entry.isDir) loadDir(fullPath);
-                      }}
-                      onContextMenu={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setSelected(fullPath);
-                        setCtxMenu({ x: e.clientX, y: e.clientY, entry });
-                      }}
-                    >
-                      {entry.isDir ? (
-                        <Folder className="h-3.5 w-3.5 text-primary/70 shrink-0" />
-                      ) : (
-                        <File className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                      )}
-                      <span className="flex-1 truncate">{entry.name}</span>
-                      {!entry.isDir && (
-                        <span className="text-muted-foreground shrink-0 text-[10px]">
-                          {formatBytes(entry.size)}
-                        </span>
-                      )}
-                      <span className="text-muted-foreground shrink-0 text-[10px]">
-                        {formatDate(entry.modTime)}
-                      </span>
-                    </div>
-                  );
-                })}
-              </>
-            )}
-          </div>
-        </ScrollArea>
+            onMouseDown={handleResizeStart}
+          />
 
-        {/* Transfer section */}
-        {sessionTransfers.length > 0 && (
-          <div className="border-t shrink-0">
-            <div className="flex items-center justify-between px-2 py-0.5">
-              <span className="text-[11px] font-medium text-muted-foreground">
-                {t("sftp.transfers")}
-              </span>
+          {/* Panel */}
+          <div
+            ref={panelRef}
+            className="flex flex-col border-l bg-background relative overflow-hidden"
+            style={
+              {
+                width,
+                "--wails-drop-target": isOpen ? "drop" : undefined,
+              } as React.CSSProperties
+            }
+          >
+            {/* Drop overlay */}
+            {isDragOver && (
+              <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-primary/5 border-2 border-dashed border-primary/30 rounded animate-in fade-in-0 duration-150">
+                <div className="flex flex-col items-center gap-1 text-primary/60">
+                  <Upload className="h-5 w-5" />
+                  <span className="text-xs">{t("sftp.dropToUpload")}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Path bar */}
+            <div className="flex items-center gap-0.5 px-1 py-1 border-b shrink-0">
               <Button
                 variant="ghost"
                 size="icon-xs"
-                className="h-4 w-4"
-                onClick={clearCompleted}
-                title={t("sftp.clear")}
+                onClick={goUp}
+                disabled={currentPath === "/"}
+                title={t("sftp.parentDir")}
               >
-                <X className="h-2.5 w-2.5" />
+                <ArrowUp className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={goHome}
+                title={t("sftp.home")}
+              >
+                <Home className="h-3.5 w-3.5" />
+              </Button>
+              <Input
+                className="h-6 text-xs flex-1 min-w-0"
+                value={pathInput}
+                onChange={(e) => setPathInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") loadDir(pathInput.trim());
+                }}
+              />
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={() => loadDir(currentPath)}
+                title={t("sftp.refresh")}
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
               </Button>
             </div>
-            <ScrollArea className="max-h-28">
-              <div className="px-2 pb-1 space-y-0.5">
-                {sessionTransfers.map((transfer) => (
-                  <TransferRow
-                    key={transfer.transferId}
-                    transfer={transfer}
-                  />
-                ))}
+
+            {/* File list */}
+            <ScrollArea className="flex-1 min-h-0">
+              <div
+                className="text-xs select-none"
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setCtxMenu({ x: e.clientX, y: e.clientY, entry: null });
+                }}
+              >
+                {loading && (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                  </div>
+                )}
+                {error && !loading && (
+                  <div className="flex flex-col items-center justify-center py-8 gap-1 px-2">
+                    <span className="text-destructive text-center text-xs">
+                      {t("sftp.loadError")}
+                    </span>
+                    <span className="text-muted-foreground text-center break-all text-[10px]">
+                      {error}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="xs"
+                      onClick={() => loadDir(currentPath)}
+                      className="mt-1"
+                    >
+                      {t("sftp.retry")}
+                    </Button>
+                  </div>
+                )}
+                {!loading && !error && entries.length === 0 && (
+                  <div className="flex items-center justify-center py-8">
+                    <span className="text-muted-foreground">
+                      {t("sftp.empty")}
+                    </span>
+                  </div>
+                )}
+                {!loading && !error && (
+                  <>
+                    {currentPath !== "/" && (
+                      <div
+                        className="flex items-center gap-1.5 px-2 py-1 cursor-pointer hover:bg-muted/50"
+                        onDoubleClick={goUp}
+                      >
+                        <Folder className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        <span className="flex-1 truncate">..</span>
+                      </div>
+                    )}
+                    {sortedEntries.map((entry) => {
+                      const fullPath = getFullPath(entry);
+                      const isSelected = selected === fullPath;
+                      return (
+                        <div
+                          key={entry.name}
+                          className={cn(
+                            "flex items-center gap-1.5 px-2 py-1 cursor-pointer transition-colors",
+                            isSelected
+                              ? "bg-primary/10 text-primary"
+                              : "hover:bg-muted/50"
+                          )}
+                          onClick={() => setSelected(fullPath)}
+                          onDoubleClick={() => {
+                            if (entry.isDir) loadDir(fullPath);
+                          }}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setSelected(fullPath);
+                            setCtxMenu({
+                              x: e.clientX,
+                              y: e.clientY,
+                              entry,
+                            });
+                          }}
+                        >
+                          {entry.isDir ? (
+                            <Folder className="h-3.5 w-3.5 text-primary/70 shrink-0" />
+                          ) : (
+                            <File className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                          )}
+                          <span className="flex-1 truncate">{entry.name}</span>
+                          {!entry.isDir && (
+                            <span className="text-muted-foreground shrink-0 text-[10px]">
+                              {formatBytes(entry.size)}
+                            </span>
+                          )}
+                          <span className="text-muted-foreground shrink-0 text-[10px]">
+                            {formatDate(entry.modTime)}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </>
+                )}
               </div>
             </ScrollArea>
+
+            {/* Transfer section */}
+            {sessionTransfers.length > 0 && (
+              <div className="border-t shrink-0">
+                <div className="flex items-center justify-between px-2 py-0.5">
+                  <span className="text-[11px] font-medium text-muted-foreground">
+                    {t("sftp.transfers")}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    className="h-4 w-4"
+                    onClick={() => clearCompletedForSession(sessionId)}
+                    title={t("sftp.clear")}
+                  >
+                    <X className="h-2.5 w-2.5" />
+                  </Button>
+                </div>
+                <ScrollArea className="max-h-28">
+                  <div className="px-2 pb-1 space-y-0.5">
+                    {sessionTransfers.map((transfer) => (
+                      <TransferRow
+                        key={transfer.transferId}
+                        transfer={transfer}
+                      />
+                    ))}
+                  </div>
+                </ScrollArea>
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </div>
 
       {/* Context menu */}
@@ -660,6 +766,32 @@ export function FileManagerPanel({
           onClose={() => setCtxMenu(null)}
         />
       )}
-    </div>
+
+      {/* Delete confirmation */}
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("sftp.deleteConfirmTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("sftp.deleteConfirmDesc", { name: deleteTarget?.name })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("action.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={handleDelete}
+            >
+              {t("action.delete")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }

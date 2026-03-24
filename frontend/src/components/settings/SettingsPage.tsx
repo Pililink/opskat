@@ -64,10 +64,11 @@ import { ImportDialog, ImportCallOptions } from "@/components/settings/ImportDia
 import {
   Bot, Palette, Check, HardDrive, Download, Upload, Import,
   Github, LogOut, Loader2, Copy, ExternalLink, Eye, EyeOff, Shuffle, Keyboard,
-  Plus, Pencil, Trash2, MonitorDot, Terminal, RefreshCw, ChevronDown, ChevronUp,
-  Info,
+  Plus, Pencil, Trash2, MonitorDot, RefreshCw, ChevronDown, ChevronUp,
+  Info, Key,
 } from "lucide-react";
 import { ShortcutSettings } from "@/components/settings/ShortcutSettings";
+import { CredentialManager } from "@/components/settings/CredentialManager";
 import { TerminalThemeEditor } from "@/components/settings/TerminalThemeEditor";
 import { useTerminalThemeStore } from "@/stores/terminalThemeStore";
 import { builtinThemes, TerminalTheme } from "@/data/terminalThemes";
@@ -506,6 +507,11 @@ export function SettingsPage() {
   const { configure, configured, detectCLIs, localCLIs } = useAIStore();
   const { refresh } = useAssetStore();
 
+  // 启动 Tab 设置
+  const [startupTab, setStartupTab] = useState(
+    () => localStorage.getItem("startup_tab") || "last"
+  );
+
   // AI Provider
   const [providerType, setProviderType] = useState(
     localStorage.getItem("ai_provider_type") || "openai"
@@ -822,7 +828,7 @@ export function SettingsPage() {
           <TabsList>
             <TabsTrigger value="ai" className="gap-1">
               <Bot className="h-3.5 w-3.5" />
-              AI Provider
+              AI
             </TabsTrigger>
             <TabsTrigger value="import" className="gap-1">
               <Import className="h-3.5 w-3.5" />
@@ -831,6 +837,10 @@ export function SettingsPage() {
             <TabsTrigger value="backup" className="gap-1">
               <HardDrive className="h-3.5 w-3.5" />
               {t("backup.title")}
+            </TabsTrigger>
+            <TabsTrigger value="credentials" className="gap-1">
+              <Key className="h-3.5 w-3.5" />
+              {t("credential.title")}
             </TabsTrigger>
             <TabsTrigger value="shortcuts" className="gap-1">
               <Keyboard className="h-3.5 w-3.5" />
@@ -843,10 +853,6 @@ export function SettingsPage() {
             <TabsTrigger value="appearance" className="gap-1">
               <Palette className="h-3.5 w-3.5" />
               {t("nav.appearance")}
-            </TabsTrigger>
-            <TabsTrigger value="integration" className="gap-1">
-              <Terminal className="h-3.5 w-3.5" />
-              {t("integration.title")}
             </TabsTrigger>
             <TabsTrigger value="about" className="gap-1">
               <Info className="h-3.5 w-3.5" />
@@ -919,6 +925,7 @@ export function SettingsPage() {
                 </Button>
               </CardContent>
             </Card>
+            <IntegrationSection />
           </TabsContent>
 
           {/* 导入 */}
@@ -1026,6 +1033,18 @@ export function SettingsPage() {
                     </div>
                   </>
                 )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* 密钥管理 */}
+          <TabsContent value="credentials" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">{t("credential.title")}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <CredentialManager />
               </CardContent>
             </Card>
           </TabsContent>
@@ -1223,13 +1242,22 @@ export function SettingsPage() {
                     </SelectContent>
                   </Select>
                 </div>
+                <Separator />
+                <div className="grid gap-2">
+                  <Label>{t("appearance.startupTab")}</Label>
+                  <Select value={startupTab} onValueChange={(v) => {
+                    localStorage.setItem("startup_tab", v);
+                    setStartupTab(v);
+                  }}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="last">{t("appearance.startupTabLast")}</SelectItem>
+                      <SelectItem value="home">{t("appearance.startupTabHome")}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </CardContent>
             </Card>
-          </TabsContent>
-
-          {/* Integration */}
-          <TabsContent value="integration" className="space-y-4">
-            <IntegrationSection />
           </TabsContent>
 
           {/* About & Update */}

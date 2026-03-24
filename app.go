@@ -19,13 +19,14 @@ import (
 	"ops-cat/internal/ai"
 	"ops-cat/internal/approval"
 	"ops-cat/internal/bootstrap"
+	"ops-cat/internal/connpool"
 	"ops-cat/internal/embedded"
 	"ops-cat/internal/model/entity/asset_entity"
 	"ops-cat/internal/model/entity/audit_entity"
 	"ops-cat/internal/model/entity/conversation_entity"
 	"ops-cat/internal/model/entity/group_entity"
 	"ops-cat/internal/model/entity/plan_entity"
-	"ops-cat/internal/model/entity/ssh_key_entity"
+	"ops-cat/internal/model/entity/credential_entity"
 	"ops-cat/internal/repository/asset_repo"
 	"ops-cat/internal/repository/audit_repo"
 	"ops-cat/internal/repository/group_repo"
@@ -33,10 +34,10 @@ import (
 	"ops-cat/internal/service/asset_svc"
 	"ops-cat/internal/service/backup_svc"
 	"ops-cat/internal/service/conversation_svc"
+	"ops-cat/internal/service/credential_mgr_svc"
 	"ops-cat/internal/service/credential_svc"
 	"ops-cat/internal/service/import_svc"
 	"ops-cat/internal/service/sftp_svc"
-	"ops-cat/internal/service/ssh_key_svc"
 	"ops-cat/internal/service/ssh_svc"
 	"ops-cat/internal/service/update_svc"
 	"ops-cat/internal/sshpool"
@@ -241,19 +242,7 @@ func (d *appPoolDialer) DialAsset(ctx context.Context, assetID int64) (*ssh.Clie
 	}
 
 	// 解析凭证
-	password, key := "", ""
-	if sshCfg.AuthType == "password" && sshCfg.Password != "" {
-		decrypted, err := credential_svc.Default().Decrypt(sshCfg.Password)
-		if err == nil {
-			password = decrypted
-		}
-	}
-	if sshCfg.AuthType == "key" && sshCfg.KeySource == "managed" && sshCfg.KeyID > 0 {
-		privKey, err := ssh_key_svc.GetPrivateKey(d.app.langCtx(), sshCfg.KeyID)
-		if err == nil {
-			key = privKey
-		}
-	}
+	password, key := d.app.resolveSSHCredentials(sshCfg)
 
 	cfg := ssh_svc.ConnectConfig{
 		Host:        sshCfg.Host,
@@ -279,6 +268,37 @@ func (d *appPoolDialer) DialAsset(ctx context.Context, assetID int64) (*ssh.Clie
 	return d.app.sshManager.Dial(cfg)
 }
 
+// resolveSSHCredentials 从 SSHConfig 解析凭据（统一凭证优先，兼容内联密码和本地密钥文件）
+func (a *App) resolveSSHCredentials(sshCfg *asset_entity.SSHConfig) (password, key string) {
+	ctx := a.langCtx()
+	// 优先使用统一凭证
+	if sshCfg.CredentialID > 0 {
+		cred, err := credential_mgr_svc.Get(ctx, sshCfg.CredentialID)
+		if err == nil {
+			switch cred.Type {
+			case credential_entity.TypePassword:
+				decrypted, err := credential_svc.Default().Decrypt(cred.Password)
+				if err == nil {
+					return decrypted, ""
+				}
+			case credential_entity.TypeSSHKey:
+				privKey, err := credential_mgr_svc.GetDecryptedPrivateKey(ctx, sshCfg.CredentialID)
+				if err == nil {
+					return "", privKey
+				}
+			}
+		}
+	}
+	// 向后兼容：内联密码
+	if sshCfg.AuthType == "password" && sshCfg.Password != "" {
+		decrypted, err := credential_svc.Default().Decrypt(sshCfg.Password)
+		if err == nil {
+			return decrypted, ""
+		}
+	}
+	return "", ""
+}
+
 // resolveJumpHostsWithCredentials 递归解析跳板机链（含凭据解密）
 func (a *App) resolveJumpHostsWithCredentials(jumpHostID int64, maxDepth int) ([]ssh_svc.JumpHostEntry, error) {
 	if maxDepth <= 0 {
@@ -295,19 +315,7 @@ func (a *App) resolveJumpHostsWithCredentials(jumpHostID int64, maxDepth int) ([
 	}
 
 	// 解析跳板机凭证
-	password, key := "", ""
-	if jumpCfg.AuthType == "password" && jumpCfg.Password != "" {
-		decrypted, err := credential_svc.Default().Decrypt(jumpCfg.Password)
-		if err == nil {
-			password = decrypted
-		}
-	}
-	if jumpCfg.AuthType == "key" && jumpCfg.KeySource == "managed" && jumpCfg.KeyID > 0 {
-		privKey, err := ssh_key_svc.GetPrivateKey(a.langCtx(), jumpCfg.KeyID)
-		if err == nil {
-			key = privKey
-		}
-	}
+	password, key := a.resolveSSHCredentials(jumpCfg)
 
 	entry := ssh_svc.JumpHostEntry{
 		Host:     jumpCfg.Host,
@@ -595,6 +603,11 @@ func (a *App) ListGroups() ([]*group_entity.Group, error) {
 	return group_repo.Group().List(a.langCtx())
 }
 
+// GetGroup 获取单个分组详情
+func (a *App) GetGroup(id int64) (*group_entity.Group, error) {
+	return group_repo.Group().Find(a.langCtx(), id)
+}
+
 // CreateGroup 创建分组
 func (a *App) CreateGroup(group *group_entity.Group) error {
 	if err := group.Validate(); err != nil {
@@ -664,19 +677,14 @@ func (a *App) ConnectSSH(req SSHConnectRequest) (string, error) {
 	}
 
 	// 解析存储的凭证
+	storedPassword, storedKey := a.resolveSSHCredentials(sshCfg)
 	password := req.Password
 	key := req.Key
-	if password == "" && sshCfg.AuthType == "password" && sshCfg.Password != "" {
-		decrypted, err := credential_svc.Default().Decrypt(sshCfg.Password)
-		if err == nil {
-			password = decrypted
-		}
+	if password == "" {
+		password = storedPassword
 	}
-	if key == "" && sshCfg.AuthType == "key" && sshCfg.KeySource == "managed" && sshCfg.KeyID > 0 {
-		privKey, err := ssh_key_svc.GetPrivateKey(a.langCtx(), sshCfg.KeyID)
-		if err == nil {
-			key = privKey
-		}
+	if key == "" {
+		key = storedKey
 	}
 
 	connectCfg := ssh_svc.ConnectConfig{
@@ -771,19 +779,14 @@ func (a *App) ConnectSSHAsync(req SSHConnectRequest) (string, error) {
 		}
 
 		// 解析凭证
+		storedPassword, storedKey := a.resolveSSHCredentials(sshCfg)
 		password := req.Password
 		key := req.Key
-		if password == "" && sshCfg.AuthType == "password" && sshCfg.Password != "" {
-			decrypted, err := credential_svc.Default().Decrypt(sshCfg.Password)
-			if err == nil {
-				password = decrypted
-			}
+		if password == "" {
+			password = storedPassword
 		}
-		if key == "" && sshCfg.AuthType == "key" && sshCfg.KeySource == "managed" && sshCfg.KeyID > 0 {
-			privKey, err := ssh_key_svc.GetPrivateKey(a.langCtx(), sshCfg.KeyID)
-			if err == nil {
-				key = privKey
-			}
+		if key == "" {
+			key = storedKey
 		}
 
 		connectCfg := ssh_svc.ConnectConfig{
@@ -944,23 +947,10 @@ func (a *App) TestSSHConnection(configJSON string, plainPassword string) error {
 		return fmt.Errorf("配置解析失败: %w", err)
 	}
 
+	storedPassword, key := a.resolveSSHCredentials(&sshCfg)
 	password := plainPassword
-	var key string
-
-	// 如果没传明文密码，尝试解密存储的密码
-	if password == "" && sshCfg.AuthType == "password" && sshCfg.Password != "" {
-		decrypted, err := credential_svc.Default().Decrypt(sshCfg.Password)
-		if err == nil {
-			password = decrypted
-		}
-	}
-
-	// 处理密钥认证
-	if sshCfg.AuthType == "key" && sshCfg.KeySource == "managed" && sshCfg.KeyID > 0 {
-		privKey, err := ssh_key_svc.GetPrivateKey(a.langCtx(), sshCfg.KeyID)
-		if err == nil {
-			key = privKey
-		}
+	if password == "" {
+		password = storedPassword
 	}
 
 	connectCfg := ssh_svc.ConnectConfig{
@@ -984,6 +974,117 @@ func (a *App) TestSSHConnection(configJSON string, plainPassword string) error {
 	}
 
 	return a.sshManager.TestConnection(connectCfg)
+}
+
+// TestDatabaseConnection 测试数据库连接
+// configJSON: DatabaseConfig JSON，plainPassword: 明文密码
+func (a *App) TestDatabaseConnection(configJSON string, plainPassword string) error {
+	var cfg asset_entity.DatabaseConfig
+	if err := json.Unmarshal([]byte(configJSON), &cfg); err != nil {
+		return fmt.Errorf("配置解析失败: %w", err)
+	}
+	if plainPassword != "" {
+		cfg.Password = plainPassword
+	}
+
+	ctx, cancel := context.WithTimeout(a.langCtx(), 10*time.Second)
+	defer cancel()
+
+	db, tunnel, err := connpool.DialDatabase(ctx, &cfg, a.sshPool)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	if tunnel != nil {
+		defer tunnel.Close()
+	}
+	return nil
+}
+
+// TestRedisConnection 测试 Redis 连接
+// configJSON: RedisConfig JSON，plainPassword: 明文密码
+func (a *App) TestRedisConnection(configJSON string, plainPassword string) error {
+	var cfg asset_entity.RedisConfig
+	if err := json.Unmarshal([]byte(configJSON), &cfg); err != nil {
+		return fmt.Errorf("配置解析失败: %w", err)
+	}
+	if plainPassword != "" {
+		cfg.Password = plainPassword
+	}
+
+	ctx, cancel := context.WithTimeout(a.langCtx(), 10*time.Second)
+	defer cancel()
+
+	client, tunnel, err := connpool.DialRedis(ctx, &cfg, a.sshPool)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	if tunnel != nil {
+		defer tunnel.Close()
+	}
+	return nil
+}
+
+// ExecuteSQL 在指定数据库资产上执行 SQL 查询
+func (a *App) ExecuteSQL(assetID int64, sqlText string, database string) (string, error) {
+	asset, err := asset_svc.Asset().Get(a.langCtx(), assetID)
+	if err != nil {
+		return "", fmt.Errorf("资产不存在: %w", err)
+	}
+	if !asset.IsDatabase() {
+		return "", fmt.Errorf("资产不是数据库类型")
+	}
+	cfg, err := asset.GetDatabaseConfig()
+	if err != nil {
+		return "", fmt.Errorf("获取数据库配置失败: %w", err)
+	}
+	if database != "" {
+		cfg.Database = database
+	}
+
+	ctx, cancel := context.WithTimeout(a.langCtx(), 30*time.Second)
+	defer cancel()
+
+	db, tunnel, err := connpool.DialDatabase(ctx, cfg, a.sshPool)
+	if err != nil {
+		return "", fmt.Errorf("连接数据库失败: %w", err)
+	}
+	defer db.Close()
+	if tunnel != nil {
+		defer tunnel.Close()
+	}
+
+	return ai.ExecuteSQL(ctx, db, sqlText)
+}
+
+// ExecuteRedis 在指定 Redis 资产上执行命令
+func (a *App) ExecuteRedis(assetID int64, command string) (string, error) {
+	asset, err := asset_svc.Asset().Get(a.langCtx(), assetID)
+	if err != nil {
+		return "", fmt.Errorf("资产不存在: %w", err)
+	}
+	if !asset.IsRedis() {
+		return "", fmt.Errorf("资产不是 Redis 类型")
+	}
+	cfg, err := asset.GetRedisConfig()
+	if err != nil {
+		return "", fmt.Errorf("获取 Redis 配置失败: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(a.langCtx(), 30*time.Second)
+	defer cancel()
+
+	client, tunnel, err := connpool.DialRedis(ctx, cfg, a.sshPool)
+	if err != nil {
+		return "", fmt.Errorf("连接 Redis 失败: %w", err)
+	}
+	defer client.Close()
+	if tunnel != nil {
+		defer tunnel.Close()
+	}
+
+	return ai.ExecuteRedis(ctx, client, command)
 }
 
 // WriteSSH 向 SSH 终端写入数据（base64 编码）
@@ -1241,6 +1342,14 @@ type LocalSSHKeyInfo struct {
 	Path        string `json:"path"`
 	KeyType     string `json:"keyType"`
 	Fingerprint string `json:"fingerprint"`
+}
+
+// SFTPDelete 删除远程文件或目录
+func (a *App) SFTPDelete(sessionID, remotePath string, isDir bool) error {
+	if isDir {
+		return a.sftpService.RemoveDir(sessionID, remotePath)
+	}
+	return a.sftpService.Remove(sessionID, remotePath)
 }
 
 // ListLocalSSHKeys 扫描 ~/.ssh 目录，返回有效的私钥列表
@@ -2040,16 +2149,31 @@ func (a *App) ListBackupGists(token string) ([]*backup_svc.GistInfo, error) {
 	return backup_svc.ListBackupGists(token)
 }
 
-// --- SSH 密钥管理 ---
+// --- 密钥管理 ---
 
-// ListSSHKeys 列出所有 SSH 托管密钥
-func (a *App) ListSSHKeys() ([]*ssh_key_entity.SSHKey, error) {
-	return ssh_key_svc.List(a.langCtx())
+// ListCredentials 列出所有凭证
+func (a *App) ListCredentials() ([]*credential_entity.Credential, error) {
+	return credential_mgr_svc.List(a.langCtx())
+}
+
+// ListCredentialsByType 按类型列出凭证
+func (a *App) ListCredentialsByType(credType string) ([]*credential_entity.Credential, error) {
+	return credential_mgr_svc.ListByType(a.langCtx(), credType)
+}
+
+// CreatePasswordCredential 创建密码凭证
+func (a *App) CreatePasswordCredential(name, username, password, description string) (*credential_entity.Credential, error) {
+	return credential_mgr_svc.CreatePassword(a.langCtx(), credential_mgr_svc.CreatePasswordRequest{
+		Name:        name,
+		Username:    username,
+		Password:    password,
+		Description: description,
+	})
 }
 
 // GenerateSSHKey 生成新的 SSH 密钥对
-func (a *App) GenerateSSHKey(name, comment, keyType string, keySize int) (*ssh_key_entity.SSHKey, error) {
-	return ssh_key_svc.Generate(a.langCtx(), ssh_key_svc.GenerateRequest{
+func (a *App) GenerateSSHKey(name, comment, keyType string, keySize int) (*credential_entity.Credential, error) {
+	return credential_mgr_svc.GenerateSSHKey(a.langCtx(), credential_mgr_svc.GenerateKeyRequest{
 		Name:    name,
 		Comment: comment,
 		KeyType: keyType,
@@ -2058,7 +2182,7 @@ func (a *App) GenerateSSHKey(name, comment, keyType string, keySize int) (*ssh_k
 }
 
 // ImportSSHKeyFile 通过文件选择框导入 SSH 密钥
-func (a *App) ImportSSHKeyFile(name, comment string) (*ssh_key_entity.SSHKey, error) {
+func (a *App) ImportSSHKeyFile(name, comment string) (*credential_entity.Credential, error) {
 	filePath, err := wailsRuntime.OpenFileDialog(a.ctx, wailsRuntime.OpenDialogOptions{
 		Title: "选择 SSH 私钥文件",
 	})
@@ -2068,26 +2192,33 @@ func (a *App) ImportSSHKeyFile(name, comment string) (*ssh_key_entity.SSHKey, er
 	if filePath == "" {
 		return nil, nil
 	}
-	return ssh_key_svc.ImportFromFile(a.langCtx(), name, comment, filePath)
+	return credential_mgr_svc.ImportSSHKeyFromFile(a.langCtx(), name, comment, filePath)
 }
 
 // ImportSSHKeyPEM 通过粘贴 PEM 内容导入 SSH 密钥
-func (a *App) ImportSSHKeyPEM(name, comment, pemData string) (*ssh_key_entity.SSHKey, error) {
-	return ssh_key_svc.ImportFromPEM(a.langCtx(), name, comment, pemData)
+func (a *App) ImportSSHKeyPEM(name, comment, pemData string) (*credential_entity.Credential, error) {
+	return credential_mgr_svc.ImportSSHKeyFromPEM(a.langCtx(), name, comment, pemData)
 }
 
-// UpdateSSHKey 更新 SSH 密钥名称和注释
-func (a *App) UpdateSSHKey(id int64, name, comment string) (*ssh_key_entity.SSHKey, error) {
-	return ssh_key_svc.Update(a.langCtx(), ssh_key_svc.UpdateRequest{
-		ID:      id,
-		Name:    name,
-		Comment: comment,
+// UpdateCredential 更新凭证
+func (a *App) UpdateCredential(id int64, name, comment, description, username string) (*credential_entity.Credential, error) {
+	return credential_mgr_svc.Update(a.langCtx(), credential_mgr_svc.UpdateRequest{
+		ID:          id,
+		Name:        name,
+		Comment:     comment,
+		Description: description,
+		Username:    username,
 	})
 }
 
-// GetSSHKeyUsage 获取引用此 SSH 密钥的资产名称列表
-func (a *App) GetSSHKeyUsage(id int64) ([]string, error) {
-	assets, err := asset_repo.Asset().FindBySSHKeyID(a.langCtx(), id)
+// UpdateCredentialPassword 更新密码凭证的密码
+func (a *App) UpdateCredentialPassword(id int64, password string) error {
+	return credential_mgr_svc.UpdatePassword(a.langCtx(), id, password)
+}
+
+// GetCredentialUsage 获取引用此凭证的资产名称列表
+func (a *App) GetCredentialUsage(id int64) ([]string, error) {
+	assets, err := asset_repo.Asset().FindByCredentialID(a.langCtx(), id)
 	if err != nil {
 		return nil, err
 	}
@@ -2098,18 +2229,18 @@ func (a *App) GetSSHKeyUsage(id int64) ([]string, error) {
 	return names, nil
 }
 
-// DeleteSSHKey 删除 SSH 密钥
-func (a *App) DeleteSSHKey(id int64) error {
-	return ssh_key_svc.Delete(a.langCtx(), id)
+// DeleteCredential 删除凭证
+func (a *App) DeleteCredential(id int64) error {
+	return credential_mgr_svc.Delete(a.langCtx(), id)
 }
 
-// GetSSHKeyPublicKey 获取密钥公钥（用于复制）
-func (a *App) GetSSHKeyPublicKey(id int64) (string, error) {
-	key, err := ssh_key_svc.Get(a.langCtx(), id)
+// GetCredentialPublicKey 获取 SSH 密钥凭证的公钥（用于复制）
+func (a *App) GetCredentialPublicKey(id int64) (string, error) {
+	cred, err := credential_mgr_svc.Get(a.langCtx(), id)
 	if err != nil {
 		return "", err
 	}
-	return key.PublicKey, nil
+	return cred.PublicKey, nil
 }
 
 // ImportFromGist 从 Gist 导入备份

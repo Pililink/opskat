@@ -8,7 +8,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
 	"strings"
+
+	"github.com/cago-frame/cago/pkg/logger"
+	"go.uber.org/zap"
 )
 
 // OpenAIProvider OpenAI 兼容 API provider
@@ -84,7 +88,11 @@ func (p *OpenAIProvider) Chat(ctx context.Context, messages []Message, tools []T
 		return nil, fmt.Errorf("请求失败: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		defer func() { _ = resp.Body.Close() }()
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				logger.Default().Warn("close HTTP response body", zap.Error(err))
+			}
+		}()
 		errBody, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("API 错误 %d: %s", resp.StatusCode, string(errBody))
 	}
@@ -96,7 +104,11 @@ func (p *OpenAIProvider) Chat(ctx context.Context, messages []Message, tools []T
 
 func (p *OpenAIProvider) readStream(ctx context.Context, body io.ReadCloser, ch chan<- StreamEvent) {
 	defer close(ch)
-	defer func() { _ = body.Close() }()
+	defer func() {
+		if err := body.Close(); err != nil {
+			logger.Default().Warn("close SSE stream body", zap.Error(err))
+		}
+	}()
 
 	// 累积 tool calls（流式中 tool_calls 是分片的）
 	toolCallMap := make(map[int]*ToolCall)

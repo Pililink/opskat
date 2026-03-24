@@ -17,14 +17,41 @@ import { PlanApprovalDialog } from "@/components/approval/PlanApprovalDialog";
 import { useAssetStore } from "@/stores/assetStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useAIStore } from "@/stores/aiStore";
+import { useQueryStore } from "@/stores/queryStore";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { asset_entity, group_entity } from "../wailsjs/go/models";
+import { WindowToggleMaximise } from "../wailsjs/runtime/runtime";
 
 const AI_TAB_PREFIX = "ai:";
+const QUERY_TAB_PREFIX = "query:";
 
 function App() {
-  const [openPageTabs, setOpenPageTabs] = useState<string[]>([]);
-  const [activePageTab, setActivePageTab] = useState<string | null>(null);
+  const suppressAIAutoActivation = useRef(false);
+  const startupTabSetting = useRef(localStorage.getItem("startup_tab") || "last");
+
+  const [openPageTabs, setOpenPageTabs] = useState<string[]>(() => {
+    if (startupTabSetting.current === "last") {
+      const lastTab = localStorage.getItem("last_active_tab");
+      if (lastTab && !lastTab.startsWith(AI_TAB_PREFIX)) {
+        return [lastTab];
+      }
+    }
+    return [];
+  });
+  const [activePageTab, setActivePageTab] = useState<string | null>(() => {
+    if (startupTabSetting.current === "home") {
+      suppressAIAutoActivation.current = true;
+      return null;
+    }
+    const lastTab = localStorage.getItem("last_active_tab");
+    if (lastTab === null) return null;
+    if (lastTab === "") {
+      suppressAIAutoActivation.current = true;
+      return null;
+    }
+    if (lastTab.startsWith(AI_TAB_PREFIX)) return null;
+    return lastTab;
+  });
 
   const activePage = activePageTab || "home";
 
@@ -48,6 +75,10 @@ function App() {
       const aiTabId = pageId.slice(AI_TAB_PREFIX.length);
       useAIStore.getState().closeConversationTab(aiTabId);
       setActivePageTab((prev) => (prev === pageId ? null : prev));
+    } else if (pageId.startsWith(QUERY_TAB_PREFIX)) {
+      const assetId = Number(pageId.slice(QUERY_TAB_PREFIX.length));
+      useQueryStore.getState().closeQueryTab(`query:${assetId}`);
+      setActivePageTab((prev) => (prev === pageId ? null : prev));
     } else {
       setOpenPageTabs((prev) => prev.filter((id) => id !== pageId));
       setActivePageTab((prev) => (prev === pageId ? null : prev));
@@ -60,6 +91,24 @@ function App() {
 
   const handleOpenConversation = useCallback((tabId: string) => {
     setActivePageTab(AI_TAB_PREFIX + tabId);
+  }, []);
+
+  // 双击拖拽区域最大化/还原窗口
+  useEffect(() => {
+    const handleDblClick = (e: MouseEvent) => {
+      let el = e.target as HTMLElement | null;
+      while (el) {
+        const drag = getComputedStyle(el).getPropertyValue("--wails-draggable").trim();
+        if (drag === "no-drag") return;
+        if (drag === "drag") {
+          WindowToggleMaximise();
+          return;
+        }
+        el = el.parentElement;
+      }
+    };
+    window.addEventListener("dblclick", handleDblClick);
+    return () => window.removeEventListener("dblclick", handleDblClick);
   }, []);
 
   const [sidebarHidden, setSidebarHidden] = useState(
@@ -131,9 +180,15 @@ function App() {
     activePageTab,
   });
 
+  // 持久化当前活动 tab
+  useEffect(() => {
+    localStorage.setItem("last_active_tab", activePageTab || "");
+  }, [activePageTab]);
+
   // 启动时自动激活 AI store 中已打开的第一个 tab
   const aiActiveTabId = useAIStore((s) => s.activeAITabId);
   useEffect(() => {
+    if (suppressAIAutoActivation.current) return;
     if (aiActiveTabId && !activePageTab) {
       setActivePageTab(AI_TAB_PREFIX + aiActiveTabId);
     }
@@ -184,11 +239,22 @@ const { assets, groups, selectedAssetId, selectedGroupId, selectAsset, selectGro
     openAssetInfo();
   };
 
+  const handleOpenInfoTab = useCallback((type: 'asset' | 'group', id: number, name: string, icon?: string) => {
+    useTerminalStore.getState().openInfoTab(type, id, name, icon);
+    setActivePageTab(null);
+  }, []);
+
   const handleDeleteAsset = async (id: number) => {
     await deleteAsset(id);
   };
 
   const handleConnectAsset = async (asset: asset_entity.Asset) => {
+    if (asset.Type === "database" || asset.Type === "redis") {
+      useQueryStore.getState().openQueryTab(asset);
+      setActivePageTab(QUERY_TAB_PREFIX + asset.ID);
+      return;
+    }
+    if (asset.Type !== "ssh") return;
     const assetPath = getAssetPath(asset);
     let metadata: { host: string; port: number; username: string } | undefined;
     try {
@@ -200,7 +266,7 @@ const { assets, groups, selectedAssetId, selectedGroupId, selectAsset, selectGro
       };
     } catch { /* ignore parse errors */ }
     try {
-      await connect(asset.ID, assetPath, "", 80, 24, metadata);
+      await connect(asset.ID, assetPath, asset.Icon || "", "", 80, 24, metadata);
       setActivePageTab(null);
     } catch (e) {
       toast.error(`${assetPath}: ${String(e)}`);
@@ -251,6 +317,7 @@ const { assets, groups, selectedAssetId, selectedGroupId, selectAsset, selectGro
               onCopyAsset={handleCopyAsset}
               onConnectAsset={handleConnectAsset}
               onSelectAsset={handleSelectAsset}
+              onOpenInfoTab={handleOpenInfoTab}
             />
             {/* Resize handle */}
             {!assetTreeCollapsed && (

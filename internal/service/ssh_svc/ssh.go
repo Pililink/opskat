@@ -10,6 +10,8 @@ import (
 
 	"ops-cat/internal/model/entity/asset_entity"
 
+	"github.com/cago-frame/cago/pkg/logger"
+	"go.uber.org/zap"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/net/proxy"
 )
@@ -20,7 +22,7 @@ type sharedClient struct {
 	mu       sync.Mutex
 	refCount int
 	closers  []io.Closer // 跳板机 client 等额外资源
-	closed bool
+	closed   bool
 }
 
 func newSharedClient(client *ssh.Client, closers []io.Closer) *sharedClient {
@@ -43,9 +45,13 @@ func (sc *sharedClient) release() {
 	sc.refCount--
 	if sc.refCount <= 0 && !sc.closed {
 		sc.closed = true
-		_ = sc.client.Close()
+		if err := sc.client.Close(); err != nil {
+			logger.Default().Warn("close client", zap.Error(err))
+		}
 		for _, c := range sc.closers {
-			_ = c.Close()
+			if err := c.Close(); err != nil {
+				logger.Default().Warn("close jump host resource", zap.Error(err))
+			}
 		}
 	}
 }
@@ -93,7 +99,9 @@ func (s *Session) Close() {
 		return
 	}
 	s.closed = true
-	_ = s.session.Close()
+	if err := s.session.Close(); err != nil {
+		logger.Default().Warn("close session", zap.String("sessionID", s.ID), zap.Error(err))
+	}
 	s.shared.release()
 	if s.onClosed != nil {
 		go s.onClosed(s.ID)
@@ -116,7 +124,7 @@ func (s *Session) IsClosed() bool {
 type Manager struct {
 	sessions sync.Map // map[string]*Session
 	counter  int64
-	mu           sync.Mutex
+	mu       sync.Mutex
 }
 
 // NewManager 创建会话管理器
@@ -243,24 +251,32 @@ func (m *Manager) createSession(shared *sharedClient, assetID int64, cols, rows 
 		ssh.TTY_OP_ISPEED: 14400,
 		ssh.TTY_OP_OSPEED: 14400,
 	}); err != nil {
-		_ = session.Close()
+		if closeErr := session.Close(); closeErr != nil {
+			logger.Default().Warn("close session after PTY request failure", zap.Error(closeErr))
+		}
 		return "", fmt.Errorf("请求PTY失败: %w", err)
 	}
 
 	stdin, err := session.StdinPipe()
 	if err != nil {
-		_ = session.Close()
+		if closeErr := session.Close(); closeErr != nil {
+			logger.Default().Warn("close session after stdin pipe failure", zap.Error(closeErr))
+		}
 		return "", fmt.Errorf("获取stdin失败: %w", err)
 	}
 
 	stdout, err := session.StdoutPipe()
 	if err != nil {
-		_ = session.Close()
+		if closeErr := session.Close(); closeErr != nil {
+			logger.Default().Warn("close session after stdout pipe failure", zap.Error(closeErr))
+		}
 		return "", fmt.Errorf("获取stdout失败: %w", err)
 	}
 
 	if err := session.Shell(); err != nil {
-		_ = session.Close()
+		if closeErr := session.Close(); closeErr != nil {
+			logger.Default().Warn("close session after shell start failure", zap.Error(closeErr))
+		}
 		return "", fmt.Errorf("启动shell失败: %w", err)
 	}
 
@@ -330,7 +346,9 @@ func (m *Manager) dial(cfg ConnectConfig, sshConfig *ssh.ClientConfig, targetAdd
 		emitProgress(&cfg, "auth", "正在认证...")
 		c, chans, reqs, err := ssh.NewClientConn(conn, targetAddr, sshConfig)
 		if err != nil {
-			_ = conn.Close()
+			if closeErr := conn.Close(); closeErr != nil {
+				logger.Default().Warn("close proxy connection after handshake failure", zap.Error(closeErr))
+			}
 			return nil, nil, fmt.Errorf("SSH握手失败: %w", err)
 		}
 		return ssh.NewClient(c, chans, reqs), closers, nil
@@ -378,7 +396,9 @@ func (m *Manager) dialViaJumpHosts(cfg ConnectConfig, targetConfig *ssh.ClientCo
 
 		c, chans, reqs, err := ssh.NewClientConn(conn, firstAddr, firstConfig)
 		if err != nil {
-			_ = conn.Close()
+			if closeErr := conn.Close(); closeErr != nil {
+				logger.Default().Warn("close proxy connection after jump host handshake failure", zap.Error(closeErr))
+			}
 			return nil, nil, fmt.Errorf("跳板机SSH握手失败: %w", err)
 		}
 		currentClient = ssh.NewClient(c, chans, reqs)
@@ -400,7 +420,9 @@ func (m *Manager) dialViaJumpHosts(cfg ConnectConfig, targetConfig *ssh.ClientCo
 		jumpAuth, err := buildAuthMethods(jump.AuthType, jump.Password, jump.Key, nil, nil)
 		if err != nil {
 			for _, c := range closers {
-				_ = c.Close()
+				if closeErr := c.Close(); closeErr != nil {
+					logger.Default().Warn("close jump host chain resource during auth config cleanup", zap.Error(closeErr))
+				}
 			}
 			return nil, nil, fmt.Errorf("跳板机认证配置失败: %w", err)
 		}
@@ -414,16 +436,22 @@ func (m *Manager) dialViaJumpHosts(cfg ConnectConfig, targetConfig *ssh.ClientCo
 		conn, err := currentClient.Dial("tcp", jumpAddr)
 		if err != nil {
 			for _, c := range closers {
-				_ = c.Close()
+				if closeErr := c.Close(); closeErr != nil {
+					logger.Default().Warn("close jump host chain resource during dial cleanup", zap.Error(closeErr))
+				}
 			}
 			return nil, nil, fmt.Errorf("通过跳板机连接下一跳失败: %w", err)
 		}
 
 		c, chans, reqs, err := ssh.NewClientConn(conn, jumpAddr, jumpConfig)
 		if err != nil {
-			_ = conn.Close()
+			if closeErr := conn.Close(); closeErr != nil {
+				logger.Default().Warn("close jump host connection after handshake failure", zap.Error(closeErr))
+			}
 			for _, c := range closers {
-				_ = c.Close()
+				if closeErr := c.Close(); closeErr != nil {
+					logger.Default().Warn("close jump host chain resource during handshake cleanup", zap.Error(closeErr))
+				}
 			}
 			return nil, nil, fmt.Errorf("跳板机SSH握手失败: %w", err)
 		}
@@ -437,7 +465,9 @@ func (m *Manager) dialViaJumpHosts(cfg ConnectConfig, targetConfig *ssh.ClientCo
 	conn, err := currentClient.Dial("tcp", targetAddr)
 	if err != nil {
 		for _, c := range closers {
-			_ = c.Close()
+			if closeErr := c.Close(); closeErr != nil {
+				logger.Default().Warn("close jump host chain resource during target dial cleanup", zap.Error(closeErr))
+			}
 		}
 		return nil, nil, fmt.Errorf("通过跳板机连接目标失败: %w", err)
 	}
@@ -446,9 +476,13 @@ func (m *Manager) dialViaJumpHosts(cfg ConnectConfig, targetConfig *ssh.ClientCo
 
 	c, chans, reqs, err := ssh.NewClientConn(conn, targetAddr, targetConfig)
 	if err != nil {
-		_ = conn.Close()
+		if closeErr := conn.Close(); closeErr != nil {
+			logger.Default().Warn("close target connection after handshake failure", zap.Error(closeErr))
+		}
 		for _, c := range closers {
-			_ = c.Close()
+			if closeErr := c.Close(); closeErr != nil {
+				logger.Default().Warn("close jump host chain resource during target handshake cleanup", zap.Error(closeErr))
+			}
 		}
 		return nil, nil, fmt.Errorf("目标SSH握手失败: %w", err)
 	}
@@ -610,9 +644,13 @@ func (m *Manager) TestConnection(cfg ConnectConfig) error {
 	if err != nil {
 		return err
 	}
-	_ = client.Close()
+	if err := client.Close(); err != nil {
+		logger.Default().Warn("close test connection client", zap.Error(err))
+	}
 	for _, c := range closers {
-		_ = c.Close()
+		if err := c.Close(); err != nil {
+			logger.Default().Warn("close test connection resource", zap.Error(err))
+		}
 	}
 	return nil
 }

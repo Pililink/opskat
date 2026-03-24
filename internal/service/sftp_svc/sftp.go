@@ -13,7 +13,9 @@ import (
 
 	"ops-cat/internal/service/ssh_svc"
 
+	"github.com/cago-frame/cago/pkg/logger"
 	"github.com/pkg/sftp"
+	"go.uber.org/zap"
 )
 
 // TransferProgress 传输进度事件
@@ -57,7 +59,9 @@ func (s *Service) getSFTPClient(sessionID string) (*sftp.Client, error) {
 		}
 		// 已失效，移除
 		s.clients.Delete(sessionID)
-		_ = client.Close()
+		if err := client.Close(); err != nil {
+			logger.Default().Warn("close stale client", zap.String("sessionID", sessionID), zap.Error(err))
+		}
 	}
 
 	sess, ok := s.sshManager.GetSession(sessionID)
@@ -146,7 +150,11 @@ func (s *Service) Upload(ctx context.Context, transferID, sessionID, localPath, 
 	if err != nil {
 		return fmt.Errorf("打开本地文件失败: %w", err)
 	}
-	defer func() { _ = localFile.Close() }()
+	defer func() {
+		if err := localFile.Close(); err != nil {
+			logger.Default().Warn("close local file", zap.String("path", localPath), zap.Error(err))
+		}
+	}()
 
 	stat, err := localFile.Stat()
 	if err != nil {
@@ -157,9 +165,13 @@ func (s *Service) Upload(ctx context.Context, transferID, sessionID, localPath, 
 	if err != nil {
 		return fmt.Errorf("创建远程文件失败: %w", err)
 	}
-	defer func() { _ = remoteFile.Close() }()
+	defer func() {
+		if err := remoteFile.Close(); err != nil {
+			logger.Default().Warn("close remote file", zap.String("path", remotePath), zap.Error(err))
+		}
+	}()
 
-	return s.copyWithProgress(ctx, transferID, remoteFile, localFile, stat.Size(), 1, onProgress)
+	return s.copyWithProgress(ctx, transferID, remoteFile, localFile, stat.Size(), 1, filepath.Base(remotePath), onProgress)
 }
 
 // Download 下载单个文件
@@ -180,7 +192,11 @@ func (s *Service) Download(ctx context.Context, transferID, sessionID, remotePat
 	if err != nil {
 		return fmt.Errorf("打开远程文件失败: %w", err)
 	}
-	defer func() { _ = remoteFile.Close() }()
+	defer func() {
+		if err := remoteFile.Close(); err != nil {
+			logger.Default().Warn("close remote file", zap.String("path", remotePath), zap.Error(err))
+		}
+	}()
 
 	stat, err := remoteFile.Stat()
 	if err != nil {
@@ -191,9 +207,13 @@ func (s *Service) Download(ctx context.Context, transferID, sessionID, remotePat
 	if err != nil {
 		return fmt.Errorf("创建本地文件失败: %w", err)
 	}
-	defer func() { _ = localFile.Close() }()
+	defer func() {
+		if err := localFile.Close(); err != nil {
+			logger.Default().Warn("close local file", zap.String("path", localPath), zap.Error(err))
+		}
+	}()
 
-	return s.copyWithProgress(ctx, transferID, localFile, remoteFile, stat.Size(), 1, onProgress)
+	return s.copyWithProgress(ctx, transferID, localFile, remoteFile, stat.Size(), 1, filepath.Base(remotePath), onProgress)
 }
 
 // UploadDir 上传目录
@@ -259,13 +279,21 @@ func (s *Service) UploadDir(ctx context.Context, transferID, sessionID, localDir
 		if err != nil {
 			return err
 		}
-		defer func() { _ = localFile.Close() }()
+		defer func() {
+			if err := localFile.Close(); err != nil {
+				logger.Default().Warn("close local file", zap.String("path", path), zap.Error(err))
+			}
+		}()
 
 		remoteFile, err := sftpClient.Create(remoteFull)
 		if err != nil {
 			return err
 		}
-		defer func() { _ = remoteFile.Close() }()
+		defer func() {
+			if err := remoteFile.Close(); err != nil {
+				logger.Default().Warn("close remote file", zap.String("path", remoteFull), zap.Error(err))
+			}
+		}()
 
 		buf := make([]byte, 32*1024)
 		for {
@@ -398,22 +426,32 @@ func (s *Service) DownloadDir(ctx context.Context, transferID, sessionID, remote
 
 		localFile, err := os.Create(localFull) //nolint:gosec // file path from user config
 		if err != nil {
-			_ = remoteFile.Close()
+			if closeErr := remoteFile.Close(); closeErr != nil {
+				logger.Default().Warn("close remote file", zap.String("path", entry.remotePath), zap.Error(closeErr))
+			}
 			return err
 		}
 
 		buf := make([]byte, 32*1024)
 		for {
 			if ctx.Err() != nil {
-				_ = localFile.Close()
-				_ = remoteFile.Close()
+				if closeErr := localFile.Close(); closeErr != nil {
+					logger.Default().Warn("close local file", zap.String("path", localFull), zap.Error(closeErr))
+				}
+				if closeErr := remoteFile.Close(); closeErr != nil {
+					logger.Default().Warn("close remote file", zap.String("path", entry.remotePath), zap.Error(closeErr))
+				}
 				return ctx.Err()
 			}
 			n, readErr := remoteFile.Read(buf)
 			if n > 0 {
 				if _, writeErr := localFile.Write(buf[:n]); writeErr != nil {
-					_ = localFile.Close()
-					_ = remoteFile.Close()
+					if closeErr := localFile.Close(); closeErr != nil {
+						logger.Default().Warn("close local file", zap.String("path", localFull), zap.Error(closeErr))
+					}
+					if closeErr := remoteFile.Close(); closeErr != nil {
+						logger.Default().Warn("close remote file", zap.String("path", entry.remotePath), zap.Error(closeErr))
+					}
 					return writeErr
 				}
 				bytesDone += int64(n)
@@ -441,14 +479,22 @@ func (s *Service) DownloadDir(ctx context.Context, transferID, sessionID, remote
 				break
 			}
 			if readErr != nil {
-				_ = localFile.Close()
-				_ = remoteFile.Close()
+				if closeErr := localFile.Close(); closeErr != nil {
+					logger.Default().Warn("close local file", zap.String("path", localFull), zap.Error(closeErr))
+				}
+				if closeErr := remoteFile.Close(); closeErr != nil {
+					logger.Default().Warn("close remote file", zap.String("path", entry.remotePath), zap.Error(closeErr))
+				}
 				return readErr
 			}
 		}
 
-		_ = localFile.Close()
-		_ = remoteFile.Close()
+		if closeErr := localFile.Close(); closeErr != nil {
+			logger.Default().Warn("close local file", zap.String("path", localFull), zap.Error(closeErr))
+		}
+		if closeErr := remoteFile.Close(); closeErr != nil {
+			logger.Default().Warn("close remote file", zap.String("path", entry.remotePath), zap.Error(closeErr))
+		}
 		filesCompleted++
 	}
 
@@ -465,12 +511,52 @@ func (s *Service) Cancel(transferID string) {
 // CleanupSession 清理 SSH 会话关联的 SFTP 客户端
 func (s *Service) CleanupSession(sessionID string) {
 	if v, ok := s.clients.LoadAndDelete(sessionID); ok {
-		_ = v.(*sftp.Client).Close()
+		if err := v.(*sftp.Client).Close(); err != nil {
+			logger.Default().Warn("close client", zap.String("sessionID", sessionID), zap.Error(err))
+		}
 	}
 }
 
+// Remove 删除单个文件
+func (s *Service) Remove(sessionID, path string) error {
+	sftpClient, err := s.getSFTPClient(sessionID)
+	if err != nil {
+		return err
+	}
+	return sftpClient.Remove(path)
+}
+
+// RemoveDir 递归删除目录
+func (s *Service) RemoveDir(sessionID, path string) error {
+	sftpClient, err := s.getSFTPClient(sessionID)
+	if err != nil {
+		return err
+	}
+	return s.removeDirRecursive(sftpClient, path)
+}
+
+func (s *Service) removeDirRecursive(client *sftp.Client, path string) error {
+	entries, err := client.ReadDir(path)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		fullPath := path + "/" + entry.Name()
+		if entry.IsDir() {
+			if err := s.removeDirRecursive(client, fullPath); err != nil {
+				return err
+			}
+		} else {
+			if err := client.Remove(fullPath); err != nil {
+				return err
+			}
+		}
+	}
+	return client.RemoveDirectory(path)
+}
+
 // copyWithProgress 带进度的文件拷贝
-func (s *Service) copyWithProgress(ctx context.Context, transferID string, dst io.Writer, src io.Reader, totalBytes int64, filesTotal int, onProgress func(TransferProgress)) error {
+func (s *Service) copyWithProgress(ctx context.Context, transferID string, dst io.Writer, src io.Reader, totalBytes int64, filesTotal int, currentFile string, onProgress func(TransferProgress)) error {
 	buf := make([]byte, 32*1024)
 	var bytesDone int64
 	startTime := time.Now()
@@ -497,6 +583,7 @@ func (s *Service) copyWithProgress(ctx context.Context, transferID string, dst i
 				onProgress(TransferProgress{
 					TransferID:     transferID,
 					Status:         "progress",
+					CurrentFile:    currentFile,
 					FilesCompleted: 0,
 					FilesTotal:     filesTotal,
 					BytesDone:      bytesDone,

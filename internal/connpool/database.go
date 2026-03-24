@@ -12,8 +12,10 @@ import (
 	"ops-cat/internal/service/credential_svc"
 	"ops-cat/internal/sshpool"
 
+	"github.com/cago-frame/cago/pkg/logger"
 	"github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib" // PostgreSQL driver
+	"go.uber.org/zap"
 )
 
 // DialDatabase 创建数据库连接（直连或通过 SSH 隧道）
@@ -34,7 +36,9 @@ func DialDatabase(ctx context.Context, cfg *asset_entity.DatabaseConfig, sshPool
 	}
 	if err != nil {
 		if tunnel != nil {
-			_ = tunnel.Close()
+			if err := tunnel.Close(); err != nil {
+				logger.Default().Warn("close ssh tunnel", zap.Error(err))
+			}
 		}
 		return nil, nil, err
 	}
@@ -42,9 +46,13 @@ func DialDatabase(ctx context.Context, cfg *asset_entity.DatabaseConfig, sshPool
 	// 连接级只读
 	if cfg.ReadOnly {
 		if roErr := setReadOnly(db, cfg.Driver); roErr != nil {
-			_ = db.Close()
+			if err := db.Close(); err != nil {
+				logger.Default().Warn("close db", zap.Error(err))
+			}
 			if tunnel != nil {
-				_ = tunnel.Close()
+				if err := tunnel.Close(); err != nil {
+					logger.Default().Warn("close ssh tunnel", zap.Error(err))
+				}
 			}
 			return nil, nil, fmt.Errorf("设置只读模式失败: %w", roErr)
 		}
@@ -52,9 +60,13 @@ func DialDatabase(ctx context.Context, cfg *asset_entity.DatabaseConfig, sshPool
 
 	// 测试连接
 	if pingErr := db.PingContext(ctx); pingErr != nil {
-		_ = db.Close()
+		if err := db.Close(); err != nil {
+			logger.Default().Warn("close db", zap.Error(err))
+		}
 		if tunnel != nil {
-			_ = tunnel.Close()
+			if err := tunnel.Close(); err != nil {
+				logger.Default().Warn("close ssh tunnel", zap.Error(err))
+			}
 		}
 		return nil, nil, fmt.Errorf("数据库连接失败: %w", pingErr)
 	}

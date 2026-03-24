@@ -8,8 +8,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+
 	"os/exec"
 	"sync"
+
+	"github.com/cago-frame/cago/pkg/logger"
+	"go.uber.org/zap"
 )
 
 // CLIProcess 管理 CLI 子进程的生命周期和 stdin/stdout 通信
@@ -39,7 +43,9 @@ func StartCLIProcess(ctx context.Context, cliPath string, args []string, workDir
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		_ = stdin.Close()
+		if closeErr := stdin.Close(); closeErr != nil {
+			logger.Default().Warn("close CLI stdin pipe", zap.Error(closeErr))
+		}
 		return nil, fmt.Errorf("获取 stdout 失败: %w", err)
 	}
 
@@ -51,8 +57,12 @@ func StartCLIProcess(ctx context.Context, cliPath string, args []string, workDir
 	cmd.Stderr = &p.stderr
 
 	if err := cmd.Start(); err != nil {
-		_ = stdin.Close()
-		_ = stdout.Close()
+		if closeErr := stdin.Close(); closeErr != nil {
+			logger.Default().Warn("close CLI stdin pipe after start failure", zap.Error(closeErr))
+		}
+		if closeErr := stdout.Close(); closeErr != nil {
+			logger.Default().Warn("close CLI stdout pipe after start failure", zap.Error(closeErr))
+		}
 		return nil, fmt.Errorf("启动 CLI 失败: %w", err)
 	}
 
@@ -103,8 +113,12 @@ func (p *CLIProcess) Stderr() string {
 
 // Stop 停止进程
 func (p *CLIProcess) Stop() {
-	_ = p.stdin.Close()
+	if err := p.stdin.Close(); err != nil {
+		logger.Default().Warn("close CLI stdin pipe", zap.Error(err))
+	}
 	if p.cmd.Process != nil {
-		_ = p.cmd.Process.Kill()
+		if err := p.cmd.Process.Kill(); err != nil {
+			logger.Default().Warn("kill CLI process", zap.Error(err))
+		}
 	}
 }

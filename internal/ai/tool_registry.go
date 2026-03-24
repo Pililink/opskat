@@ -7,6 +7,9 @@ import (
 	"io"
 	"os"
 
+	"github.com/cago-frame/cago/pkg/logger"
+	"go.uber.org/zap"
+
 	"ops-cat/internal/model/entity/asset_entity"
 	"ops-cat/internal/repository/group_repo"
 	"ops-cat/internal/service/asset_svc"
@@ -47,7 +50,7 @@ func AllToolDefs() []ToolDef {
 	return []ToolDef{
 		{
 			Name:        "list_assets",
-			Description: "List managed remote server assets. Returns an array of assets (with ID, name, type, group, etc.). This is typically the first step to discover asset IDs for other operations. Supports filtering by type and group.",
+			Description: "List managed remote server assets. Returns an array of assets (with ID, name, type, group, etc.). This is typically the first step to discover asset IDs for other operations. Supports filtering by type and group. Use get_asset to view asset description and connection details.",
 			Params: []ParamDef{
 				{Name: "asset_type", Type: ParamString, Description: `Filter by asset type. Currently only "ssh" is supported. Omit to return all types.`},
 				{Name: "group_id", Type: ParamNumber, Description: "Filter by group ID. Omit or set to 0 to list all groups."},
@@ -106,8 +109,16 @@ func AllToolDefs() []ToolDef {
 		},
 		{
 			Name:        "list_groups",
-			Description: "List all asset groups. Groups organize assets into a hierarchy via parent_id.",
+			Description: "List all asset groups. Groups organize assets into a hierarchy via parent_id. Use get_group to view group description.",
 			Handler:     handleListGroups,
+		},
+		{
+			Name:        "get_group",
+			Description: "Get detailed information about a specific asset group, including its description.",
+			Params: []ParamDef{
+				{Name: "id", Type: ParamNumber, Description: "Group ID. Use list_groups to find available IDs.", Required: true},
+			},
+			Handler: handleGetGroup,
 		},
 		{
 			Name:        "upload_file",
@@ -204,7 +215,9 @@ func NewSSHClientCache() *SSHClientCache {
 // Close 关闭所有缓存的 SSH 连接
 func (c *SSHClientCache) Close() error {
 	for id, client := range c.clients {
-		_ = client.Close()
+		if err := client.Close(); err != nil {
+			logger.Default().Warn("close cached SSH connection", zap.Int64("assetID", id), zap.Error(err))
+		}
 		delete(c.clients, id)
 	}
 	return nil
@@ -228,7 +241,9 @@ func (c *SSHClientCache) getOrCreate(ctx context.Context, assetID int64, cfg *as
 
 func (c *SSHClientCache) remove(assetID int64) {
 	if client, ok := c.clients[assetID]; ok {
-		_ = client.Close()
+		if err := client.Close(); err != nil {
+			logger.Default().Warn("close SSH connection", zap.Int64("assetID", assetID), zap.Error(err))
+		}
 		delete(c.clients, assetID)
 	}
 }
@@ -302,6 +317,21 @@ type safeAssetView struct {
 	RedisDB int `json:"redis_db,omitempty"`
 }
 
+// safeGroupListView 列表视图（不含描述）
+type safeGroupListView struct {
+	ID        int64  `json:"id"`
+	Name      string `json:"name"`
+	ParentID  int64  `json:"parent_id"`
+	Icon      string `json:"icon,omitempty"`
+	SortOrder int    `json:"sort_order"`
+}
+
+// safeGroupDetailView 详情视图（含描述）
+type safeGroupDetailView struct {
+	safeGroupListView
+	Description string `json:"description,omitempty"`
+}
+
 func toSafeView(a *asset_entity.Asset) safeAssetView {
 	v := safeAssetView{
 		ID:          a.ID,
@@ -351,6 +381,7 @@ func handleListAssets(ctx context.Context, args map[string]any) (string, error) 
 	views := make([]safeAssetView, len(assets))
 	for i, a := range assets {
 		views[i] = toSafeView(a)
+		views[i].Description = "" // list 不返回描述，通过 get_asset 查看
 	}
 	data, _ := json.Marshal(views)
 	return string(data), nil
@@ -463,12 +494,14 @@ func handleAddAsset(ctx context.Context, args map[string]any) (string, error) {
 		if authType == "" {
 			authType = "password"
 		}
-		_ = asset.SetSSHConfig(&asset_entity.SSHConfig{
+		if err := asset.SetSSHConfig(&asset_entity.SSHConfig{
 			Host:     host,
 			Port:     port,
 			Username: username,
 			AuthType: authType,
-		})
+		}); err != nil {
+			logger.Default().Warn("set SSH config for new asset", zap.Error(err))
+		}
 	case asset_entity.AssetTypeDatabase:
 		driver := asset_entity.DatabaseDriver(argString(args, "driver"))
 		if driver == "" {
@@ -483,7 +516,9 @@ func handleAddAsset(ctx context.Context, args map[string]any) (string, error) {
 			ReadOnly:   argString(args, "read_only") == "true",
 			SSHAssetID: argInt64(args, "ssh_asset_id"),
 		}
-		_ = asset.SetDatabaseConfig(dbCfg)
+		if err := asset.SetDatabaseConfig(dbCfg); err != nil {
+			logger.Default().Warn("set database config for new asset", zap.Error(err))
+		}
 	case asset_entity.AssetTypeRedis:
 		redisCfg := &asset_entity.RedisConfig{
 			Host:       host,
@@ -491,7 +526,9 @@ func handleAddAsset(ctx context.Context, args map[string]any) (string, error) {
 			Username:   username,
 			SSHAssetID: argInt64(args, "ssh_asset_id"),
 		}
-		_ = asset.SetRedisConfig(redisCfg)
+		if err := asset.SetRedisConfig(redisCfg); err != nil {
+			logger.Default().Warn("set Redis config for new asset", zap.Error(err))
+		}
 	default:
 		return "", fmt.Errorf("不支持的资产类型: %s", assetType)
 	}
@@ -536,7 +573,9 @@ func handleUpdateAsset(ctx context.Context, args map[string]any) (string, error)
 			if username := argString(args, "username"); username != "" {
 				sshCfg.Username = username
 			}
-			_ = asset.SetSSHConfig(sshCfg)
+			if err := asset.SetSSHConfig(sshCfg); err != nil {
+				logger.Default().Warn("set SSH config for updated asset", zap.Error(err))
+			}
 		}
 	case asset_entity.AssetTypeDatabase:
 		dbCfg, _ := asset.GetDatabaseConfig()
@@ -553,7 +592,9 @@ func handleUpdateAsset(ctx context.Context, args map[string]any) (string, error)
 			if db := argString(args, "database"); db != "" {
 				dbCfg.Database = db
 			}
-			_ = asset.SetDatabaseConfig(dbCfg)
+			if err := asset.SetDatabaseConfig(dbCfg); err != nil {
+				logger.Default().Warn("set database config for updated asset", zap.Error(err))
+			}
 		}
 	case asset_entity.AssetTypeRedis:
 		redisCfg, _ := asset.GetRedisConfig()
@@ -567,7 +608,9 @@ func handleUpdateAsset(ctx context.Context, args map[string]any) (string, error)
 			if username := argString(args, "username"); username != "" {
 				redisCfg.Username = username
 			}
-			_ = asset.SetRedisConfig(redisCfg)
+			if err := asset.SetRedisConfig(redisCfg); err != nil {
+				logger.Default().Warn("set Redis config for updated asset", zap.Error(err))
+			}
 		}
 	}
 
@@ -582,7 +625,40 @@ func handleListGroups(ctx context.Context, _ map[string]any) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("获取分组失败: %w", err)
 	}
-	data, _ := json.Marshal(groups)
+	views := make([]safeGroupListView, len(groups))
+	for i, g := range groups {
+		views[i] = safeGroupListView{
+			ID:        g.ID,
+			Name:      g.Name,
+			ParentID:  g.ParentID,
+			Icon:      g.Icon,
+			SortOrder: g.SortOrder,
+		}
+	}
+	data, _ := json.Marshal(views)
+	return string(data), nil
+}
+
+func handleGetGroup(ctx context.Context, args map[string]any) (string, error) {
+	id := argInt64(args, "id")
+	if id == 0 {
+		return "", fmt.Errorf("缺少参数 id")
+	}
+	group, err := group_repo.Group().Find(ctx, id)
+	if err != nil {
+		return "", fmt.Errorf("分组不存在: %w", err)
+	}
+	view := safeGroupDetailView{
+		safeGroupListView: safeGroupListView{
+			ID:        group.ID,
+			Name:      group.Name,
+			ParentID:  group.ParentID,
+			Icon:      group.Icon,
+			SortOrder: group.SortOrder,
+		},
+		Description: group.Description,
+	}
+	data, _ := json.Marshal(view)
 	return string(data), nil
 }
 
@@ -604,13 +680,21 @@ func handleUploadFile(ctx context.Context, args map[string]any) (string, error) 
 		if err != nil {
 			return fmt.Errorf("打开本地文件失败: %w", err)
 		}
-		defer func() { _ = srcFile.Close() }()
+		defer func() {
+			if err := srcFile.Close(); err != nil {
+				logger.Default().Warn("close local file", zap.String("path", localPath), zap.Error(err))
+			}
+		}()
 
 		dstFile, err := client.Create(remotePath)
 		if err != nil {
 			return fmt.Errorf("创建远程文件失败: %w", err)
 		}
-		defer func() { _ = dstFile.Close() }()
+		defer func() {
+			if err := dstFile.Close(); err != nil {
+				logger.Default().Warn("close remote file", zap.String("path", remotePath), zap.Error(err))
+			}
+		}()
 
 		_, err = io.Copy(dstFile, srcFile)
 		return err
@@ -639,13 +723,21 @@ func handleDownloadFile(ctx context.Context, args map[string]any) (string, error
 		if err != nil {
 			return fmt.Errorf("打开远程文件失败: %w", err)
 		}
-		defer func() { _ = srcFile.Close() }()
+		defer func() {
+			if err := srcFile.Close(); err != nil {
+				logger.Default().Warn("close remote file", zap.String("path", remotePath), zap.Error(err))
+			}
+		}()
 
 		dstFile, err := os.Create(localPath) //nolint:gosec
 		if err != nil {
 			return fmt.Errorf("创建本地文件失败: %w", err)
 		}
-		defer func() { _ = dstFile.Close() }()
+		defer func() {
+			if err := dstFile.Close(); err != nil {
+				logger.Default().Warn("close local file", zap.String("path", localPath), zap.Error(err))
+			}
+		}()
 
 		_, err = io.Copy(dstFile, srcFile)
 		return err

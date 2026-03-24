@@ -7,6 +7,9 @@ import (
 	"io"
 	"strings"
 
+	"github.com/cago-frame/cago/pkg/logger"
+	"go.uber.org/zap"
+
 	"ops-cat/internal/connpool"
 	"ops-cat/internal/model/entity/asset_entity"
 	"ops-cat/internal/service/asset_svc"
@@ -35,12 +38,16 @@ func NewRedisClientCache() *RedisClientCache {
 // Close 关闭所有缓存的 Redis 连接
 func (c *RedisClientCache) Close() error {
 	for id, client := range c.clients {
-		_ = client.Close()
+		if err := client.Close(); err != nil {
+			logger.Default().Warn("close cached Redis connection", zap.Int64("assetID", id), zap.Error(err))
+		}
 		delete(c.clients, id)
 	}
 	for id, closer := range c.closers {
 		if closer != nil {
-			_ = closer.Close()
+			if err := closer.Close(); err != nil {
+				logger.Default().Warn("close Redis tunnel", zap.Int64("assetID", id), zap.Error(err))
+			}
 		}
 		delete(c.closers, id)
 	}
@@ -94,10 +101,18 @@ func handleExecRedis(ctx context.Context, args map[string]any) (string, error) {
 	}
 	if getRedisCache(ctx) == nil {
 		if client != nil {
-			defer func() { _ = client.Close() }()
+			defer func() {
+				if err := client.Close(); err != nil {
+					logger.Default().Warn("close Redis connection", zap.Error(err))
+				}
+			}()
 		}
 		if closer != nil {
-			defer func() { _ = closer.Close() }()
+			defer func() {
+				if err := closer.Close(); err != nil {
+					logger.Default().Warn("close Redis tunnel", zap.Error(err))
+				}
+			}()
 		}
 	}
 
@@ -124,7 +139,7 @@ func getOrDialRedis(ctx context.Context, assetID int64, cfg *asset_entity.RedisC
 func ExecuteRedis(ctx context.Context, client *redis.Client, command string) (string, error) {
 	parts := strings.Fields(command)
 	if len(parts) == 0 {
-		return "", fmt.Errorf("Redis 命令为空")
+		return "", fmt.Errorf("redis 命令为空")
 	}
 
 	redisArgs := make([]any, len(parts))
@@ -137,7 +152,7 @@ func ExecuteRedis(ctx context.Context, client *redis.Client, command string) (st
 		if err == redis.Nil {
 			return `{"type":"nil","value":null}`, nil
 		}
-		return "", fmt.Errorf("Redis 命令执行失败: %w", err)
+		return "", fmt.Errorf("redis 命令执行失败: %w", err)
 	}
 
 	return formatRedisResult(result)

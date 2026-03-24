@@ -11,7 +11,9 @@ import (
 	"ops-cat/internal/service/credential_svc"
 	"ops-cat/internal/sshpool"
 
+	"github.com/cago-frame/cago/pkg/logger"
 	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 )
 
 // DialRedis 创建 Redis 连接（直连或通过 SSH 隧道）
@@ -28,7 +30,7 @@ func DialRedis(ctx context.Context, cfg *asset_entity.RedisConfig, sshPool *sshp
 		DB:       cfg.Database,
 	}
 	if cfg.TLS {
-		opts.TLSConfig = &tls.Config{} //nolint:gosec // TLS config uses defaults
+		opts.TLSConfig = &tls.Config{}
 	}
 
 	var tunnel *SSHTunnel
@@ -41,11 +43,15 @@ func DialRedis(ctx context.Context, cfg *asset_entity.RedisConfig, sshPool *sshp
 
 	client := redis.NewClient(opts)
 	if pingErr := client.Ping(ctx).Err(); pingErr != nil {
-		_ = client.Close()
-		if tunnel != nil {
-			_ = tunnel.Close()
+		if err := client.Close(); err != nil {
+			logger.Default().Warn("close redis client", zap.Error(err))
 		}
-		return nil, nil, fmt.Errorf("Redis 连接失败: %w", pingErr)
+		if tunnel != nil {
+			if err := tunnel.Close(); err != nil {
+				logger.Default().Warn("close ssh tunnel", zap.Error(err))
+			}
+		}
+		return nil, nil, fmt.Errorf("redis 连接失败: %w", pingErr)
 	}
 
 	return client, tunnel, nil

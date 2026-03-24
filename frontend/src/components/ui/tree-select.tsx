@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, type ReactNode } from "react";
-import { ChevronDown, ChevronRight, Check } from "lucide-react";
+import { ChevronDown, ChevronRight, Check, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 export interface TreeNode {
   id: number;
@@ -19,6 +20,31 @@ interface TreeSelectProps {
   placeholder?: string;
   /** Icon shown next to placeholder */
   placeholderIcon?: ReactNode;
+  /** Whether to show search input (default: false) */
+  searchable?: boolean;
+  /** Search placeholder text */
+  searchPlaceholder?: string;
+  /** Custom className for the trigger button */
+  className?: string;
+}
+
+/** Filter tree nodes by search query, preserving ancestor paths */
+function filterTree(nodes: TreeNode[], query: string): TreeNode[] {
+  if (!query) return nodes;
+  const lower = query.toLowerCase();
+
+  function matches(node: TreeNode): boolean {
+    if (node.label.toLowerCase().includes(lower)) return true;
+    if (node.children?.some(matches)) return true;
+    return false;
+  }
+
+  return nodes
+    .filter(matches)
+    .map((node) => ({
+      ...node,
+      children: node.children ? filterTree(node.children, query) : undefined,
+    }));
 }
 
 function TreeItem({
@@ -116,12 +142,19 @@ export function TreeSelect({
   nodes,
   placeholder,
   placeholderIcon,
+  searchable = false,
+  searchPlaceholder,
+  className,
 }: TreeSelectProps) {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   const displayLabel = value === 0 ? placeholder : findLabel(nodes, value) || placeholder;
   const displayIcon = value === 0 ? placeholderIcon : findIcon(nodes, value) || placeholderIcon;
+
+  const filteredNodes = searchable ? filterTree(nodes, search) : nodes;
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -135,12 +168,20 @@ export function TreeSelect({
     return () => document.removeEventListener("mousedown", handleClick);
   }, [open]);
 
+  // Reset search and focus input when opening
+  useEffect(() => {
+    if (open) {
+      setSearch("");
+      setTimeout(() => searchRef.current?.focus(), 0);
+    }
+  }, [open]);
+
   return (
     <div ref={containerRef} className="relative">
       <Button
         type="button"
         variant="outline"
-        className="w-full justify-between font-normal"
+        className={cn("w-full justify-between font-normal", className)}
         onClick={() => setOpen(!open)}
       >
         <div className="flex items-center gap-2 truncate">
@@ -152,11 +193,26 @@ export function TreeSelect({
       {open && (
         <div
           className="absolute z-50 mt-1 w-full rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
+          style={{ minWidth: "200px" }}
           onWheel={(e) => e.stopPropagation()}
         >
+          {searchable && (
+            <div className="flex items-center gap-1.5 px-2 py-1 border-b mb-1">
+              <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <input
+                ref={searchRef}
+                type="text"
+                className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                placeholder={searchPlaceholder}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+              />
+            </div>
+          )}
           <div className="max-h-[200px] overflow-y-auto">
             {/* Zero-value / placeholder option */}
-            {placeholder && (
+            {placeholder && !search && (
               <div
                 className="flex items-center gap-1 px-2 py-1.5 rounded cursor-pointer hover:bg-accent text-sm"
                 onClick={() => {
@@ -172,7 +228,7 @@ export function TreeSelect({
                 )}
               </div>
             )}
-            {nodes.map((node) => (
+            {filteredNodes.map((node) => (
               <TreeItem
                 key={node.id}
                 node={node}
@@ -183,6 +239,11 @@ export function TreeSelect({
                 }}
               />
             ))}
+            {searchable && search && filteredNodes.length === 0 && (
+              <div className="px-2 py-3 text-center text-sm text-muted-foreground">
+                --
+              </div>
+            )}
           </div>
         </div>
       )}

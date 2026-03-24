@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/cago-frame/cago/configs"
+	"github.com/cago-frame/cago/pkg/logger"
+	"go.uber.org/zap"
 )
 
 const (
@@ -82,7 +84,11 @@ func fetchReleaseFromURL(url string) (*ReleaseInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("request GitHub API failed: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			logger.Default().Warn("close response body", zap.Error(err))
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
@@ -109,7 +115,11 @@ func fetchLatestBetaRelease() (*ReleaseInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("request GitHub API failed: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			logger.Default().Warn("close response body", zap.Error(err))
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
@@ -216,7 +226,11 @@ func DownloadAndUpdate(channel string, onProgress func(downloaded, total int64))
 	if err != nil {
 		return fmt.Errorf("download failed: %w", err)
 	}
-	defer func() { _ = dlResp.Body.Close() }()
+	defer func() {
+		if err := dlResp.Body.Close(); err != nil {
+			logger.Default().Warn("close download response body", zap.Error(err))
+		}
+	}()
 
 	if dlResp.StatusCode != http.StatusOK {
 		return fmt.Errorf("download returned status %d", dlResp.StatusCode)
@@ -232,7 +246,11 @@ func DownloadAndUpdate(channel string, onProgress func(downloaded, total int64))
 		return fmt.Errorf("create temp file failed: %w", err)
 	}
 	tmpPath := tmpFile.Name()
-	defer func() { _ = os.Remove(tmpPath) }()
+	defer func() {
+		if err := os.Remove(tmpPath); err != nil {
+			logger.Default().Warn("remove temp file", zap.String("path", tmpPath), zap.Error(err))
+		}
+	}()
 
 	var reader io.Reader = dlResp.Body
 	if onProgress != nil {
@@ -240,10 +258,14 @@ func DownloadAndUpdate(channel string, onProgress func(downloaded, total int64))
 	}
 
 	if _, err := io.Copy(tmpFile, reader); err != nil {
-		_ = tmpFile.Close()
+		if closeErr := tmpFile.Close(); closeErr != nil {
+			logger.Default().Warn("close temp file after write error", zap.Error(closeErr))
+		}
 		return fmt.Errorf("download write failed: %w", err)
 	}
-	_ = tmpFile.Close()
+	if err := tmpFile.Close(); err != nil {
+		logger.Default().Warn("close temp file", zap.Error(err))
+	}
 
 	// 获取当前可执行文件路径
 	execPath, err := os.Executable()
@@ -286,7 +308,11 @@ func updateMacOS(archivePath, execPath string) error {
 	if err != nil {
 		return fmt.Errorf("create temp dir failed: %w", err)
 	}
-	defer func() { _ = os.RemoveAll(tmpExtractDir) }()
+	defer func() {
+		if err := os.RemoveAll(tmpExtractDir); err != nil {
+			logger.Default().Warn("remove temp extract dir", zap.String("path", tmpExtractDir), zap.Error(err))
+		}
+	}()
 
 	if err := extractTarGz(archivePath, tmpExtractDir); err != nil {
 		return fmt.Errorf("extract failed: %w", err)
@@ -300,7 +326,9 @@ func updateMacOS(archivePath, execPath string) error {
 
 	// 备份旧的 .app
 	backupDir := appDir + ".backup"
-	_ = os.RemoveAll(backupDir)
+	if err := os.RemoveAll(backupDir); err != nil {
+		logger.Default().Warn("remove old backup dir", zap.String("path", backupDir), zap.Error(err))
+	}
 	if err := os.Rename(appDir, backupDir); err != nil {
 		return fmt.Errorf("backup old app failed: %w", err)
 	}
@@ -308,11 +336,15 @@ func updateMacOS(archivePath, execPath string) error {
 	// 移动新的 .app 到原位置
 	if err := os.Rename(newAppDir, filepath.Join(parentDir, "ops-cat.app")); err != nil {
 		// 恢复备份
-		_ = os.Rename(backupDir, appDir)
+		if renameErr := os.Rename(backupDir, appDir); renameErr != nil {
+			logger.Default().Error("restore backup after failed install", zap.Error(renameErr))
+		}
 		return fmt.Errorf("install new app failed: %w", err)
 	}
 
-	_ = os.RemoveAll(backupDir)
+	if err := os.RemoveAll(backupDir); err != nil {
+		logger.Default().Warn("remove backup dir", zap.String("path", backupDir), zap.Error(err))
+	}
 	return nil
 }
 
@@ -323,7 +355,11 @@ func updateLinux(archivePath, execPath string) error {
 	if err != nil {
 		return fmt.Errorf("create temp dir failed: %w", err)
 	}
-	defer func() { _ = os.RemoveAll(tmpExtractDir) }()
+	defer func() {
+		if err := os.RemoveAll(tmpExtractDir); err != nil {
+			logger.Default().Warn("remove temp extract dir", zap.String("path", tmpExtractDir), zap.Error(err))
+		}
+	}()
 
 	if err := extractTarGz(archivePath, tmpExtractDir); err != nil {
 		return fmt.Errorf("extract failed: %w", err)
@@ -336,17 +372,23 @@ func updateLinux(archivePath, execPath string) error {
 
 	// 备份旧文件，替换新文件
 	backupPath := execPath + ".backup"
-	_ = os.Remove(backupPath)
+	if err := os.Remove(backupPath); err != nil {
+		logger.Default().Warn("remove old backup", zap.String("path", backupPath), zap.Error(err))
+	}
 	if err := os.Rename(execPath, backupPath); err != nil {
 		return fmt.Errorf("backup old binary failed: %w", err)
 	}
 
 	if err := copyFile(newBin, execPath, 0755); err != nil {
-		_ = os.Rename(backupPath, execPath)
+		if renameErr := os.Rename(backupPath, execPath); renameErr != nil {
+			logger.Default().Error("restore backup after failed install", zap.Error(renameErr))
+		}
 		return fmt.Errorf("install new binary failed: %w", err)
 	}
 
-	_ = os.Remove(backupPath)
+	if err := os.Remove(backupPath); err != nil {
+		logger.Default().Warn("remove backup", zap.String("path", backupPath), zap.Error(err))
+	}
 	return nil
 }
 
@@ -357,7 +399,11 @@ func updateWindows(archivePath, execPath string) error {
 	if err != nil {
 		return fmt.Errorf("create temp dir failed: %w", err)
 	}
-	defer func() { _ = os.RemoveAll(tmpExtractDir) }()
+	defer func() {
+		if err := os.RemoveAll(tmpExtractDir); err != nil {
+			logger.Default().Warn("remove temp extract dir", zap.String("path", tmpExtractDir), zap.Error(err))
+		}
+	}()
 
 	if err := extractZip(archivePath, tmpExtractDir); err != nil {
 		return fmt.Errorf("extract failed: %w", err)
@@ -370,13 +416,17 @@ func updateWindows(archivePath, execPath string) error {
 
 	// Windows 不能替换正在运行的 exe，重命名旧文件后复制新文件
 	backupPath := execPath + ".old"
-	_ = os.Remove(backupPath)
+	if err := os.Remove(backupPath); err != nil {
+		logger.Default().Warn("remove old backup", zap.String("path", backupPath), zap.Error(err))
+	}
 	if err := os.Rename(execPath, backupPath); err != nil {
 		return fmt.Errorf("backup old binary failed: %w", err)
 	}
 
 	if err := copyFile(newBin, execPath, 0755); err != nil {
-		_ = os.Rename(backupPath, execPath)
+		if renameErr := os.Rename(backupPath, execPath); renameErr != nil {
+			logger.Default().Error("restore backup after failed install", zap.Error(renameErr))
+		}
 		return fmt.Errorf("install new binary failed: %w", err)
 	}
 
@@ -390,13 +440,21 @@ func extractTarGz(archivePath, destDir string) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = f.Close() }()
+	defer func() {
+		if err := f.Close(); err != nil {
+			logger.Default().Warn("close archive file", zap.Error(err))
+		}
+	}()
 
 	gz, err := gzip.NewReader(f)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = gz.Close() }()
+	defer func() {
+		if err := gz.Close(); err != nil {
+			logger.Default().Warn("close gzip reader", zap.Error(err))
+		}
+	}()
 
 	tr := tar.NewReader(gz)
 	for {
@@ -428,10 +486,14 @@ func extractTarGz(archivePath, destDir string) error {
 				return err
 			}
 			if _, err := io.Copy(outFile, tr); err != nil { //nolint:gosec // trusted archive source
-				_ = outFile.Close()
+				if closeErr := outFile.Close(); closeErr != nil {
+					logger.Default().Warn("close extracted file after copy error", zap.Error(closeErr))
+				}
 				return err
 			}
-			_ = outFile.Close()
+			if err := outFile.Close(); err != nil {
+				logger.Default().Warn("close extracted file", zap.Error(err))
+			}
 		}
 	}
 	return nil
@@ -443,7 +505,11 @@ func extractZip(archivePath, destDir string) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = r.Close() }()
+	defer func() {
+		if err := r.Close(); err != nil {
+			logger.Default().Warn("close zip reader", zap.Error(err))
+		}
+	}()
 
 	for _, f := range r.File {
 		target := filepath.Join(destDir, f.Name) //nolint:gosec // extracting trusted archive
@@ -452,7 +518,9 @@ func extractZip(archivePath, destDir string) error {
 		}
 
 		if f.FileInfo().IsDir() {
-			_ = os.MkdirAll(target, 0755) //nolint:gosec // extracting trusted archive
+			if err := os.MkdirAll(target, 0755); err != nil { //nolint:gosec // extracting trusted archive
+				logger.Default().Warn("create directory", zap.String("path", target), zap.Error(err))
+			}
 			continue
 		}
 
@@ -466,12 +534,18 @@ func extractZip(archivePath, destDir string) error {
 		}
 		outFile, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, f.Mode()) //nolint:gosec // extracting trusted archive
 		if err != nil {
-			_ = rc.Close()
+			if closeErr := rc.Close(); closeErr != nil {
+				logger.Default().Warn("close zip entry after open error", zap.Error(closeErr))
+			}
 			return err
 		}
 		_, err = io.Copy(outFile, rc) //nolint:gosec // trusted archive source
-		_ = outFile.Close()
-		_ = rc.Close()
+		if closeErr := outFile.Close(); closeErr != nil {
+			logger.Default().Warn("close extracted file", zap.Error(closeErr))
+		}
+		if closeErr := rc.Close(); closeErr != nil {
+			logger.Default().Warn("close zip entry", zap.Error(closeErr))
+		}
 		if err != nil {
 			return err
 		}
@@ -485,13 +559,21 @@ func copyFile(src, dst string, perm os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = in.Close() }()
+	defer func() {
+		if err := in.Close(); err != nil {
+			logger.Default().Warn("close source file", zap.String("path", src), zap.Error(err))
+		}
+	}()
 
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm) //nolint:gosec // copying trusted file
 	if err != nil {
 		return err
 	}
-	defer func() { _ = out.Close() }()
+	defer func() {
+		if err := out.Close(); err != nil {
+			logger.Default().Warn("close destination file", zap.String("path", dst), zap.Error(err))
+		}
+	}()
 
 	_, err = io.Copy(out, in)
 	return err

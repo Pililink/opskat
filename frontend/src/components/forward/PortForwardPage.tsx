@@ -13,12 +13,12 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { AssetSelect } from "@/components/asset/AssetSelect";
 import {
   ListForwardConfigs, CreateForwardConfig, UpdateForwardConfig,
   DeleteForwardConfig, StartForwardConfig, StopForwardConfig,
-  ListAssets,
 } from "../../../wailsjs/go/main/App";
-import { main, asset_entity } from "../../../wailsjs/go/models";
+import { main, forward_entity } from "../../../wailsjs/go/models";
 
 // 编辑中的规则（无 id）
 interface EditRule {
@@ -36,14 +36,13 @@ const emptyRule = (): EditRule => ({
 export function PortForwardPage() {
   const { t } = useTranslation();
   const [configs, setConfigs] = useState<main.ForwardConfigWithStatus[]>([]);
-  const [assets, setAssets] = useState<asset_entity.Asset[]>([]);
   const [loading, setLoading] = useState(false);
 
   // 编辑弹窗
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editId, setEditId] = useState<number | null>(null); // null = 新建
   const [editName, setEditName] = useState("");
-  const [editAssetId, setEditAssetId] = useState<string>("");
+  const [editAssetId, setEditAssetId] = useState(0);
   const [editRules, setEditRules] = useState<EditRule[]>([emptyRule()]);
 
   const refresh = useCallback(async () => {
@@ -56,20 +55,14 @@ export function PortForwardPage() {
     }
   }, []);
 
-  const loadAssets = useCallback(async () => {
-    const list = await ListAssets("", 0);
-    setAssets((list || []).filter((a) => a.Type === "ssh"));
-  }, []);
-
   useEffect(() => {
     refresh();
-    loadAssets();
-  }, [refresh, loadAssets]);
+  }, [refresh]);
 
   const openCreate = () => {
     setEditId(null);
     setEditName("");
-    setEditAssetId("");
+    setEditAssetId(0);
     setEditRules([emptyRule()]);
     setDialogOpen(true);
   };
@@ -77,7 +70,7 @@ export function PortForwardPage() {
   const openEdit = (cfg: main.ForwardConfigWithStatus) => {
     setEditId(cfg.id);
     setEditName(cfg.name);
-    setEditAssetId(String(cfg.assetId));
+    setEditAssetId(cfg.assetId);
     setEditRules(
       cfg.rules.length > 0
         ? cfg.rules.map((r) => ({
@@ -93,11 +86,10 @@ export function PortForwardPage() {
   };
 
   const handleSave = async () => {
-    const assetId = parseInt(editAssetId, 10);
-    if (!editName || !assetId) return;
+    if (!editName || !editAssetId) return;
     const rules = editRules
       .filter((r) => r.localPort && r.remotePort)
-      .map((r) => new main.ForwardRule({
+      .map((r) => new forward_entity.ForwardRule({
         type: r.type,
         localHost: r.localHost,
         localPort: parseInt(r.localPort, 10),
@@ -105,9 +97,9 @@ export function PortForwardPage() {
         remotePort: parseInt(r.remotePort, 10),
       }));
     if (editId) {
-      await UpdateForwardConfig(editId, editName, assetId, rules);
+      await UpdateForwardConfig(editId, editName, editAssetId, rules);
     } else {
-      await CreateForwardConfig(editName, assetId, rules);
+      await CreateForwardConfig(editName, editAssetId, rules);
     }
     setDialogOpen(false);
     refresh();
@@ -128,10 +120,9 @@ export function PortForwardPage() {
     refresh();
   };
 
-  const handleAssetChange = async (cfg: main.ForwardConfigWithStatus, newAssetId: string) => {
-    const assetId = parseInt(newAssetId, 10);
+  const handleAssetChange = async (cfg: main.ForwardConfigWithStatus, assetId: number) => {
     const wasRunning = cfg.status !== "stopped";
-    const rules = cfg.rules.map((r) => new main.ForwardRule({
+    const rules = cfg.rules.map((r) => new forward_entity.ForwardRule({
       type: r.type, localHost: r.localHost, localPort: r.localPort,
       remoteHost: r.remoteHost, remotePort: r.remotePort,
     }));
@@ -189,21 +180,12 @@ export function PortForwardPage() {
                 <span className="font-medium text-sm flex-1">{cfg.name}</span>
 
                 {/* 资产选择（直接在卡片上切换） */}
-                <Select
-                  value={String(cfg.assetId)}
+                <AssetSelect
+                  value={cfg.assetId}
                   onValueChange={(v) => handleAssetChange(cfg, v)}
-                >
-                  <SelectTrigger className="h-7 w-44 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {assets.map((a) => (
-                      <SelectItem key={a.ID} value={String(a.ID)}>
-                        {a.Name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  filterType="ssh"
+                  className="h-7 w-44 text-xs"
+                />
 
                 {/* 状态 */}
                 <div className="flex items-center gap-1 text-xs min-w-20">
@@ -232,8 +214,10 @@ export function PortForwardPage() {
               {/* 规则列表 */}
               <div className="space-y-1">
                 {cfg.rules.map((rule) => {
-                  const prefix = rule.type === "remote" ? "R" : "L";
-                  const label = `${prefix}  ${rule.localHost}:${rule.localPort} \u2192 ${rule.remoteHost}:${rule.remotePort}`;
+                  const prefix = rule.type === "remote" ? "R" : rule.type === "dynamic" ? "D" : "L";
+                  const label = rule.type === "dynamic"
+                    ? `${prefix}  ${rule.localHost}:${rule.localPort} (SOCKS5)`
+                    : `${prefix}  ${rule.localHost}:${rule.localPort} \u2192 ${rule.remoteHost}:${rule.remotePort}`;
                   return (
                     <div key={rule.id} className="flex items-center gap-2 text-xs font-mono text-muted-foreground">
                       {rule.status === "running" ? (
@@ -274,18 +258,12 @@ export function PortForwardPage() {
             </div>
             <div className="space-y-1.5">
               <Label>{t("forward.asset")}</Label>
-              <Select value={editAssetId} onValueChange={setEditAssetId}>
-                <SelectTrigger>
-                  <SelectValue placeholder={t("forward.selectAsset")} />
-                </SelectTrigger>
-                <SelectContent>
-                  {assets.map((a) => (
-                    <SelectItem key={a.ID} value={String(a.ID)}>
-                      {a.Name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <AssetSelect
+                value={editAssetId}
+                onValueChange={setEditAssetId}
+                filterType="ssh"
+                placeholder={t("forward.selectAsset")}
+              />
             </div>
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
@@ -307,6 +285,7 @@ export function PortForwardPage() {
                     <SelectContent>
                       <SelectItem value="local">L</SelectItem>
                       <SelectItem value="remote">R</SelectItem>
+                      <SelectItem value="dynamic">D</SelectItem>
                     </SelectContent>
                   </Select>
                   <Input className="h-7 text-xs w-24" value={rule.localHost}
@@ -314,12 +293,19 @@ export function PortForwardPage() {
                   <span>:</span>
                   <Input className="h-7 text-xs w-16" value={rule.localPort}
                     onChange={(e) => updateRule(i, "localPort", e.target.value)} placeholder={t("forward.port")} />
-                  <span className="text-muted-foreground">&rarr;</span>
-                  <Input className="h-7 text-xs w-24" value={rule.remoteHost}
-                    onChange={(e) => updateRule(i, "remoteHost", e.target.value)} placeholder="127.0.0.1" />
-                  <span>:</span>
-                  <Input className="h-7 text-xs w-16" value={rule.remotePort}
-                    onChange={(e) => updateRule(i, "remotePort", e.target.value)} placeholder={t("forward.port")} />
+                  {rule.type !== "dynamic" && (
+                    <>
+                      <span className="text-muted-foreground">&rarr;</span>
+                      <Input className="h-7 text-xs w-24" value={rule.remoteHost}
+                        onChange={(e) => updateRule(i, "remoteHost", e.target.value)} placeholder="127.0.0.1" />
+                      <span>:</span>
+                      <Input className="h-7 text-xs w-16" value={rule.remotePort}
+                        onChange={(e) => updateRule(i, "remotePort", e.target.value)} placeholder={t("forward.port")} />
+                    </>
+                  )}
+                  {rule.type === "dynamic" && (
+                    <span className="text-muted-foreground ml-1">SOCKS5</span>
+                  )}
                   {editRules.length > 1 && (
                     <Button variant="ghost" size="icon-xs"
                       onClick={() => setEditRules(editRules.filter((_, j) => j !== i))}>

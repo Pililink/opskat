@@ -91,19 +91,17 @@ func (Asset) TableName() string {
 
 // SSHConfig SSH类型的特定配置
 type SSHConfig struct {
-	Host           string          `json:"host"`
-	Port           int             `json:"port"`
-	Username       string          `json:"username"`
-	AuthType       string          `json:"auth_type"`
-	Password       string          `json:"password,omitempty"`   // 加密后的密码
-	KeyID          int64           `json:"key_id,omitempty"`     // 托管密钥 ID
-	KeySource      string          `json:"key_source,omitempty"` // "managed" | "file"
-	PrivateKeys    []string        `json:"private_keys,omitempty"`
-	JumpHostID     int64           `json:"jump_host_id,omitempty"`
-	Proxy *ProxyConfig `json:"proxy,omitempty"`
-	LastConnected  int64           `json:"last_connected,omitempty"`
+	Host          string       `json:"host"`
+	Port          int          `json:"port"`
+	Username      string       `json:"username"`
+	AuthType      string       `json:"auth_type"`
+	Password      string       `json:"password,omitempty"`       // 加密后的密码（内联，向后兼容）
+	CredentialID  int64        `json:"credential_id,omitempty"`  // 统一凭证 ID（密码或密钥）
+	PrivateKeys   []string     `json:"private_keys,omitempty"`   // 本地密钥文件路径（向后兼容）
+	JumpHostID    int64        `json:"jump_host_id,omitempty"`
+	Proxy         *ProxyConfig `json:"proxy,omitempty"`
+	LastConnected int64        `json:"last_connected,omitempty"`
 }
-
 
 // ProxyConfig 代理配置
 type ProxyConfig struct {
@@ -120,12 +118,12 @@ type DatabaseConfig struct {
 	Host       string         `json:"host"`
 	Port       int            `json:"port"`
 	Username   string         `json:"username"`
-	Password   string         `json:"password,omitempty"`      // credential_svc 加密
-	Database   string         `json:"database,omitempty"`      // 默认数据库
-	SSLMode    string         `json:"ssl_mode,omitempty"`      // postgresql: disable/require/verify-full
-	Params     string         `json:"params,omitempty"`        // 额外连接参数
-	ReadOnly   bool           `json:"read_only,omitempty"`     // 连接级只读
-	SSHAssetID int64          `json:"ssh_asset_id,omitempty"`  // 0=直连, >0=SSH隧道
+	Password   string         `json:"password,omitempty"`     // credential_svc 加密
+	Database   string         `json:"database,omitempty"`     // 默认数据库
+	SSLMode    string         `json:"ssl_mode,omitempty"`     // postgresql: disable/require/verify-full
+	Params     string         `json:"params,omitempty"`       // 额外连接参数
+	ReadOnly   bool           `json:"read_only,omitempty"`    // 连接级只读
+	SSHAssetID int64          `json:"ssh_asset_id,omitempty"` // 0=直连, >0=SSH隧道
 }
 
 // RedisConfig Redis类型的特定配置
@@ -134,7 +132,7 @@ type RedisConfig struct {
 	Port       int    `json:"port"`
 	Username   string `json:"username,omitempty"`
 	Password   string `json:"password,omitempty"`
-	Database   int    `json:"database,omitempty"`     // DB index
+	Database   int    `json:"database,omitempty"` // DB index
 	TLS        bool   `json:"tls,omitempty"`
 	SSHAssetID int64  `json:"ssh_asset_id,omitempty"`
 }
@@ -399,7 +397,7 @@ func (a *Asset) validateDatabase() error {
 func (a *Asset) validateRedis() error {
 	cfg, err := a.GetRedisConfig()
 	if err != nil {
-		return fmt.Errorf("Redis配置无效: %w", err)
+		return fmt.Errorf("redis配置无效: %w", err)
 	}
 	if cfg.Host == "" {
 		return errors.New("Redis主机地址不能为空")

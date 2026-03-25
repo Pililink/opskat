@@ -36,9 +36,9 @@ export interface RedisKeyInfo {
   type: string;
   ttl: number;
   value: unknown;
-  total: number;       // LLEN/HLEN/SCARD/ZCARD, -1 for string
-  valueCursor: string;  // HSCAN/SSCAN cursor
-  valueOffset: number;  // LRANGE/ZRANGE next offset
+  total: number; // LLEN/HLEN/SCARD/ZCARD, -1 for string
+  valueCursor: string; // HSCAN/SSCAN cursor
+  valueOffset: number; // LRANGE/ZRANGE next offset
   hasMoreValues: boolean;
   loadingMore: boolean;
 }
@@ -177,7 +177,9 @@ export const useQueryStore = create<QueryState>((set, get) => ({
       const cfg = JSON.parse(asset.Config || "{}");
       driver = cfg.driver;
       defaultDatabase = cfg.database;
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
 
     const assetPath = useAssetStore.getState().getAssetPath(asset);
     tabStore.openTab({
@@ -221,15 +223,18 @@ export const useQueryStore = create<QueryState>((set, get) => ({
     }));
 
     try {
-      const sql = tab.driver === "postgresql"
-        ? "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname"
-        : "SHOW DATABASES";
+      const sql =
+        tab.driver === "postgresql"
+          ? "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname"
+          : "SHOW DATABASES";
       const result = await ExecuteSQL(tab.assetId, sql, "");
       const parsed: SQLResult = JSON.parse(result);
-      const databases = (parsed.rows || []).map((r) => {
-        const vals = Object.values(r);
-        return String(vals[0] || "");
-      }).filter(Boolean);
+      const databases = (parsed.rows || [])
+        .map((r) => {
+          const vals = Object.values(r);
+          return String(vals[0] || "");
+        })
+        .filter(Boolean);
 
       set((s) => ({
         dbStates: {
@@ -252,15 +257,18 @@ export const useQueryStore = create<QueryState>((set, get) => ({
     if (!tab) return;
 
     try {
-      const sql = tab.driver === "postgresql"
-        ? `SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename`
-        : `SHOW TABLES FROM \`${database}\``;
+      const sql =
+        tab.driver === "postgresql"
+          ? `SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename`
+          : `SHOW TABLES FROM \`${database}\``;
       const result = await ExecuteSQL(tab.assetId, sql, database);
       const parsed: SQLResult = JSON.parse(result);
-      const tables = (parsed.rows || []).map((r) => {
-        const vals = Object.values(r);
-        return String(vals[0] || "");
-      }).filter(Boolean);
+      const tables = (parsed.rows || [])
+        .map((r) => {
+          const vals = Object.values(r);
+          return String(vals[0] || "");
+        })
+        .filter(Boolean);
 
       set((s) => ({
         dbStates: {
@@ -350,7 +358,10 @@ export const useQueryStore = create<QueryState>((set, get) => ({
         ...s.dbStates,
         [tabId]: {
           ...state,
-          innerTabs: [...state.innerTabs, { id: innerId, type: "sql", title: `SQL ${count}`, sql, selectedDb: database }],
+          innerTabs: [
+            ...state.innerTabs,
+            { id: innerId, type: "sql", title: `SQL ${count}`, sql, selectedDb: database },
+          ],
           activeInnerTabId: innerId,
         },
       },
@@ -394,9 +405,7 @@ export const useQueryStore = create<QueryState>((set, get) => ({
         ...s.dbStates,
         [tabId]: {
           ...state,
-          innerTabs: state.innerTabs.map((t) =>
-            t.id === innerTabId ? ({ ...t, ...patch } as InnerTab) : t
-          ),
+          innerTabs: state.innerTabs.map((t) => (t.id === innerTabId ? ({ ...t, ...patch } as InnerTab) : t)),
         },
       },
     }));
@@ -584,13 +593,21 @@ export const useQueryStore = create<QueryState>((set, get) => ({
           [tabId]: {
             ...s.redisStates[tabId],
             keyInfo: {
-              type: keyType, ttl, value, total,
-              valueCursor, valueOffset, hasMoreValues, loadingMore: false,
+              type: keyType,
+              ttl,
+              value,
+              total,
+              valueCursor,
+              valueOffset,
+              hasMoreValues,
+              loadingMore: false,
             },
           },
         },
       }));
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   },
 
   loadMoreValues: async (tabId) => {
@@ -617,7 +634,11 @@ export const useQueryStore = create<QueryState>((set, get) => ({
 
       switch (info.type) {
         case "list": {
-          const r = await ExecuteRedisArgs(tab.assetId, ["LRANGE", key, String(newOffset), String(newOffset + REDIS_PAGE_SIZE - 1)], db);
+          const r = await ExecuteRedisArgs(
+            tab.assetId,
+            ["LRANGE", key, String(newOffset), String(newOffset + REDIS_PAGE_SIZE - 1)],
+            db
+          );
           const items = (JSON.parse(r).value as string[]) || [];
           newValue = [...(info.value as string[]), ...items];
           newOffset = (newValue as string[]).length;
@@ -625,7 +646,11 @@ export const useQueryStore = create<QueryState>((set, get) => ({
           break;
         }
         case "hash": {
-          const r = await ExecuteRedisArgs(tab.assetId, ["HSCAN", key, newCursor, "COUNT", String(REDIS_PAGE_SIZE)], db);
+          const r = await ExecuteRedisArgs(
+            tab.assetId,
+            ["HSCAN", key, newCursor, "COUNT", String(REDIS_PAGE_SIZE)],
+            db
+          );
           const parsed = JSON.parse(r);
           if (parsed.type === "list" && Array.isArray(parsed.value)) {
             const arr = parsed.value as unknown[];
@@ -641,7 +666,11 @@ export const useQueryStore = create<QueryState>((set, get) => ({
           break;
         }
         case "set": {
-          const r = await ExecuteRedisArgs(tab.assetId, ["SSCAN", key, newCursor, "COUNT", String(REDIS_PAGE_SIZE)], db);
+          const r = await ExecuteRedisArgs(
+            tab.assetId,
+            ["SSCAN", key, newCursor, "COUNT", String(REDIS_PAGE_SIZE)],
+            db
+          );
           const parsed = JSON.parse(r);
           if (parsed.type === "list" && Array.isArray(parsed.value)) {
             const arr = parsed.value as unknown[];
@@ -653,7 +682,11 @@ export const useQueryStore = create<QueryState>((set, get) => ({
           break;
         }
         case "zset": {
-          const r = await ExecuteRedisArgs(tab.assetId, ["ZRANGE", key, String(newOffset), String(newOffset + REDIS_PAGE_SIZE - 1), "WITHSCORES"], db);
+          const r = await ExecuteRedisArgs(
+            tab.assetId,
+            ["ZRANGE", key, String(newOffset), String(newOffset + REDIS_PAGE_SIZE - 1), "WITHSCORES"],
+            db
+          );
           const raw = (JSON.parse(r).value as string[]) || [];
           const pairs: [string, string][] = [];
           for (let i = 0; i < raw.length; i += 2) {
@@ -672,9 +705,12 @@ export const useQueryStore = create<QueryState>((set, get) => ({
           [tabId]: {
             ...s.redisStates[tabId],
             keyInfo: {
-              ...info, value: newValue,
-              valueCursor: newCursor, valueOffset: newOffset,
-              hasMoreValues: newHasMore, loadingMore: false,
+              ...info,
+              value: newValue,
+              valueCursor: newCursor,
+              valueOffset: newOffset,
+              hasMoreValues: newHasMore,
+              loadingMore: false,
             },
           },
         },

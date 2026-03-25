@@ -2,24 +2,12 @@ import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { Trash2, Eye, EyeOff, FolderOpen, Loader2, PlugZap } from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { IconPicker } from "@/components/asset/IconPicker";
 import { AssetSelect } from "@/components/asset/AssetSelect";
@@ -102,12 +90,7 @@ const DEFAULT_ICONS: Record<string, string> = {
   redis: "redis",
 };
 
-export function AssetForm({
-  open,
-  onOpenChange,
-  editAsset,
-  defaultGroupId = 0,
-}: AssetFormProps) {
+export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }: AssetFormProps) {
   const { t } = useTranslation();
   const { createAsset, updateAsset } = useAssetStore();
 
@@ -382,7 +365,13 @@ export function AssetForm({
     }
     if (connectionType === "jumphost" && jumpHostId > 0) sshConfig.jump_host_id = jumpHostId;
     if (connectionType === "proxy" && proxyHost) {
-      sshConfig.proxy = { type: proxyType, host: proxyHost, port: proxyPort, username: proxyUsername || undefined, password: proxyPassword || undefined };
+      sshConfig.proxy = {
+        type: proxyType,
+        host: proxyHost,
+        port: proxyPort,
+        username: proxyUsername || undefined,
+        password: proxyPassword || undefined,
+      };
     }
     setTesting(true);
     try {
@@ -550,7 +539,12 @@ export function AssetForm({
     }
   };
 
-  const typeLabel = assetType === "ssh" ? t("asset.typeSSH") : assetType === "database" ? t("asset.typeDatabase") : t("asset.typeRedis");
+  const typeLabel =
+    assetType === "ssh"
+      ? t("asset.typeSSH")
+      : assetType === "database"
+        ? t("asset.typeDatabase")
+        : t("asset.typeRedis");
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -742,10 +736,7 @@ export function AssetForm({
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
                 <Label>{t("asset.username")}</Label>
-                <Input
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                />
+                <Input value={username} onChange={(e) => setUsername(e.target.value)} />
               </div>
               <div className="grid gap-2">
                 <Label>{t("asset.authType")}</Label>
@@ -754,9 +745,7 @@ export function AssetForm({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="password">
-                      {t("asset.authPassword")}
-                    </SelectItem>
+                    <SelectItem value="password">{t("asset.authPassword")}</SelectItem>
                     <SelectItem value="key">{t("asset.authKey")}</SelectItem>
                   </SelectContent>
                 </Select>
@@ -771,7 +760,11 @@ export function AssetForm({
               <Input
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder={assetType === "redis" ? t("asset.username") + " (" + t("asset.databasePlaceholder").split("（")[0] + ")" : ""}
+                placeholder={
+                  assetType === "redis"
+                    ? t("asset.username") + " (" + t("asset.databasePlaceholder").split("（")[0] + ")"
+                    : ""
+                }
               />
             </div>
           )}
@@ -795,11 +788,7 @@ export function AssetForm({
                   className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
                   onClick={() => setShowPassword(!showPassword)}
                 >
-                  {showPassword ? (
-                    <EyeOff className="h-3.5 w-3.5" />
-                  ) : (
-                    <Eye className="h-3.5 w-3.5" />
-                  )}
+                  {showPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                 </Button>
               </div>
             </div>
@@ -824,11 +813,7 @@ export function AssetForm({
                   className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
                   onClick={() => setShowPassword(!showPassword)}
                 >
-                  {showPassword ? (
-                    <EyeOff className="h-3.5 w-3.5" />
-                  ) : (
-                    <Eye className="h-3.5 w-3.5" />
-                  )}
+                  {showPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                 </Button>
               </div>
             </div>
@@ -839,20 +824,13 @@ export function AssetForm({
             <div className="grid gap-3 border rounded-lg p-3">
               <div className="grid gap-2">
                 <Label>{t("asset.keySource")}</Label>
-                <Select
-                  value={keySource}
-                  onValueChange={(v) => setKeySource(v as "managed" | "file")}
-                >
+                <Select value={keySource} onValueChange={(v) => setKeySource(v as "managed" | "file")}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="managed">
-                      {t("asset.keySourceManaged")}
-                    </SelectItem>
-                    <SelectItem value="file">
-                      {t("asset.keySourceFile")}
-                    </SelectItem>
+                    <SelectItem value="managed">{t("asset.keySourceManaged")}</SelectItem>
+                    <SelectItem value="file">{t("asset.keySourceFile")}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -861,19 +839,12 @@ export function AssetForm({
                 <div className="grid gap-2">
                   <Label>{t("asset.selectKey")}</Label>
                   {managedKeys.length > 0 ? (
-                    <Select
-                      value={String(credentialId)}
-                      onValueChange={(v) => setCredentialId(Number(v))}
-                    >
+                    <Select value={String(credentialId)} onValueChange={(v) => setCredentialId(Number(v))}>
                       <SelectTrigger>
-                        <SelectValue
-                          placeholder={t("asset.selectKeyPlaceholder")}
-                        />
+                        <SelectValue placeholder={t("asset.selectKeyPlaceholder")} />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="0">
-                          {t("asset.selectKeyPlaceholder")}
-                        </SelectItem>
+                        <SelectItem value="0">{t("asset.selectKeyPlaceholder")}</SelectItem>
                         {managedKeys.map((k) => (
                           <SelectItem key={k.id} value={String(k.id)}>
                             {k.name} ({(k.keyType || "").toUpperCase()})
@@ -882,9 +853,7 @@ export function AssetForm({
                       </SelectContent>
                     </Select>
                   ) : (
-                    <p className="text-xs text-muted-foreground">
-                      {t("asset.noManagedKeys")}
-                    </p>
+                    <p className="text-xs text-muted-foreground">{t("asset.noManagedKeys")}</p>
                   )}
                 </div>
               )}
@@ -1056,9 +1025,11 @@ export function AssetForm({
             variant="outline"
             size="sm"
             onClick={
-              assetType === "ssh" ? handleTestConnection
-                : assetType === "database" ? handleTestDatabaseConnection
-                : handleTestRedisConnection
+              assetType === "ssh"
+                ? handleTestConnection
+                : assetType === "database"
+                  ? handleTestDatabaseConnection
+                  : handleTestRedisConnection
             }
             disabled={testing || !host}
             className="gap-1 w-fit"
@@ -1070,22 +1041,14 @@ export function AssetForm({
           {/* Group - Tree Selector */}
           <div className="grid gap-2">
             <Label>{t("asset.group")}</Label>
-            <GroupSelect
-              value={groupId}
-              onValueChange={setGroupId}
-            />
+            <GroupSelect value={groupId} onValueChange={setGroupId} />
           </div>
 
           {/* Description */}
           <div className="grid gap-2">
             <Label>{t("asset.description")}</Label>
-            <Textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              rows={2}
-            />
+            <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
           </div>
-
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>

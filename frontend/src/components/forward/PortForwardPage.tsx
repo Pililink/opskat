@@ -1,23 +1,20 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Plus, Play, Square, Pencil, Trash2,
-  CircleCheck, CircleAlert, CircleDot, CircleMinus,
-} from "lucide-react";
+import { Plus, Play, Square, Pencil, Trash2, CircleCheck, CircleAlert, CircleDot, CircleMinus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
-} from "@/components/ui/dialog";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { AssetSelect } from "@/components/asset/AssetSelect";
 import {
-  ListForwardConfigs, CreateForwardConfig, UpdateForwardConfig,
-  DeleteForwardConfig, StartForwardConfig, StopForwardConfig,
+  ListForwardConfigs,
+  CreateForwardConfig,
+  UpdateForwardConfig,
+  DeleteForwardConfig,
+  StartForwardConfig,
+  StopForwardConfig,
 } from "../../../wailsjs/go/main/App";
 import { main, forward_entity } from "../../../wailsjs/go/models";
 
@@ -31,7 +28,11 @@ interface EditRule {
 }
 
 const emptyRule = (): EditRule => ({
-  type: "local", localHost: "127.0.0.1", localPort: "", remoteHost: "127.0.0.1", remotePort: "",
+  type: "local",
+  localHost: "127.0.0.1",
+  localPort: "",
+  remoteHost: "127.0.0.1",
+  remotePort: "",
 });
 
 export function PortForwardPage() {
@@ -90,13 +91,16 @@ export function PortForwardPage() {
     if (!editName || !editAssetId) return;
     const rules = editRules
       .filter((r) => r.localPort && r.remotePort)
-      .map((r) => new forward_entity.ForwardRule({
-        type: r.type,
-        localHost: r.localHost,
-        localPort: parseInt(r.localPort, 10),
-        remoteHost: r.remoteHost,
-        remotePort: parseInt(r.remotePort, 10),
-      }));
+      .map(
+        (r) =>
+          new forward_entity.ForwardRule({
+            type: r.type,
+            localHost: r.localHost,
+            localPort: parseInt(r.localPort, 10),
+            remoteHost: r.remoteHost,
+            remotePort: parseInt(r.remotePort, 10),
+          })
+      );
     if (editId) {
       await UpdateForwardConfig(editId, editName, editAssetId, rules);
     } else {
@@ -127,10 +131,16 @@ export function PortForwardPage() {
 
   const handleAssetChange = async (cfg: main.ForwardConfigWithStatus, assetId: number) => {
     const wasRunning = cfg.status !== "stopped";
-    const rules = cfg.rules.map((r) => new forward_entity.ForwardRule({
-      type: r.type, localHost: r.localHost, localPort: r.localPort,
-      remoteHost: r.remoteHost, remotePort: r.remotePort,
-    }));
+    const rules = cfg.rules.map(
+      (r) =>
+        new forward_entity.ForwardRule({
+          type: r.type,
+          localHost: r.localHost,
+          localPort: r.localPort,
+          remoteHost: r.remoteHost,
+          remotePort: r.remotePort,
+        })
+    );
     await UpdateForwardConfig(cfg.id, cfg.name, assetId, rules);
     if (wasRunning) {
       await StartForwardConfig(cfg.id);
@@ -144,19 +154,27 @@ export function PortForwardPage() {
 
   const statusIcon = (status: string) => {
     switch (status) {
-      case "running": return <CircleCheck className="h-4 w-4 text-green-500" />;
-      case "partial": return <CircleDot className="h-4 w-4 text-yellow-500" />;
-      case "error":   return <CircleAlert className="h-4 w-4 text-destructive" />;
-      default:        return <CircleMinus className="h-4 w-4 text-muted-foreground" />;
+      case "running":
+        return <CircleCheck className="h-4 w-4 text-green-500" />;
+      case "partial":
+        return <CircleDot className="h-4 w-4 text-yellow-500" />;
+      case "error":
+        return <CircleAlert className="h-4 w-4 text-destructive" />;
+      default:
+        return <CircleMinus className="h-4 w-4 text-muted-foreground" />;
     }
   };
 
   const statusLabel = (status: string) => {
     switch (status) {
-      case "running": return t("forward.running");
-      case "partial": return t("forward.partial");
-      case "error":   return t("forward.error");
-      default:        return t("forward.stopped");
+      case "running":
+        return t("forward.running");
+      case "partial":
+        return t("forward.partial");
+      case "error":
+        return t("forward.error");
+      default:
+        return t("forward.stopped");
     }
   };
 
@@ -172,9 +190,7 @@ export function PortForwardPage() {
 
       <div className="flex-1 overflow-y-auto p-4">
         {configs.length === 0 && !loading && (
-          <div className="text-center text-muted-foreground py-12">
-            {t("forward.empty")}
-          </div>
+          <div className="text-center text-muted-foreground py-12">{t("forward.empty")}</div>
         )}
 
         <div className="grid gap-4 max-w-3xl mx-auto">
@@ -211,7 +227,12 @@ export function PortForwardPage() {
                 <Button variant="ghost" size="icon-xs" onClick={() => openEdit(cfg)} title={t("forward.edit")}>
                   <Pencil className="h-3.5 w-3.5" />
                 </Button>
-                <Button variant="ghost" size="icon-xs" onClick={() => setDeleteTarget({ id: cfg.id, name: cfg.name })} title={t("forward.delete")}>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={() => setDeleteTarget({ id: cfg.id, name: cfg.name })}
+                  title={t("forward.delete")}
+                >
                   <Trash2 className="h-3.5 w-3.5" />
                 </Button>
               </div>
@@ -220,9 +241,10 @@ export function PortForwardPage() {
               <div className="space-y-1">
                 {cfg.rules.map((rule) => {
                   const prefix = rule.type === "remote" ? "R" : rule.type === "dynamic" ? "D" : "L";
-                  const label = rule.type === "dynamic"
-                    ? `${prefix}  ${rule.localHost}:${rule.localPort} (SOCKS5)`
-                    : `${prefix}  ${rule.localHost}:${rule.localPort} \u2192 ${rule.remoteHost}:${rule.remotePort}`;
+                  const label =
+                    rule.type === "dynamic"
+                      ? `${prefix}  ${rule.localHost}:${rule.localPort} (SOCKS5)`
+                      : `${prefix}  ${rule.localHost}:${rule.localPort} \u2192 ${rule.remoteHost}:${rule.remotePort}`;
                   return (
                     <div key={rule.id} className="flex items-center gap-2 text-xs font-mono text-muted-foreground">
                       {rule.status === "running" ? (
@@ -248,9 +270,7 @@ export function PortForwardPage() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>
-              {editId ? t("forward.edit") : t("forward.create")}
-            </DialogTitle>
+            <DialogTitle>{editId ? t("forward.edit") : t("forward.create")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
@@ -274,7 +294,10 @@ export function PortForwardPage() {
               <div className="flex items-center justify-between">
                 <Label>{t("forward.rules")}</Label>
                 <Button
-                  type="button" variant="ghost" size="sm" className="h-6 gap-1 text-xs"
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 gap-1 text-xs"
                   onClick={() => setEditRules([...editRules, emptyRule()])}
                 >
                   <Plus className="h-3 w-3" />
@@ -293,27 +316,44 @@ export function PortForwardPage() {
                       <SelectItem value="dynamic">D</SelectItem>
                     </SelectContent>
                   </Select>
-                  <Input className="h-7 text-xs w-24" value={rule.localHost}
-                    onChange={(e) => updateRule(i, "localHost", e.target.value)} placeholder="127.0.0.1" />
+                  <Input
+                    className="h-7 text-xs w-24"
+                    value={rule.localHost}
+                    onChange={(e) => updateRule(i, "localHost", e.target.value)}
+                    placeholder="127.0.0.1"
+                  />
                   <span>:</span>
-                  <Input className="h-7 text-xs w-16" value={rule.localPort}
-                    onChange={(e) => updateRule(i, "localPort", e.target.value)} placeholder={t("forward.port")} />
+                  <Input
+                    className="h-7 text-xs w-16"
+                    value={rule.localPort}
+                    onChange={(e) => updateRule(i, "localPort", e.target.value)}
+                    placeholder={t("forward.port")}
+                  />
                   {rule.type !== "dynamic" && (
                     <>
                       <span className="text-muted-foreground">&rarr;</span>
-                      <Input className="h-7 text-xs w-24" value={rule.remoteHost}
-                        onChange={(e) => updateRule(i, "remoteHost", e.target.value)} placeholder="127.0.0.1" />
+                      <Input
+                        className="h-7 text-xs w-24"
+                        value={rule.remoteHost}
+                        onChange={(e) => updateRule(i, "remoteHost", e.target.value)}
+                        placeholder="127.0.0.1"
+                      />
                       <span>:</span>
-                      <Input className="h-7 text-xs w-16" value={rule.remotePort}
-                        onChange={(e) => updateRule(i, "remotePort", e.target.value)} placeholder={t("forward.port")} />
+                      <Input
+                        className="h-7 text-xs w-16"
+                        value={rule.remotePort}
+                        onChange={(e) => updateRule(i, "remotePort", e.target.value)}
+                        placeholder={t("forward.port")}
+                      />
                     </>
                   )}
-                  {rule.type === "dynamic" && (
-                    <span className="text-muted-foreground ml-1">SOCKS5</span>
-                  )}
+                  {rule.type === "dynamic" && <span className="text-muted-foreground ml-1">SOCKS5</span>}
                   {editRules.length > 1 && (
-                    <Button variant="ghost" size="icon-xs"
-                      onClick={() => setEditRules(editRules.filter((_, j) => j !== i))}>
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      onClick={() => setEditRules(editRules.filter((_, j) => j !== i))}
+                    >
                       <Trash2 className="h-3 w-3" />
                     </Button>
                   )}
@@ -335,7 +375,9 @@ export function PortForwardPage() {
       {/* Delete confirm */}
       <ConfirmDialog
         open={!!deleteTarget}
-        onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
         title={t("forward.deleteConfirmTitle")}
         description={t("forward.deleteConfirmDesc", { name: deleteTarget?.name ?? "" })}
         cancelText={t("action.cancel")}

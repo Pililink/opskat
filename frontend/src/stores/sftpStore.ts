@@ -135,9 +135,7 @@ function subscribeProgress(
               ...state.transfers,
               [transferId]: {
                 ...existing,
-                status: event.error?.includes("context canceled")
-                  ? "cancelled"
-                  : "error",
+                status: event.error?.includes("context canceled") ? "cancelled" : "error",
                 error: event.error,
               },
             },
@@ -225,9 +223,7 @@ export const useSFTPStore = create<SFTPState>((set, get) => ({
   },
 
   getSessionTransfers: (sessionId) => {
-    return Object.values(get().transfers).filter(
-      (t) => t.sessionId === sessionId
-    );
+    return Object.values(get().transfers).filter((t) => t.sessionId === sessionId);
   },
 
   toggleFileManager: (tabId) => {
@@ -241,10 +237,7 @@ export const useSFTPStore = create<SFTPState>((set, get) => ({
 
   setFileManagerWidth: (width) => {
     set({
-      fileManagerWidth: Math.max(
-        MIN_FILE_MANAGER_WIDTH,
-        Math.min(MAX_FILE_MANAGER_WIDTH, width)
-      ),
+      fileManagerWidth: Math.max(MIN_FILE_MANAGER_WIDTH, Math.min(MAX_FILE_MANAGER_WIDTH, width)),
     });
   },
 }));

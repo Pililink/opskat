@@ -264,15 +264,19 @@ func TestAllSubCommandsAllowed(t *testing.T) {
 		rules := []string{"ls *", "cat *", "grep *"}
 
 		Convey("全部允许", func() {
-			So(allSubCommandsAllowed([]string{"ls -la", "cat /etc/passwd"}, rules), ShouldBeTrue)
+			ok, matched := allSubCommandsAllowed([]string{"ls -la", "cat /etc/passwd"}, rules)
+			So(ok, ShouldBeTrue)
+			So(matched, ShouldNotBeEmpty)
 		})
 
 		Convey("部分不允许", func() {
-			So(allSubCommandsAllowed([]string{"ls -la", "rm -rf /"}, rules), ShouldBeFalse)
+			ok, _ := allSubCommandsAllowed([]string{"ls -la", "rm -rf /"}, rules)
+			So(ok, ShouldBeFalse)
 		})
 
 		Convey("空规则", func() {
-			So(allSubCommandsAllowed([]string{"ls"}, nil), ShouldBeFalse)
+			ok, _ := allSubCommandsAllowed([]string{"ls"}, nil)
+			So(ok, ShouldBeFalse)
 		})
 	})
 }

@@ -11,11 +11,11 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
+	"github.com/opskat/opskat/internal/model/entity/grant_entity"
 	"github.com/opskat/opskat/internal/model/entity/group_entity"
-	"github.com/opskat/opskat/internal/model/entity/plan_entity"
 	"github.com/opskat/opskat/internal/model/entity/policy"
+	"github.com/opskat/opskat/internal/repository/grant_repo"
 	"github.com/opskat/opskat/internal/repository/group_repo"
-	"github.com/opskat/opskat/internal/repository/plan_repo"
 	"github.com/opskat/opskat/internal/service/asset_svc"
 
 	"mvdan.cc/sh/v3/syntax"
@@ -32,14 +32,12 @@ const (
 
 // 决策来源常量
 const (
-	SourcePolicyAllow  = "policy_allow"  // 命令策略白名单放行
-	SourcePolicyDeny   = "policy_deny"   // 命令策略黑名单拒绝
-	SourceSessionAllow = "session_allow" // 会话级模式匹配放行
-	SourceUserAllow    = "user_allow"    // 用户手动允许
-	SourceUserDeny     = "user_deny"     // 用户手动拒绝
-	SourceAutoAllow    = "auto_allow"    // 无策略限制，直接放行
-	SourcePlanAllow    = "plan_allow"    // Plan 预批准匹配放行
-	SourcePlanDeny     = "plan_deny"     // Plan 权限申请被拒绝
+	SourcePolicyAllow = "policy_allow" // 命令策略白名单放行
+	SourcePolicyDeny  = "policy_deny"  // 命令策略黑名单拒绝
+	SourceUserAllow   = "user_allow"   // 用户手动允许
+	SourceUserDeny    = "user_deny"    // 用户手动拒绝
+	SourceGrantAllow  = "grant_allow"  // Grant 预批准匹配放行
+	SourceGrantDeny   = "grant_deny"   // Grant 权限申请被拒绝
 )
 
 // CheckResult 权限检查结果
@@ -79,21 +77,13 @@ func setCheckResult(ctx context.Context, result CheckResult) {
 	}
 }
 
-// getCheckResult 读取决策结果（由 AuditingExecutor 调用）
-func getCheckResult(ctx context.Context) *CheckResult {
-	if r, ok := ctx.Value(checkResultKey{}).(*CheckResult); ok {
-		return r
-	}
-	return nil
-}
-
 // CommandConfirmFunc 命令确认回调，阻塞等待用户响应
 type CommandConfirmFunc func(assetName, command string) (allowed, alwaysAllow bool)
 
-// PlanRequestFunc Plan 审批回调，创建 plan 并等待用户审批
+// GrantRequestFunc Grant 审批回调，创建 grant 并等待用户审批
 // patterns 为命令模式列表，用户可能在审批弹窗中编辑
 // 返回 (approved, 用户编辑后的 patterns)
-type PlanRequestFunc func(assetID int64, assetName string, patterns []string, reason string) (approved bool, finalPatterns []string)
+type GrantRequestFunc func(assetID int64, assetName string, patterns []string, reason string) (approved bool, finalPatterns []string)
 
 // ApprovedPattern 会话级已批准的命令模式
 type ApprovedPattern struct {
@@ -111,10 +101,10 @@ func (p *ApprovedPattern) Match(assetID int64, command string) bool {
 
 // CommandPolicyChecker 命令权限检查器，通过 context 注入到两条执行路径
 type CommandPolicyChecker struct {
-	confirmFunc     CommandConfirmFunc
-	planRequestFunc PlanRequestFunc
-	sessionAllowed  []ApprovedPattern // 会话级白名单（资产+命令模式，exec 确认弹窗的「始终允许」）
-	mu              sync.Mutex
+	confirmFunc      CommandConfirmFunc
+	grantRequestFunc GrantRequestFunc
+	grantAllowed     []ApprovedPattern // Grant 预批准白名单（资产+命令模式）
+	mu               sync.Mutex
 }
 
 // NewCommandPolicyChecker 创建权限检查器
@@ -124,55 +114,55 @@ func NewCommandPolicyChecker(confirmFunc CommandConfirmFunc) *CommandPolicyCheck
 	}
 }
 
-// SetPlanRequestFunc 设置 Plan 审批回调
-func (c *CommandPolicyChecker) SetPlanRequestFunc(fn PlanRequestFunc) {
-	c.planRequestFunc = fn
+// SetGrantRequestFunc 设置 Grant 审批回调
+func (c *CommandPolicyChecker) SetGrantRequestFunc(fn GrantRequestFunc) {
+	c.grantRequestFunc = fn
 }
 
-// SubmitPlan 提交 plan 审批请求（request_permission 工具调用）
-func (c *CommandPolicyChecker) SubmitPlan(ctx context.Context, assetID int64, patterns []string, reason string) CheckResult {
-	if c.planRequestFunc == nil {
-		return CheckResult{Decision: Deny, Message: "无 Plan 审批机制"}
+// SubmitGrant 提交 grant 审批请求（request_permission 工具调用）
+func (c *CommandPolicyChecker) SubmitGrant(ctx context.Context, assetID int64, patterns []string, reason string) CheckResult {
+	if c.grantRequestFunc == nil {
+		return CheckResult{Decision: Deny, Message: "无 Grant 审批机制"}
 	}
 
 	assetName := ""
 	if assetID > 0 {
 		asset, err := asset_svc.Asset().Get(ctx, assetID)
 		if err != nil {
-			logger.Default().Warn("get asset for plan submission", zap.Int64("assetID", assetID), zap.Error(err))
+			logger.Default().Warn("get asset for grant submission", zap.Int64("assetID", assetID), zap.Error(err))
 		}
 		if asset != nil {
 			assetName = asset.Name
 		}
 	}
 
-	approved, finalPatterns := c.planRequestFunc(assetID, assetName, patterns, reason)
+	approved, finalPatterns := c.grantRequestFunc(assetID, assetName, patterns, reason)
 	if !approved {
-		return CheckResult{Decision: Deny, Message: "用户拒绝 Plan 审批", DecisionSource: SourcePlanDeny, MatchedPattern: strings.Join(patterns, "; ")}
+		return CheckResult{Decision: Deny, Message: "用户拒绝 Grant 审批", DecisionSource: SourceGrantDeny, MatchedPattern: strings.Join(patterns, "; ")}
 	}
 
-	return CheckResult{Decision: Allow, Message: fmt.Sprintf("Plan 已批准，共 %d 条模式", len(finalPatterns)), DecisionSource: SourcePlanAllow, MatchedPattern: strings.Join(finalPatterns, "; ")}
+	return CheckResult{Decision: Allow, Message: fmt.Sprintf("Grant 已批准，共 %d 条模式", len(finalPatterns)), DecisionSource: SourceGrantAllow, MatchedPattern: strings.Join(finalPatterns, "; ")}
 }
 
 // AddApprovedPattern 添加已批准的模式（外部调用，如 opsctl 审批后）
 func (c *CommandPolicyChecker) AddApprovedPattern(assetID int64, pattern string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.sessionAllowed = append(c.sessionAllowed, ApprovedPattern{
+	c.grantAllowed = append(c.grantAllowed, ApprovedPattern{
 		AssetID: assetID,
 		Pattern: pattern,
 	})
 }
 
-// matchPlanPatterns 从 DB 中查找已批准 plan 的 items，用通配匹配命令
+// matchGrantPatterns 从 DB 中查找已批准 grant 的 items，用通配匹配命令
 // 返回首个匹配的 pattern，空字符串表示未匹配
 // groups 为资产所属的组链（组 → 父组 → ... → 根）
-func matchPlanPatterns(ctx context.Context, assetID int64, groups []*group_entity.Group, subCmds []string) string {
+func matchGrantPatterns(ctx context.Context, assetID int64, groups []*group_entity.Group, subCmds []string) string {
 	sessionID := GetSessionID(ctx)
 	if sessionID == "" {
 		return ""
 	}
-	repo := plan_repo.Plan()
+	repo := grant_repo.Grant()
 	if repo == nil {
 		return ""
 	}
@@ -181,18 +171,18 @@ func matchPlanPatterns(ctx context.Context, assetID int64, groups []*group_entit
 		return ""
 	}
 
-	// 构建资产所属的组 ID 集合，用于匹配 group 级 plan item
+	// 构建资产所属的组 ID 集合，用于匹配 group 级 grant item
 	groupIDs := make(map[int64]bool, len(groups))
 	for _, g := range groups {
 		groupIDs[g.ID] = true
 	}
 
-	// 所有子命令都必须匹配某个 plan item
+	// 所有子命令都必须匹配某个 grant item
 	var firstPattern string
 	for _, cmd := range subCmds {
 		matched := false
 		for _, item := range items {
-			if !planItemMatchesTarget(item, assetID, groupIDs) {
+			if !grantItemMatchesTarget(item, assetID, groupIDs) {
 				continue
 			}
 			if MatchCommandRule(item.Command, cmd) {
@@ -210,11 +200,11 @@ func matchPlanPatterns(ctx context.Context, assetID int64, groups []*group_entit
 	return firstPattern
 }
 
-// planItemMatchesTarget 检查 plan item 是否匹配目标资产
+// grantItemMatchesTarget 检查 grant item 是否匹配目标资产
 // AssetID=0 且 GroupID=0 → 匹配所有资产
 // AssetID>0 → 精确匹配资产
 // GroupID>0 → 匹配组内资产（检查资产所属组链）
-func planItemMatchesTarget(item *plan_entity.PlanItem, assetID int64, groupIDs map[int64]bool) bool {
+func grantItemMatchesTarget(item *grant_entity.GrantItem, assetID int64, groupIDs map[int64]bool) bool {
 	if item.AssetID != 0 {
 		return item.AssetID == assetID
 	}
@@ -228,17 +218,17 @@ func planItemMatchesTarget(item *plan_entity.PlanItem, assetID int64, groupIDs m
 // matchSessionPatterns 检查所有子命令是否都能被会话级模式匹配（调用方需持有 mu 锁）
 // 返回是否匹配，以及首个匹配的模式（用于审计）
 func (c *CommandPolicyChecker) matchSessionPatterns(assetID int64, subCmds []string) (bool, string) {
-	if len(c.sessionAllowed) == 0 {
+	if len(c.grantAllowed) == 0 {
 		return false, ""
 	}
 	var firstPattern string
 	for _, cmd := range subCmds {
 		matched := false
-		for i := range c.sessionAllowed {
-			if c.sessionAllowed[i].Match(assetID, cmd) {
+		for i := range c.grantAllowed {
+			if c.grantAllowed[i].Match(assetID, cmd) {
 				matched = true
 				if firstPattern == "" {
-					firstPattern = c.sessionAllowed[i].Pattern
+					firstPattern = c.grantAllowed[i].Pattern
 				}
 				break
 			}
@@ -254,7 +244,7 @@ func (c *CommandPolicyChecker) matchSessionPatterns(assetID int64, subCmds []str
 func (c *CommandPolicyChecker) Reset() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.sessionAllowed = nil
+	c.grantAllowed = nil
 }
 
 // Check 检查命令是否允许执行
@@ -297,8 +287,10 @@ func (c *CommandPolicyChecker) Check(ctx context.Context, assetID int64, command
 	}
 
 	// 4. 检查 allow list（所有子命令都匹配才放行）
-	if len(allAllowRules) > 0 && allSubCommandsAllowed(subCmds, allAllowRules) {
-		return CheckResult{Decision: Allow, DecisionSource: SourcePolicyAllow}
+	if len(allAllowRules) > 0 {
+		if ok, matched := allSubCommandsAllowed(subCmds, allAllowRules); ok {
+			return CheckResult{Decision: Allow, DecisionSource: SourcePolicyAllow, MatchedPattern: matched}
+		}
 	}
 
 	// 5. 检查会话级白名单（按 assetID + pattern 匹配，exec 弹窗的「始终允许」）
@@ -306,12 +298,12 @@ func (c *CommandPolicyChecker) Check(ctx context.Context, assetID int64, command
 	sessionOK, matchedPattern := c.matchSessionPatterns(assetID, subCmds)
 	c.mu.Unlock()
 	if sessionOK {
-		return CheckResult{Decision: Allow, DecisionSource: SourceSessionAllow, MatchedPattern: matchedPattern}
+		return CheckResult{Decision: Allow, DecisionSource: SourceGrantAllow, MatchedPattern: matchedPattern}
 	}
 
-	// 6. 检查 Plan 预批准（DB 中已批准的 plan items 做通配匹配）
-	if planPattern := matchPlanPatterns(ctx, assetID, groups, subCmds); planPattern != "" {
-		return CheckResult{Decision: Allow, DecisionSource: SourcePlanAllow, MatchedPattern: planPattern}
+	// 6. 检查 Grant 预批准（DB 中已批准的 grant items 做通配匹配）
+	if grantPattern := matchGrantPatterns(ctx, assetID, groups, subCmds); grantPattern != "" {
+		return CheckResult{Decision: Allow, DecisionSource: SourceGrantAllow, MatchedPattern: grantPattern}
 	}
 
 	// 7. 请求用户确认
@@ -336,12 +328,14 @@ func (c *CommandPolicyChecker) Check(ctx context.Context, assetID int64, command
 	if alwaysAllow {
 		c.mu.Lock()
 		for _, cmd := range subCmds {
-			c.sessionAllowed = append(c.sessionAllowed, ApprovedPattern{
+			c.grantAllowed = append(c.grantAllowed, ApprovedPattern{
 				AssetID: assetID,
 				Pattern: cmd,
 			})
 		}
 		c.mu.Unlock()
+		// 写审计日志记录会话模式变更
+		writeGrantSubmitAudit(ctx, assetID, assetName, subCmds)
 	}
 
 	return CheckResult{Decision: Allow, DecisionSource: SourceUserAllow}
@@ -384,8 +378,10 @@ func CheckPolicyOnly(ctx context.Context, assetID int64, command string) CheckRe
 	}
 
 	// Check allow list
-	if len(allAllowRules) > 0 && allSubCommandsAllowed(subCmds, allAllowRules) {
-		return CheckResult{Decision: Allow, DecisionSource: SourcePolicyAllow}
+	if len(allAllowRules) > 0 {
+		if ok, matched := allSubCommandsAllowed(subCmds, allAllowRules); ok {
+			return CheckResult{Decision: Allow, DecisionSource: SourcePolicyAllow, MatchedPattern: matched}
+		}
 	}
 
 	return CheckResult{Decision: NeedConfirm, HintRules: allAllowRules}
@@ -512,7 +508,7 @@ func (c *CommandPolicyChecker) handleConfirm(ctx context.Context, assetID int64,
 	sessionOK, matchedPattern := c.matchSessionPatterns(assetID, []string{command})
 	c.mu.Unlock()
 	if sessionOK {
-		return CheckResult{Decision: Allow, DecisionSource: SourceSessionAllow, MatchedPattern: matchedPattern}
+		return CheckResult{Decision: Allow, DecisionSource: SourceGrantAllow, MatchedPattern: matchedPattern}
 	}
 
 	if c.confirmFunc == nil {
@@ -529,7 +525,7 @@ func (c *CommandPolicyChecker) handleConfirm(ctx context.Context, assetID int64,
 	}
 	if alwaysAllow {
 		c.mu.Lock()
-		c.sessionAllowed = append(c.sessionAllowed, ApprovedPattern{
+		c.grantAllowed = append(c.grantAllowed, ApprovedPattern{
 			AssetID: assetID,
 			Pattern: command,
 		})
@@ -747,8 +743,9 @@ func MatchCommandRule(rule, command string) bool {
 // --- 辅助函数 ---
 
 func tokenize(s string) []string {
-	var result []string
-	for _, f := range strings.Fields(s) {
+	fields := strings.Fields(s)
+	result := make([]string, 0, len(fields))
+	for _, f := range fields {
 		result = append(result, expandShortFlag(f)...)
 	}
 	return result
@@ -793,24 +790,31 @@ func matchGlobPattern(pattern, value string) bool {
 	return matched
 }
 
-// allSubCommandsAllowed 检查所有子命令是否都匹配 allow 规则
-func allSubCommandsAllowed(subCmds []string, allowRules []string) bool {
+// allSubCommandsAllowed 检查所有子命令是否都匹配 allow 规则，返回是否全部匹配及命中的规则
+func allSubCommandsAllowed(subCmds []string, allowRules []string) (bool, string) {
 	if len(allowRules) == 0 {
-		return false
+		return false, ""
 	}
+	matchedRules := make(map[string]struct{})
 	for _, cmd := range subCmds {
 		matched := false
 		for _, rule := range allowRules {
 			if MatchCommandRule(rule, cmd) {
 				matched = true
+				matchedRules[rule] = struct{}{}
 				break
 			}
 		}
 		if !matched {
-			return false
+			return false, ""
 		}
 	}
-	return true
+	// 收集去重的匹配规则
+	rules := make([]string, 0, len(matchedRules))
+	for r := range matchedRules {
+		rules = append(rules, r)
+	}
+	return true, strings.Join(rules, ", ")
 }
 
 // findHintRules 从 allow 规则中找同程序名的规则作为提示

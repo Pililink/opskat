@@ -20,13 +20,7 @@ interface SqlPreviewDialogProps {
   submitting?: boolean;
 }
 
-export function SqlPreviewDialog({
-  open,
-  onOpenChange,
-  statements,
-  onConfirm,
-  submitting,
-}: SqlPreviewDialogProps) {
+export function SqlPreviewDialog({ open, onOpenChange, statements, onConfirm, submitting }: SqlPreviewDialogProps) {
   const { t } = useTranslation();
 
   return (
@@ -34,9 +28,7 @@ export function SqlPreviewDialog({
       <AlertDialogContent className="max-w-2xl" onOverlayClick={() => onOpenChange(false)}>
         <AlertDialogHeader>
           <AlertDialogTitle>{t("query.sqlPreviewTitle")}</AlertDialogTitle>
-          <AlertDialogDescription>
-            {t("query.sqlPreviewDesc", { count: statements.length })}
-          </AlertDialogDescription>
+          <AlertDialogDescription>{t("query.sqlPreviewDesc", { count: statements.length })}</AlertDialogDescription>
         </AlertDialogHeader>
         <ScrollArea className="max-h-[400px]">
           <pre className="bg-muted rounded-md p-3 text-xs font-mono whitespace-pre-wrap break-all border border-border">
@@ -45,14 +37,8 @@ export function SqlPreviewDialog({
         </ScrollArea>
         <AlertDialogFooter>
           <AlertDialogCancel disabled={submitting}>{t("action.cancel")}</AlertDialogCancel>
-          <AlertDialogAction
-            variant="default"
-            onClick={onConfirm}
-            disabled={submitting}
-          >
-            {submitting ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
-            ) : null}
+          <AlertDialogAction variant="default" onClick={onConfirm} disabled={submitting}>
+            {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : null}
             {t("query.confirmExecute")}
           </AlertDialogAction>
         </AlertDialogFooter>

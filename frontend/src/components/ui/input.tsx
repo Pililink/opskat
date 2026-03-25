@@ -1,29 +1,45 @@
-import * as React from "react"
-import { useCallback } from "react"
+import * as React from "react";
+import { useCallback } from "react";
 
-import { cn } from "@/lib/utils"
-import { useIMEComposing } from "@/hooks/useIMEComposing"
+import { cn } from "@/lib/utils";
+import { useIMEComposing } from "@/hooks/useIMEComposing";
 
-function Input({ className, type, onKeyDown, onCompositionStart, onCompositionEnd, ...props }: React.ComponentProps<"input">) {
-  const { isComposing, onCompositionStart: imeStart, onCompositionEnd: imeEnd } = useIMEComposing()
+function Input({
+  className,
+  type,
+  onKeyDown,
+  onCompositionStart,
+  onCompositionEnd,
+  ...props
+}: React.ComponentProps<"input">) {
+  const { isComposing, onCompositionStart: imeStart, onCompositionEnd: imeEnd } = useIMEComposing();
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter" && isComposing()) {
-      e.preventDefault()
-      return
-    }
-    onKeyDown?.(e)
-  }, [onKeyDown, isComposing])
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === "Enter" && isComposing()) {
+        e.preventDefault();
+        return;
+      }
+      onKeyDown?.(e);
+    },
+    [onKeyDown, isComposing]
+  );
 
-  const handleCompositionStart = useCallback((e: React.CompositionEvent<HTMLInputElement>) => {
-    imeStart()
-    onCompositionStart?.(e)
-  }, [imeStart, onCompositionStart])
+  const handleCompositionStart = useCallback(
+    (e: React.CompositionEvent<HTMLInputElement>) => {
+      imeStart();
+      onCompositionStart?.(e);
+    },
+    [imeStart, onCompositionStart]
+  );
 
-  const handleCompositionEnd = useCallback((e: React.CompositionEvent<HTMLInputElement>) => {
-    imeEnd()
-    onCompositionEnd?.(e)
-  }, [imeEnd, onCompositionEnd])
+  const handleCompositionEnd = useCallback(
+    (e: React.CompositionEvent<HTMLInputElement>) => {
+      imeEnd();
+      onCompositionEnd?.(e);
+    },
+    [imeEnd, onCompositionEnd]
+  );
 
   return (
     <input
@@ -44,7 +60,7 @@ function Input({ className, type, onKeyDown, onCompositionStart, onCompositionEn
       onCompositionEnd={handleCompositionEnd}
       {...props}
     />
-  )
+  );
 }
 
-export { Input }
+export { Input };

@@ -58,36 +58,29 @@ export function SessionToolbar({ tabId }: SessionToolbarProps) {
   const paneValues = Object.values(tabData.panes);
   const anyConnected = paneValues.some((p) => p.connected);
 
-  const hostInfo = tabMeta?.username && tabMeta?.host
-    ? `${tabMeta.username}@${tabMeta.host}${tabMeta.port !== 22 ? `:${tabMeta.port}` : ""}`
-    : tabMeta?.host
-      ? `${tabMeta.host}${tabMeta.port !== 22 ? `:${tabMeta.port}` : ""}`
-      : "";
+  const hostInfo =
+    tabMeta?.username && tabMeta?.host
+      ? `${tabMeta.username}@${tabMeta.host}${tabMeta.port !== 22 ? `:${tabMeta.port}` : ""}`
+      : tabMeta?.host
+        ? `${tabMeta.host}${tabMeta.port !== 22 ? `:${tabMeta.port}` : ""}`
+        : "";
 
   return (
     <div className="flex items-center gap-1.5 px-2 py-1 border-b bg-background shrink-0 text-xs">
       {/* 连接状态指示器 */}
       <span
-        className={`h-2 w-2 rounded-full shrink-0 ${
-          anyConnected ? "bg-green-500" : "bg-destructive"
-        }`}
+        className={`h-2 w-2 rounded-full shrink-0 ${anyConnected ? "bg-green-500" : "bg-destructive"}`}
         title={anyConnected ? t("ssh.session.connected") : t("ssh.session.disconnected")}
       />
 
       {/* 主机信息 */}
-      {hostInfo && (
-        <span className="font-mono text-muted-foreground select-text truncate max-w-48">
-          {hostInfo}
-        </span>
-      )}
+      {hostInfo && <span className="font-mono text-muted-foreground select-text truncate max-w-48">{hostInfo}</span>}
 
       {/* 连接时长 */}
       {uptime && (
         <>
           <span className="text-muted-foreground/40">|</span>
-          <span className="font-mono text-muted-foreground tabular-nums">
-            {uptime}
-          </span>
+          <span className="font-mono text-muted-foreground tabular-nums">{uptime}</span>
         </>
       )}
 
@@ -114,12 +107,7 @@ export function SessionToolbar({ tabId }: SessionToolbarProps) {
       </Button>
 
       {/* 重新连接 */}
-      <Button
-        variant="ghost"
-        size="icon-xs"
-        title={t("ssh.session.reconnect")}
-        onClick={() => reconnect(tabId)}
-      >
+      <Button variant="ghost" size="icon-xs" title={t("ssh.session.reconnect")} onClick={() => reconnect(tabId)}>
         <RotateCcw className="h-3.5 w-3.5" />
       </Button>
     </div>

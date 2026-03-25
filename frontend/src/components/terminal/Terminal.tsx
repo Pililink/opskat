@@ -25,8 +25,7 @@ export function Terminal({ sessionId, active }: TerminalProps) {
   const xtermTheme = useMemo(() => {
     if (selectedThemeId === "default") return undefined;
     const theme =
-      builtinThemes.find((t) => t.id === selectedThemeId) ||
-      customThemes.find((t) => t.id === selectedThemeId);
+      builtinThemes.find((t) => t.id === selectedThemeId) || customThemes.find((t) => t.id === selectedThemeId);
     return theme ? toXtermTheme(theme) : undefined;
   }, [selectedThemeId, customThemes]);
 
@@ -59,9 +58,7 @@ export function Terminal({ sessionId, active }: TerminalProps) {
 
     // 用户输入 → 后端
     const onDataDispose = term.onData((data) => {
-      const encoded = btoa(
-        String.fromCharCode(...new TextEncoder().encode(data))
-      );
+      const encoded = btoa(String.fromCharCode(...new TextEncoder().encode(data)));
       WriteSSH(sessionId, encoded).catch(console.error);
     });
 
@@ -134,11 +131,5 @@ export function Terminal({ sessionId, active }: TerminalProps) {
     }
   }, [active]);
 
-  return (
-    <div
-      ref={containerRef}
-      className="h-full w-full"
-      style={{ padding: "4px" }}
-    />
-  );
+  return <div ref={containerRef} className="h-full w-full" style={{ padding: "4px" }} />;
 }

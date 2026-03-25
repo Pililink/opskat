@@ -1,9 +1,11 @@
 package ai
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/cago-frame/cago/pkg/logger"
@@ -18,7 +20,7 @@ import (
 
 type auditSourceKey struct{}
 type conversationIDKey struct{}
-type planSessionIDKey struct{}
+type grantSessionIDKey struct{}
 type sessionIDKey struct{}
 
 // WithAuditSource 注入审计来源
@@ -47,14 +49,14 @@ func GetConversationID(ctx context.Context) int64 {
 	return 0
 }
 
-// WithPlanSessionID 注入计划会话 ID
-func WithPlanSessionID(ctx context.Context, id string) context.Context {
-	return context.WithValue(ctx, planSessionIDKey{}, id)
+// WithGrantSessionID 注入授权会话 ID
+func WithGrantSessionID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, grantSessionIDKey{}, id)
 }
 
-// GetPlanSessionID 获取计划会话 ID
-func GetPlanSessionID(ctx context.Context) string {
-	if v, ok := ctx.Value(planSessionIDKey{}).(string); ok {
+// GetGrantSessionID 获取授权会话 ID
+func GetGrantSessionID(ctx context.Context) string {
+	if v, ok := ctx.Value(grantSessionIDKey{}).(string); ok {
 		return v
 	}
 	return ""
@@ -132,11 +134,11 @@ func (w *DefaultAuditWriter) WriteToolCall(ctx context.Context, info ToolCallInf
 		AssetName:      assetName,
 		Command:        command,
 		Request:        truncateString(info.ArgsJSON, 4096),
-		Result:         truncateString(info.Result, 4096),
+		Result:         truncateString(info.Result, 32768),
 		Error:          errMsg,
 		Success:        success,
 		ConversationID: GetConversationID(ctx),
-		PlanSessionID:  GetPlanSessionID(ctx),
+		GrantSessionID: GetGrantSessionID(ctx),
 		SessionID:      GetSessionID(ctx),
 		Createtime:     time.Now().Unix(),
 	}
@@ -195,6 +197,48 @@ func (a *AuditingExecutor) Close() error {
 	return nil
 }
 
+// --- 会话模式审计 ---
+
+// writeGrantSubmitAudit 记录会话级"始终允许"模式变更（内部使用）
+func writeGrantSubmitAudit(ctx context.Context, assetID int64, assetName string, patterns []string) {
+	if repo := audit_repo.Audit(); repo != nil {
+		entry := &audit_entity.AuditLog{
+			Source:     GetAuditSource(ctx),
+			ToolName:   "grant_submit",
+			AssetID:    assetID,
+			AssetName:  assetName,
+			Command:    strings.Join(patterns, ", "),
+			SessionID:  GetSessionID(ctx),
+			Decision:   "allow",
+			Success:    1,
+			Createtime: time.Now().Unix(),
+		}
+		if err := repo.Create(context.Background(), entry); err != nil {
+			logger.Default().Error("write grant submit audit", zap.Error(err))
+		}
+	}
+}
+
+// WriteGrantSubmitAudit 对外暴露的 grant 审计写入（供桌面端 approval handler 使用）
+func WriteGrantSubmitAudit(ctx context.Context, assetID int64, assetName string, patterns []string, sessionID string) {
+	if repo := audit_repo.Audit(); repo != nil {
+		entry := &audit_entity.AuditLog{
+			Source:     "opsctl",
+			ToolName:   "grant_submit",
+			AssetID:    assetID,
+			AssetName:  assetName,
+			Command:    strings.Join(patterns, ", "),
+			SessionID:  sessionID,
+			Decision:   "allow",
+			Success:    1,
+			Createtime: time.Now().Unix(),
+		}
+		if err := repo.Create(context.Background(), entry); err != nil {
+			logger.Default().Error("write grant submit audit", zap.Error(err))
+		}
+	}
+}
+
 // --- 命令提取 ---
 
 // commandExtractors 从 AllToolDefs 构建的命令提取器映射（延迟初始化）
@@ -233,6 +277,34 @@ func truncateString(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen]
+	return s[:maxLen] + "\n...[truncated]"
 }
 
+// LimitedBuffer 限制大小的缓冲区，用于审计日志捕获输出
+type LimitedBuffer struct {
+	buf   bytes.Buffer
+	limit int
+}
+
+// NewLimitedBuffer 创建限制大小的缓冲区
+func NewLimitedBuffer(limit int) *LimitedBuffer {
+	return &LimitedBuffer{limit: limit}
+}
+
+func (b *LimitedBuffer) Write(p []byte) (int, error) {
+	n := len(p) // 始终返回原始长度，避免 io.MultiWriter 报 ErrShortWrite
+	remaining := b.limit - b.buf.Len()
+	if remaining <= 0 {
+		return n, nil
+	}
+	if len(p) > remaining {
+		p = p[:remaining]
+	}
+	b.buf.Write(p)
+	return n, nil
+}
+
+// String 返回缓冲区内容
+func (b *LimitedBuffer) String() string {
+	return b.buf.String()
+}

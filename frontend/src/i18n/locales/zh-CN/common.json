@@ -222,7 +222,9 @@
       "nameRequired": "权限组名称不能为空",
       "saveSuccess": "权限组已保存",
       "copySuccess": "权限组已复制",
-      "deleteSuccess": "权限组已删除"
+      "deleteSuccess": "权限组已删除",
+      "deleteConfirmTitle": "确认删除权限组",
+      "deleteConfirm": "确定删除权限组 \"{{name}}\"？此操作不可撤销。"
     }
   },
   "sshKey": {
@@ -344,7 +346,10 @@
     "cliPathHint": "留空则自动从 PATH 中检测",
     "detectedCLIs": "检测到本地 CLI",
     "configured": "已配置",
-    "saved": "已保存"
+    "saved": "已保存",
+    "sendBehavior": "发送行为",
+    "sendBehaviorDesc": "配置 AI 对话消息的发送方式",
+    "enterToSend": "按 Enter 发送消息"
   },
   "backup": {
     "title": "备份",
@@ -359,7 +364,7 @@
     "confirmImport": "导入将替换所有现有数据，确定继续？",
     "password": "加密密码",
     "passwordOptional": "留空则不加密",
-    "passwordRequired": "Gist 备份必须设置密码",
+    "passwordRequired": "请设置备份密码",
     "passwordConfirm": "确认密码",
     "passwordMismatch": "两次密码不一致",
     "enterPassword": "请输入密份密码",
@@ -383,7 +388,37 @@
     "deviceFlowWaiting": "等待授权...",
     "deviceFlowOpen": "打开浏览器",
     "gistCreateNew": "创建新备份",
-    "gistUpdate": "更新: {{desc}}"
+    "gistUpdate": "更新: {{desc}}",
+    "exportTitle": "导出备份",
+    "importTitle": "导入备份",
+    "assetSelection": "资产选择",
+    "allAssets": "全部资产",
+    "selectedAssets": "选择资产 ({{count}})",
+    "selectedCount": "已选 {{selected}}/{{total}}",
+    "selectAll": "全选",
+    "selectNone": "全不选",
+    "exportContent": "导出内容",
+    "includeCredentials": "包含密码/密钥",
+    "includeForwards": "端口转发规则",
+    "includePolicyGroups": "策略组",
+    "includeShortcuts": "快捷键配置",
+    "includeThemes": "自定义终端主题",
+    "credentialWarning": "包含密码/密钥时，备份文件将使用密码加密保护。请妥善保管备份密码。",
+    "passwordPlaceholder": "输入备份密码",
+    "generatePassword": "随机生成密码",
+    "encryptedFile": "此备份已加密，需要输入密码解密",
+    "decryptPreview": "解密预览",
+    "backupFrom": "备份时间",
+    "importAssets": "资产与分组",
+    "importCredentials": "密码/密钥",
+    "importForwards": "端口转发",
+    "importPolicyGroups": "策略组",
+    "importShortcuts": "快捷键配置",
+    "importThemes": "自定义终端主题",
+    "importMode": "导入模式",
+    "modeMerge": "合并（追加）",
+    "modeReplace": "覆盖（清除已有数据）",
+    "replaceWarning": "覆盖模式将删除选中模块的所有现有数据，此操作不可恢复！"
   },
   "setup": {
     "title": "配置 AI 提供商",
@@ -577,7 +612,7 @@
     "patternPlaceholder": "例如: cat /var/log/*",
     "patternHint": "后续匹配此模式的命令将自动放行"
   },
-  "planApproval": {
+  "grantApproval": {
     "title": "权限审批",
     "description": "正在请求以下命令权限，批准后匹配的命令将自动放行：",
     "approveAll": "批准",
@@ -636,7 +671,8 @@
     "sessionGroupYesterday": "昨天",
     "sessionGroupThisWeek": "本周",
     "sessionGroupEarlier": "更早",
-    "sessionOps": "{{count}} 条操作"
+    "sessionOps": "{{count}} 条操作",
+    "sessionPatterns": "会话已允许模式"
   },
   "sftp": {
     "upload": "上传文件",

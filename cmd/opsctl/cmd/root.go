@@ -116,8 +116,8 @@ func Execute() int {
 		return cmdRedisCmd(ctx, handlers, args, resolvedSession)
 	case "ssh":
 		return cmdSSH(ctx, args)
-	case "plan":
-		return cmdPlan(ctx, args)
+	case "grant":
+		return cmdGrant(ctx, args)
 	case "session":
 		return cmdSession(args)
 	default:
@@ -142,7 +142,7 @@ Commands:
   create    Create a new resource (ssh, database, or redis)
   update    Update an existing resource
   cp        Copy files between local and remote servers (scp-style)
-  plan      Submit a batch plan for approval
+  grant     Submit a batch grant for approval
   session   Manage approval sessions (start, end, status)
   version   Print version information
   help      Show this help message

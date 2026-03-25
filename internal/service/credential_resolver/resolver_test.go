@@ -39,7 +39,7 @@ func TestResolveDatabasePassword(t *testing.T) {
 		})
 
 		convey.Convey("无效密文返回错误", func() {
-			cfg := &asset_entity.DatabaseConfig{Password: "plain-text-not-encrypted"}
+			cfg := &asset_entity.DatabaseConfig{Password: "plain-text-not-encrypted"} //nolint:gosec
 			_, err := r.ResolveDatabasePassword(cfg)
 			assert.Error(t, err)
 			assert.Contains(t, err.Error(), "解密数据库密码失败")
@@ -70,7 +70,7 @@ func TestResolveRedisPassword(t *testing.T) {
 		})
 
 		convey.Convey("无效密文返回错误", func() {
-			cfg := &asset_entity.RedisConfig{Password: "plain-text-not-encrypted"}
+			cfg := &asset_entity.RedisConfig{Password: "plain-text-not-encrypted"} //nolint:gosec
 			_, err := r.ResolveRedisPassword(cfg)
 			assert.Error(t, err)
 			assert.Contains(t, err.Error(), "解密 Redis 密码失败")

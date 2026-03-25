@@ -45,7 +45,7 @@ type LocalCLIProvider struct {
 	// OnPermissionRequest 权限确认回调，由外部注入
 	OnPermissionRequest func(req PermissionRequest) PermissionResponse
 
-	// OnSessionReset 会话重置回调，通知桌面端清理 approvedSessions
+	// OnSessionReset 会话重置回调，通知桌面端清理已批准的 grant 规则
 	OnSessionReset func(sessionID string)
 }
 

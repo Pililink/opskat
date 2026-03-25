@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
@@ -11,7 +12,6 @@ import (
 
 	"github.com/cago-frame/cago/pkg/logger"
 	"go.uber.org/zap"
-	"strconv"
 )
 
 // resolveAsset resolves an asset identifier (numeric ID or name).

@@ -3,13 +3,7 @@ import { useTranslation } from "react-i18next";
 import { ChevronLeft, ChevronRight, Save, Undo2, Loader2, RefreshCw, ChevronsLeft, ChevronsRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
 import { ExecuteSQL } from "../../../wailsjs/go/main/App";
 import { QueryResultTable, CellEdit } from "./QueryResultTable";
@@ -70,9 +64,8 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
   // Fetch total count
   const fetchCount = useCallback(async () => {
     if (!assetId) return;
-    const tableName = driver === "postgresql"
-      ? `"${table}"`
-      : `${quoteIdent(database, driver)}.${quoteIdent(table, driver)}`;
+    const tableName =
+      driver === "postgresql" ? `"${table}"` : `${quoteIdent(database, driver)}.${quoteIdent(table, driver)}`;
     try {
       const result = await ExecuteSQL(assetId, `SELECT COUNT(*) AS cnt FROM ${tableName}`, database);
       const parsed: SQLResult = JSON.parse(result);
@@ -93,9 +86,8 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
       setError(null);
 
       const offset = pageNum * pageSize;
-      const tableName = driver === "postgresql"
-        ? `"${table}"`
-        : `${quoteIdent(database, driver)}.${quoteIdent(table, driver)}`;
+      const tableName =
+        driver === "postgresql" ? `"${table}"` : `${quoteIdent(database, driver)}.${quoteIdent(table, driver)}`;
       const sql = `SELECT * FROM ${tableName} LIMIT ${pageSize} OFFSET ${offset}`;
 
       try {
@@ -177,9 +169,8 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
         }
       }
 
-      const tableName = driver === "postgresql"
-        ? `"${table}"`
-        : `${quoteIdent(database, driver)}.${quoteIdent(table, driver)}`;
+      const tableName =
+        driver === "postgresql" ? `"${table}"` : `${quoteIdent(database, driver)}.${quoteIdent(table, driver)}`;
 
       statements.push(`UPDATE ${tableName} SET ${setClauses.join(", ")} WHERE ${whereClauses.join(" AND ")} LIMIT 1;`);
     }
@@ -249,9 +240,7 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
           {database}.{table}
         </span>
         {totalRows != null && (
-          <span className="text-xs text-muted-foreground">
-            {t("query.totalRows", { count: totalRows })}
-          </span>
+          <span className="text-xs text-muted-foreground">{t("query.totalRows", { count: totalRows })}</span>
         )}
         <Button
           variant="ghost"
@@ -265,7 +254,13 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
         </Button>
         <div className="ml-auto flex items-center gap-1">
           {/* Page size selector */}
-          <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setPage(0); }}>
+          <Select
+            value={String(pageSize)}
+            onValueChange={(v) => {
+              setPageSize(Number(v));
+              setPage(0);
+            }}
+          >
             <SelectTrigger size="sm" className="h-6 w-[80px] text-xs">
               <SelectValue />
             </SelectTrigger>
@@ -306,12 +301,12 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
             value={pageInput}
             onChange={(e) => setPageInput(e.target.value)}
             onBlur={handlePageInputConfirm}
-            onKeyDown={(e) => { if (e.key === "Enter") handlePageInputConfirm(); }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handlePageInputConfirm();
+            }}
           />
           {totalPages != null && (
-            <span className="text-xs text-muted-foreground whitespace-nowrap">
-              / {totalPages}
-            </span>
+            <span className="text-xs text-muted-foreground whitespace-nowrap">/ {totalPages}</span>
           )}
           {/* Next page */}
           <Button
@@ -356,9 +351,7 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
       {/* Edit action bar */}
       {hasEdits && (
         <div className="flex items-center gap-2 px-3 py-2 border-t border-border bg-muted/50 shrink-0">
-          <span className="text-xs text-muted-foreground">
-            {t("query.pendingEdits", { count: edits.size })}
-          </span>
+          <span className="text-xs text-muted-foreground">{t("query.pendingEdits", { count: edits.size })}</span>
           <div className="ml-auto flex items-center gap-2">
             <Button
               variant="outline"
@@ -377,11 +370,7 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
               onClick={() => setShowSqlPreview(true)}
               disabled={submitting}
             >
-              {submitting ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Save className="h-3.5 w-3.5" />
-              )}
+              {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
               {t("query.submitEdits")}
             </Button>
           </div>

@@ -37,9 +37,7 @@ function formatResult(parsed: RedisResult): string {
     return String(parsed.value);
   }
   if (parsed.type === "list" && Array.isArray(parsed.value)) {
-    return (parsed.value as unknown[])
-      .map((v, i) => `${i + 1}) ${JSON.stringify(v)}`)
-      .join("\n");
+    return (parsed.value as unknown[]).map((v, i) => `${i + 1}) ${JSON.stringify(v)}`).join("\n");
   }
   if (parsed.type === "hash" && typeof parsed.value === "object" && parsed.value !== null) {
     return Object.entries(parsed.value as Record<string, unknown>)
@@ -94,7 +92,9 @@ function EditableCell({
     try {
       await onSave(editVal);
       setEditing(false);
-    } catch { /* keep editing */ }
+    } catch {
+      /* keep editing */
+    }
     setSaving(false);
   };
 
@@ -133,10 +133,7 @@ function EditableCell({
       onDoubleClick={startEdit}
     >
       <span className="truncate">{value}</span>
-      <button
-        className="ml-auto hidden shrink-0 group-hover/cell:inline-flex"
-        onClick={startEdit}
-      >
+      <button className="ml-auto hidden shrink-0 group-hover/cell:inline-flex" onClick={startEdit}>
         <Pencil className="size-3 text-muted-foreground hover:text-foreground" />
       </button>
     </div>
@@ -176,7 +173,9 @@ function AddRowForm({
         setScore("0");
         setValue("");
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     setAdding(false);
   };
 
@@ -236,7 +235,11 @@ function AddRowForm({
 
 // --- Collection Table ---
 
-function CollectionTable({ info, tabId, t }: {
+function CollectionTable({
+  info,
+  tabId,
+  t,
+}: {
   info: RedisKeyInfo;
   tabId: string;
   t: (key: string, opts?: Record<string, unknown>) => string;
@@ -258,9 +261,8 @@ function CollectionTable({ info, tabId, t }: {
     overscan: 20,
   });
 
-  const totalLabel = info.total >= 0
-    ? t("query.loadedOfTotal", { loaded: itemCount, total: info.total })
-    : `${itemCount}`;
+  const totalLabel =
+    info.total >= 0 ? t("query.loadedOfTotal", { loaded: itemCount, total: info.total }) : `${itemCount}`;
 
   const handleEditHash = async (field: string, newVal: string) => {
     if (!tabMeta || !selectedKey) return;
@@ -326,42 +328,26 @@ function CollectionTable({ info, tabId, t }: {
       <div className="flex items-center border-b text-xs">
         {info.type === "hash" && (
           <>
-            <div className="w-1/3 shrink-0 px-2 py-1.5 font-medium text-muted-foreground">
-              {t("query.field")}
-            </div>
-            <div className="flex-1 px-2 py-1.5 font-medium text-muted-foreground">
-              {t("query.value")}
-            </div>
+            <div className="w-1/3 shrink-0 px-2 py-1.5 font-medium text-muted-foreground">{t("query.field")}</div>
+            <div className="flex-1 px-2 py-1.5 font-medium text-muted-foreground">{t("query.value")}</div>
           </>
         )}
         {info.type === "list" && (
           <>
-            <div className="w-16 shrink-0 px-2 py-1.5 font-medium text-muted-foreground">
-              {t("query.index")}
-            </div>
-            <div className="flex-1 px-2 py-1.5 font-medium text-muted-foreground">
-              {t("query.value")}
-            </div>
+            <div className="w-16 shrink-0 px-2 py-1.5 font-medium text-muted-foreground">{t("query.index")}</div>
+            <div className="flex-1 px-2 py-1.5 font-medium text-muted-foreground">{t("query.value")}</div>
           </>
         )}
         {info.type === "set" && (
-          <div className="flex-1 px-2 py-1.5 font-medium text-muted-foreground">
-            {t("query.member")}
-          </div>
+          <div className="flex-1 px-2 py-1.5 font-medium text-muted-foreground">{t("query.member")}</div>
         )}
         {info.type === "zset" && (
           <>
-            <div className="w-24 shrink-0 px-2 py-1.5 font-medium text-muted-foreground">
-              {t("query.score")}
-            </div>
-            <div className="flex-1 px-2 py-1.5 font-medium text-muted-foreground">
-              {t("query.member")}
-            </div>
+            <div className="w-24 shrink-0 px-2 py-1.5 font-medium text-muted-foreground">{t("query.score")}</div>
+            <div className="flex-1 px-2 py-1.5 font-medium text-muted-foreground">{t("query.member")}</div>
           </>
         )}
-        <div className="shrink-0 px-2 py-1.5 text-xs text-muted-foreground">
-          {totalLabel}
-        </div>
+        <div className="shrink-0 px-2 py-1.5 text-xs text-muted-foreground">{totalLabel}</div>
       </div>
 
       {/* Virtualized rows */}
@@ -375,19 +361,20 @@ function CollectionTable({ info, tabId, t }: {
                 className="group/row absolute left-0 flex w-full items-center border-b text-xs font-mono last:border-0"
                 style={{ top: virtualRow.start, height: virtualRow.size }}
               >
-                {info.type === "hash" && (() => {
-                  const entry = (info.value as [string, string][])[idx];
-                  return (
-                    <>
-                      <div className="w-1/3 shrink-0 truncate px-2 text-foreground">{entry[0]}</div>
-                      <EditableCell
-                        value={entry[1]}
-                        onSave={(v) => handleEditHash(entry[0], v)}
-                        className="flex-1 px-2 text-foreground"
-                      />
-                    </>
-                  );
-                })()}
+                {info.type === "hash" &&
+                  (() => {
+                    const entry = (info.value as [string, string][])[idx];
+                    return (
+                      <>
+                        <div className="w-1/3 shrink-0 truncate px-2 text-foreground">{entry[0]}</div>
+                        <EditableCell
+                          value={entry[1]}
+                          onSave={(v) => handleEditHash(entry[0], v)}
+                          className="flex-1 px-2 text-foreground"
+                        />
+                      </>
+                    );
+                  })()}
                 {info.type === "list" && (
                   <>
                     <div className="w-16 shrink-0 px-2 text-muted-foreground">{idx}</div>
@@ -403,19 +390,20 @@ function CollectionTable({ info, tabId, t }: {
                     <span className="truncate">{(info.value as string[])[idx]}</span>
                   </div>
                 )}
-                {info.type === "zset" && (() => {
-                  const pair = (info.value as [string, string][])[idx];
-                  return (
-                    <>
-                      <EditableCell
-                        value={pair[1]}
-                        onSave={(v) => handleEditZsetScore(pair[0], v)}
-                        className="w-24 shrink-0 px-2 text-muted-foreground"
-                      />
-                      <div className="flex-1 truncate px-2 text-foreground">{pair[0]}</div>
-                    </>
-                  );
-                })()}
+                {info.type === "zset" &&
+                  (() => {
+                    const pair = (info.value as [string, string][])[idx];
+                    return (
+                      <>
+                        <EditableCell
+                          value={pair[1]}
+                          onSave={(v) => handleEditZsetScore(pair[0], v)}
+                          className="w-24 shrink-0 px-2 text-muted-foreground"
+                        />
+                        <div className="flex-1 truncate px-2 text-foreground">{pair[0]}</div>
+                      </>
+                    );
+                  })()}
                 {/* Row delete button */}
                 <button
                   className="mr-1 hidden shrink-0 group-hover/row:inline-flex"
@@ -459,9 +447,7 @@ function CollectionTable({ info, tabId, t }: {
             onClick={() => loadMoreValues(tabId)}
             disabled={info.loadingMore}
           >
-            {info.loadingMore ? (
-              <Loader2 className="mr-1 size-3 animate-spin" />
-            ) : null}
+            {info.loadingMore ? <Loader2 className="mr-1 size-3 animate-spin" /> : null}
             {t("query.loadMore")}
           </Button>
         </div>
@@ -473,12 +459,17 @@ function CollectionTable({ info, tabId, t }: {
       {/* Delete element confirm */}
       <ConfirmDialog
         open={!!deleteTarget}
-        onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
         title={t("query.deleteElementTitle")}
         description={t("query.deleteElementDesc", { name: deleteTarget?.label ?? "" })}
         cancelText={t("action.cancel")}
         confirmText={t("action.delete")}
-        onConfirm={() => { deleteTarget?.action(); setDeleteTarget(null); }}
+        onConfirm={() => {
+          deleteTarget?.action();
+          setDeleteTarget(null);
+        }}
       />
     </div>
   );
@@ -535,7 +526,9 @@ function StringEditor({ tabId, t }: { tabId: string; t: (key: string) => string 
       await ExecuteRedisArgs(tabMeta.assetId, ["SET", state.selectedKey!, editVal], db);
       selectKey(tabId, state.selectedKey!);
       setEditing(false);
-    } catch { /* keep editing */ }
+    } catch {
+      /* keep editing */
+    }
     setSaving(false);
   };
 
@@ -687,7 +680,9 @@ export function RedisKeyDetail({ tabId }: RedisKeyDetailProps) {
       await ExecuteRedisArgs(tabMeta.assetId, ["DEL", state.selectedKey], state.currentDb);
       removeKey(tabId, state.selectedKey);
       loadDbKeyCounts(tabId);
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     setDeleting(false);
   }, [tabMeta, state, tabId, removeKey, loadDbKeyCounts]);
 
@@ -718,7 +713,9 @@ export function RedisKeyDetail({ tabId }: RedisKeyDetailProps) {
     try {
       await ExecuteRedisArgs(tabMeta.assetId, ["EXPIRE", state.selectedKey, String(seconds)], state.currentDb);
       selectKey(tabId, state.selectedKey);
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     setEditingTtl(false);
   }, [tabMeta, state, ttlInput, tabId, selectKey]);
 
@@ -727,7 +724,9 @@ export function RedisKeyDetail({ tabId }: RedisKeyDetailProps) {
     try {
       await ExecuteRedisArgs(tabMeta.assetId, ["PERSIST", state.selectedKey], state.currentDb);
       selectKey(tabId, state.selectedKey);
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     setEditingTtl(false);
   }, [tabMeta, state, tabId, selectKey]);
 
@@ -739,10 +738,7 @@ export function RedisKeyDetail({ tabId }: RedisKeyDetailProps) {
   const ttl = keyInfo?.ttl ?? -1;
   const isCollection = type === "hash" || type === "list" || type === "set" || type === "zset";
 
-  const ttlDisplay =
-    ttl === -1
-      ? t("query.ttlPersist")
-      : t("query.ttlSeconds", { seconds: ttl });
+  const ttlDisplay = ttl === -1 ? t("query.ttlPersist") : t("query.ttlSeconds", { seconds: ttl });
 
   return (
     <div className="flex h-full flex-col">
@@ -764,15 +760,8 @@ export function RedisKeyDetail({ tabId }: RedisKeyDetailProps) {
             {/* Header */}
             <div className="flex items-center gap-2 border-b px-3 py-2">
               <Key className="size-3.5 shrink-0 text-muted-foreground" />
-              <span className="truncate font-mono text-sm font-medium">
-                {state.selectedKey}
-              </span>
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                onClick={handleCopyKeyName}
-                title={t("query.copyKeyName")}
-              >
+              <span className="truncate font-mono text-sm font-medium">{state.selectedKey}</span>
+              <Button variant="ghost" size="icon-xs" onClick={handleCopyKeyName} title={t("query.copyKeyName")}>
                 <Copy className="size-3 text-muted-foreground" />
               </Button>
               <span
@@ -816,12 +805,7 @@ export function RedisKeyDetail({ tabId }: RedisKeyDetailProps) {
                 </span>
               )}
               <div className="ml-auto flex items-center gap-0.5">
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  onClick={handleRefreshKey}
-                  title={t("query.refreshKey")}
-                >
+                <Button variant="ghost" size="icon-xs" onClick={handleRefreshKey} title={t("query.refreshKey")}>
                   <RefreshCw className="size-3.5 text-muted-foreground" />
                 </Button>
                 <Button
@@ -868,17 +852,8 @@ export function RedisKeyDetail({ tabId }: RedisKeyDetailProps) {
             onKeyDown={handleKeyDown}
             disabled={executing}
           />
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            onClick={executeCommand}
-            disabled={executing || !command.trim()}
-          >
-            {executing ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : (
-              <Send className="size-3.5" />
-            )}
+          <Button variant="ghost" size="icon-xs" onClick={executeCommand} disabled={executing || !command.trim()}>
+            {executing ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
           </Button>
         </div>
 
@@ -887,7 +862,10 @@ export function RedisKeyDetail({ tabId }: RedisKeyDetailProps) {
           <div className="relative border-t max-h-[200px] overflow-auto px-3 py-2">
             <button
               className="absolute right-2 top-2"
-              onClick={() => { setCmdResult(null); setCmdError(null); }}
+              onClick={() => {
+                setCmdResult(null);
+                setCmdError(null);
+              }}
               title={t("query.clearResult")}
             >
               <X className="size-3 text-muted-foreground hover:text-foreground" />
@@ -897,9 +875,7 @@ export function RedisKeyDetail({ tabId }: RedisKeyDetailProps) {
                 {t("query.error")}: {cmdError}
               </pre>
             ) : (
-              <pre className="whitespace-pre-wrap font-mono text-xs text-foreground pr-6">
-                {cmdResult}
-              </pre>
+              <pre className="whitespace-pre-wrap font-mono text-xs text-foreground pr-6">{cmdResult}</pre>
             )}
           </div>
         )}

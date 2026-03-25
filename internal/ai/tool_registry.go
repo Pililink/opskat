@@ -176,19 +176,19 @@ func AllToolDefs() []ToolDef {
 		},
 		{
 			Name:        "request_permission",
-			Description: "Request approval for a plan of command patterns BEFORE executing them. Submit command patterns (one per line, supports '*' wildcard) for a target asset. The user will review and may edit the patterns before approving. Once approved, subsequent run_command calls matching any approved pattern will be auto-approved. Call this proactively when you plan to run multiple commands on the same asset.",
+			Description: "Request approval for a grant of command patterns BEFORE executing them. Submit command patterns (one per line, supports '*' wildcard) for a target asset. The user will review and may edit the patterns before approving. Once approved, subsequent run_command calls matching any approved pattern will be auto-approved. Call this proactively when you intend to run multiple commands on the same asset.",
 			Params: []ParamDef{
 				{Name: "asset_id", Type: ParamNumber, Description: "Target server asset ID.", Required: true},
 				{Name: "command_patterns", Type: ParamString, Description: "Command patterns, one per line. Supports '*' wildcard (e.g. 'cat /var/log/*\\nsystemctl * nginx').", Required: true},
 				{Name: "reason", Type: ParamString, Description: "Brief explanation of why these permissions are needed.", Required: true},
 			},
-			Handler: handleRequestPlan,
+			Handler: handleRequestGrant,
 			CommandExtractor: func(args map[string]any) string {
 				v := argString(args, "command_patterns")
 				if reason := argString(args, "reason"); reason != "" {
-					return "plan: " + v + " reason: " + reason
+					return "grant: " + v + " reason: " + reason
 				}
-				return "plan: " + v
+				return "grant: " + v
 			},
 		},
 	}
@@ -443,7 +443,7 @@ func handleGetAsset(ctx context.Context, args map[string]any) (string, error) {
 	return string(data), nil
 }
 
-func handleRequestPlan(ctx context.Context, args map[string]any) (string, error) {
+func handleRequestGrant(ctx context.Context, args map[string]any) (string, error) {
 	assetID := argInt64(args, "asset_id")
 	commandPatterns := argString(args, "command_patterns")
 	reason := argString(args, "reason")
@@ -471,7 +471,7 @@ func handleRequestPlan(ctx context.Context, args map[string]any) (string, error)
 		return "", fmt.Errorf("权限检查器不可用")
 	}
 
-	result := checker.SubmitPlan(ctx, assetID, patterns, reason)
+	result := checker.SubmitGrant(ctx, assetID, patterns, reason)
 	setCheckResult(ctx, result)
 	return result.Message, nil
 }

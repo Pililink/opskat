@@ -24,18 +24,9 @@ import {
   Ban,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import {
   AwsIcon,
@@ -264,11 +255,7 @@ interface IconPickerProps {
   type?: "asset" | "group";
 }
 
-export function IconPicker({
-  value,
-  onChange,
-  type = "asset",
-}: IconPickerProps) {
+export function IconPicker({ value, onChange, type = "asset" }: IconPickerProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -315,13 +302,15 @@ export function IconPicker({
   };
 
   return (
-    <Popover open={open} onOpenChange={(v) => { setOpen(v); if (!v) setSearch(""); }}>
+    <Popover
+      open={open}
+      onOpenChange={(v) => {
+        setOpen(v);
+        if (!v) setSearch("");
+      }}
+    >
       <PopoverTrigger asChild>
-        <Button
-          variant="outline"
-          role="combobox"
-          className="w-full justify-between font-normal h-9"
-        >
+        <Button variant="outline" role="combobox" className="w-full justify-between font-normal h-9">
           <div className="flex items-center gap-2">
             <SelectedIcon className="h-4 w-4 shrink-0" style={resolvedColor ? { color: resolvedColor } : undefined} />
             <span className="truncate">{displayName}</span>
@@ -345,9 +334,7 @@ export function IconPicker({
           <div className="max-h-[280px] overflow-y-auto" onWheel={(e) => e.stopPropagation()}>
             <div className="p-2 pt-1 space-y-2">
               {filteredCategories.length === 0 && (
-                <div className="text-center text-sm text-muted-foreground py-6">
-                  {t("asset.iconNoResults")}
-                </div>
+                <div className="text-center text-sm text-muted-foreground py-6">{t("asset.iconNoResults")}</div>
               )}
               {filteredCategories.map((cat) => (
                 <div key={cat.key}>
@@ -359,28 +346,28 @@ export function IconPicker({
                       const brandColor = ICON_COLORS[name];
                       const isSelected = iconName === name;
                       return (
-                      <Tooltip key={name}>
-                        <TooltipTrigger asChild>
-                          <button
-                            type="button"
-                            className={cn(
-                              "flex h-8 w-8 items-center justify-center rounded-md transition-colors",
-                              isSelected
-                                ? "bg-primary text-primary-foreground"
-                                : "hover:bg-muted text-muted-foreground hover:text-foreground"
-                            )}
-                            onClick={() => handleSelect(name)}
-                          >
-                            <Icon className="h-4 w-4" style={brandColor && !isSelected ? { color: brandColor } : undefined} />
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent
-                          side="bottom"
-                          className="text-xs px-2 py-1"
-                        >
-                          {ICON_DISPLAY_NAMES[name] || name}
-                        </TooltipContent>
-                      </Tooltip>
+                        <Tooltip key={name}>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              className={cn(
+                                "flex h-8 w-8 items-center justify-center rounded-md transition-colors",
+                                isSelected
+                                  ? "bg-primary text-primary-foreground"
+                                  : "hover:bg-muted text-muted-foreground hover:text-foreground"
+                              )}
+                              onClick={() => handleSelect(name)}
+                            >
+                              <Icon
+                                className="h-4 w-4"
+                                style={brandColor && !isSelected ? { color: brandColor } : undefined}
+                              />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom" className="text-xs px-2 py-1">
+                            {ICON_DISPLAY_NAMES[name] || name}
+                          </TooltipContent>
+                        </Tooltip>
                       );
                     })}
                   </div>
@@ -390,9 +377,7 @@ export function IconPicker({
           </div>
           {/* Color picker */}
           <div className="border-t p-2 space-y-1.5">
-            <div className="text-[11px] font-medium text-muted-foreground px-0.5">
-              {t("asset.iconColor")}
-            </div>
+            <div className="text-[11px] font-medium text-muted-foreground px-0.5">{t("asset.iconColor")}</div>
             <div className="flex flex-wrap gap-1.5 items-center">
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -436,9 +421,7 @@ export function IconPicker({
 }
 
 // Get icon component by name (supports "name#color" format)
-export function getIconComponent(
-  value: string
-): IconComponent {
+export function getIconComponent(value: string): IconComponent {
   const { name } = parseIconValue(value);
   return ALL_ICONS[name] || Server;
 }

@@ -1,11 +1,19 @@
 ---
 name: opsctl
-description: "opskat CLI tool (opsctl) for server asset management and remote operations. Use when: (1) user asks about opsctl commands or usage, (2) user wants to manage assets, execute remote commands, transfer files, or SSH into servers via CLI, (3) user asks to write scripts or automation using opsctl, (4) user invokes /opsctl. Covers: list/get/create/update assets, exec, ssh, cp, sql, redis, session and plan approval workflow."
+description: "opskat CLI tool (opsctl) for server asset management and remote operations. Use when: (1) user asks about opsctl commands or usage, (2) user wants to manage assets, execute remote commands, transfer files, or SSH into servers via CLI, (3) user asks to write scripts or automation using opsctl, (4) user invokes /opsctl. Covers: list/get/create/update assets, exec, ssh, cp, sql, redis, session and grant approval workflow."
 ---
 
 # opsctl CLI Tool
 
 opskat's standalone CLI for asset management and remote operations without the GUI.
+
+## Data Directory
+
+/Users/codfrm/Library/Application Support/opskat
+
+## Data Directory
+
+/Users/codfrm/Library/Application Support/opskat
 
 ## Data Directory
 
@@ -46,7 +54,7 @@ Assets can be referenced by:
 | `sql <asset> -f <file.sql>` | Execute SQL from file |
 | `redis <asset> "<command>"` | Execute Redis command (approval/policy checked) |
 | `cp <src> <dst>` | File transfer: local↔remote or remote↔remote (needs approval) |
-| `plan submit [asset] [--group <name\|id>]` | Submit batch plan from stdin JSON, returns session ID. Optional asset/group sets default scope. |
+| `grant submit [asset] [--group <name\|id>]` | Submit batch grant from stdin JSON, returns session ID. Optional asset/group sets default scope. |
 | `session start` | Create a new approval session |
 | `session end` | End the current active session |
 | `session status` | Show the current active session ID |
@@ -60,14 +68,14 @@ Most write operations require desktop app approval via Unix socket (`<data-dir>/
 
 **Exec approval flow**:
 1. Check asset's command policy (allow-list → execute, deny-list → reject)
-2. Check plan items with pattern matching (approved plans → auto-allow matching commands)
+2. Check grant items with pattern matching (approved grants → auto-allow matching commands)
 3. Check session remembered patterns → auto-allow
 4. Fall back to desktop app approval (blocks until response)
 
 **Permission pre-request flow** (`request_permission` tool):
 1. AI submits command patterns (one per line, supports `*` wildcard) for a target asset
 2. Desktop app shows permission approval dialog, user can edit patterns before approving
-3. Approved patterns are stored as plan items in database
+3. Approved patterns are stored as grant items in database
 4. Subsequent commands matching any approved pattern auto-pass without further prompts
 
 ## User Rejected Approval — MUST STOP
@@ -77,7 +85,7 @@ Most write operations require desktop app approval via Unix socket (`<data-dir>/
 Scenarios that require an immediate stop:
 
 1. **User rejected execution approval** — The user denied the approval dialog. Output contains "用户拒绝执行".
-2. **User rejected permission request** — A `request_permission` plan was rejected by the user. Output contains "用户拒绝 Plan 审批".
+2. **User rejected permission request** — A `request_permission` grant was rejected by the user. Output contains "用户拒绝 Grant 审批".
 
 **Correct behavior**:
 - Stop the entire task immediately — do not execute any remaining steps.
@@ -86,7 +94,7 @@ Scenarios that require an immediate stop:
 
 **Do NOT**:
 - Retry the same command or a similar variant hoping it will pass.
-- Skip the denied step and continue with subsequent steps (the rest of the plan likely depends on it).
+- Skip the denied step and continue with subsequent steps (the rest of the grant likely depends on it).
 - Treat the rejection as a non-fatal warning.
 
 ## Session Workflow
@@ -113,13 +121,13 @@ On the first operation, the user will be prompted to approve. If they choose **"
 2. `OPSKAT_SESSION_ID` environment variable
 3. Active session file (created by `opsctl session start`)
 
-**Plan workflow** — pre-approve command patterns:
+**Grant workflow** — pre-approve command patterns:
 ```bash
-# Submit plan for a specific asset
-SESSION=$(opsctl plan submit web-01 < plan.json)
-# Submit plan for a group (applies to all assets in group)
-SESSION=$(opsctl plan submit --group production < plan.json)
-# Commands matching plan patterns auto-pass
+# Submit grant for a specific asset
+SESSION=$(opsctl grant submit web-01 < grant.json)
+# Submit grant for a group (applies to all assets in group)
+SESSION=$(opsctl grant submit --group production < grant.json)
+# Commands matching grant patterns auto-pass
 opsctl --session $SESSION exec web-01 -- systemctl restart app
 ```
 

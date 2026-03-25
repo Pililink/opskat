@@ -43,12 +43,7 @@ export interface InfoTabMeta {
   icon?: string;
 }
 
-export type TabMeta =
-  | TerminalTabMeta
-  | AITabMeta
-  | QueryTabMeta
-  | PageTabMeta
-  | InfoTabMeta;
+export type TabMeta = TerminalTabMeta | AITabMeta | QueryTabMeta | PageTabMeta | InfoTabMeta;
 
 export interface Tab {
   id: string;
@@ -277,19 +272,32 @@ function _migrateOldKeys(): SavedTabStore | null {
       const saved = JSON.parse(raw);
       if (Array.isArray(saved)) {
         saved.forEach(
-          (st: { assetId: number; assetName: string; assetIcon: string; host: string; port: number; username: string }, i: number) => {
+          (
+            st: { assetId: number; assetName: string; assetIcon: string; host: string; port: number; username: string },
+            i: number
+          ) => {
             tabs.push({
               id: `restored-${st.assetId}-${i}`,
               type: "terminal",
               label: st.assetName,
               icon: st.assetIcon || undefined,
-              meta: { type: "terminal", assetId: st.assetId, assetName: st.assetName, assetIcon: st.assetIcon, host: st.host, port: st.port, username: st.username },
+              meta: {
+                type: "terminal",
+                assetId: st.assetId,
+                assetName: st.assetName,
+                assetIcon: st.assetIcon,
+                host: st.host,
+                port: st.port,
+                username: st.username,
+              },
             });
           }
         );
       }
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   // Migrate info tabs
   try {
@@ -308,7 +316,9 @@ function _migrateOldKeys(): SavedTabStore | null {
         });
       }
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   // Migrate AI tabs (just conversation IDs — aiStore will load messages)
   try {
@@ -326,7 +336,9 @@ function _migrateOldKeys(): SavedTabStore | null {
         });
       }
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   // Migrate query tabs
   try {
@@ -335,19 +347,36 @@ function _migrateOldKeys(): SavedTabStore | null {
       const saved = JSON.parse(raw);
       if (Array.isArray(saved)) {
         saved.forEach(
-          (st: { assetId: number; assetName: string; assetIcon: string; assetType: "database" | "redis"; driver?: string; defaultDatabase?: string }) => {
+          (st: {
+            assetId: number;
+            assetName: string;
+            assetIcon: string;
+            assetType: "database" | "redis";
+            driver?: string;
+            defaultDatabase?: string;
+          }) => {
             tabs.push({
               id: `query-${st.assetId}`,
               type: "query",
               label: st.assetName,
               icon: st.assetIcon || undefined,
-              meta: { type: "query", assetId: st.assetId, assetName: st.assetName, assetIcon: st.assetIcon, assetType: st.assetType, driver: st.driver, defaultDatabase: st.defaultDatabase },
+              meta: {
+                type: "query",
+                assetId: st.assetId,
+                assetName: st.assetName,
+                assetIcon: st.assetIcon,
+                assetType: st.assetType,
+                driver: st.driver,
+                defaultDatabase: st.defaultDatabase,
+              },
             });
           }
         );
       }
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   // Migrate page tabs
   try {
@@ -365,7 +394,9 @@ function _migrateOldKeys(): SavedTabStore | null {
         });
       }
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   // Determine active tab
   let activeTabId: string | null = null;
@@ -392,7 +423,9 @@ function _migrateOldKeys(): SavedTabStore | null {
       if (savedIdx >= 0 && savedIdx < terminalTabs.length) {
         activeTabId = terminalTabs[savedIdx].id;
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
   // AI active
   if (!activeTabId) {
@@ -402,14 +435,22 @@ function _migrateOldKeys(): SavedTabStore | null {
         const aiTab = tabs.find((t) => t.type === "ai" && (t.meta as AITabMeta).conversationId === savedConv);
         if (aiTab) activeTabId = aiTab.id;
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
 
   // Clean up old keys
   const oldKeys = [
-    "open_page_tabs", "last_active_tab", "terminal_open_tabs",
-    "terminal_active_tab_idx", "terminal_info_tabs", "ai_open_tabs",
-    "ai_active_tab_conv", "query_open_tabs", "tab_order",
+    "open_page_tabs",
+    "last_active_tab",
+    "terminal_open_tabs",
+    "terminal_active_tab_idx",
+    "terminal_info_tabs",
+    "ai_open_tabs",
+    "ai_active_tab_conv",
+    "query_open_tabs",
+    "tab_order",
   ];
   for (const key of oldKeys) localStorage.removeItem(key);
 
@@ -429,7 +470,9 @@ function _migrateOldKeys(): SavedTabStore | null {
         _fireRestoreHooks();
         return;
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
 
   // Try migration from old format

@@ -66,13 +66,14 @@ export function GroupDetail({ group }: GroupDetailProps) {
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-2 px-4 py-3 border-b">
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
-          <GroupIcon className="h-4 w-4 text-primary" style={group.Icon ? { color: getIconColor(group.Icon) } : undefined} />
+          <GroupIcon
+            className="h-4 w-4 text-primary"
+            style={group.Icon ? { color: getIconColor(group.Icon) } : undefined}
+          />
         </div>
         <div>
           <h2 className="font-semibold leading-tight">{group.Name}</h2>
-          <span className="text-xs text-muted-foreground">
-            {t("asset.groupDetailTitle")}
-          </span>
+          <span className="text-xs text-muted-foreground">{t("asset.groupDetailTitle")}</span>
         </div>
       </div>
 
@@ -81,31 +82,21 @@ export function GroupDetail({ group }: GroupDetailProps) {
         <div className="rounded-xl border bg-card p-4">
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
-              <span className="text-xs text-muted-foreground">
-                {t("asset.name")}
-              </span>
+              <span className="text-xs text-muted-foreground">{t("asset.name")}</span>
               <p className="mt-0.5 font-medium">{group.Name}</p>
             </div>
             <div>
-              <span className="text-xs text-muted-foreground">
-                {t("asset.parentGroup")}
-              </span>
-              <p className="mt-0.5">
-                {parentGroup?.Name || t("asset.parentGroupNone")}
-              </p>
+              <span className="text-xs text-muted-foreground">{t("asset.parentGroup")}</span>
+              <p className="mt-0.5">{parentGroup?.Name || t("asset.parentGroupNone")}</p>
             </div>
             <div>
-              <span className="text-xs text-muted-foreground">
-                {t("asset.groupAssetCount")}
-              </span>
+              <span className="text-xs text-muted-foreground">{t("asset.groupAssetCount")}</span>
               <p className="mt-0.5">{assetCount}</p>
             </div>
           </div>
           {group.Description && (
             <div className="mt-3 pt-3 border-t">
-              <span className="text-xs text-muted-foreground">
-                {t("asset.description")}
-              </span>
+              <span className="text-xs text-muted-foreground">{t("asset.description")}</span>
               <p className="mt-0.5 text-sm whitespace-pre-wrap">{group.Description}</p>
             </div>
           )}
@@ -120,8 +111,16 @@ export function GroupDetail({ group }: GroupDetailProps) {
               key: "allow_list",
               label: t("asset.cmdPolicyAllowList"),
               items: allowList,
-              onAdd: (val) => { const next = [...allowList, val]; setAllowList(next); savePolicy(next, denyList); },
-              onRemove: (i) => { const next = allowList.filter((_, idx) => idx !== i); setAllowList(next); savePolicy(next, denyList); },
+              onAdd: (val) => {
+                const next = [...allowList, val];
+                setAllowList(next);
+                savePolicy(next, denyList);
+              },
+              onRemove: (i) => {
+                const next = allowList.filter((_, idx) => idx !== i);
+                setAllowList(next);
+                savePolicy(next, denyList);
+              },
               placeholder: t("asset.cmdPolicyPlaceholder"),
               variant: "allow",
             },
@@ -129,13 +128,27 @@ export function GroupDetail({ group }: GroupDetailProps) {
               key: "deny_list",
               label: t("asset.cmdPolicyDenyList"),
               items: denyList,
-              onAdd: (val) => { const next = [...denyList, val]; setDenyList(next); savePolicy(allowList, next); },
-              onRemove: (i) => { const next = denyList.filter((_, idx) => idx !== i); setDenyList(next); savePolicy(allowList, next); },
+              onAdd: (val) => {
+                const next = [...denyList, val];
+                setDenyList(next);
+                savePolicy(allowList, next);
+              },
+              onRemove: (i) => {
+                const next = denyList.filter((_, idx) => idx !== i);
+                setDenyList(next);
+                savePolicy(allowList, next);
+              },
               placeholder: t("asset.cmdPolicyPlaceholder"),
               variant: "deny",
             },
           ]}
-          buildPolicyJSON={() => JSON.stringify({ allow_list: allowList, deny_list: denyList, ...(policyGroups.length > 0 ? { groups: policyGroups } : {}) })}
+          buildPolicyJSON={() =>
+            JSON.stringify({
+              allow_list: allowList,
+              deny_list: denyList,
+              ...(policyGroups.length > 0 ? { groups: policyGroups } : {}),
+            })
+          }
           hint={t("asset.cmdPolicyGroupHint")}
           groupID={group.ID}
           saving={saving}

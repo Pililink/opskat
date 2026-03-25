@@ -58,7 +58,9 @@ export function QueryResultTable({
   useEffect(() => {
     if (!ctxMenu) return;
     const close = () => setCtxMenu(null);
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
     const onPointer = (e: PointerEvent) => {
       if (ctxMenuRef.current?.contains(e.target as Node)) return;
       close();
@@ -113,18 +115,12 @@ export function QueryResultTable({
   }
 
   if (error) {
-    return (
-      <div className="px-3 py-4 text-xs text-destructive whitespace-pre-wrap font-mono">
-        {error}
-      </div>
-    );
+    return <div className="px-3 py-4 text-xs text-destructive whitespace-pre-wrap font-mono">{error}</div>;
   }
 
   if (columns.length === 0) {
     return (
-      <div className="flex items-center justify-center py-8 text-xs text-muted-foreground">
-        {t("query.noResult")}
-      </div>
+      <div className="flex items-center justify-center py-8 text-xs text-muted-foreground">{t("query.noResult")}</div>
     );
   }
 
@@ -150,10 +146,7 @@ export function QueryResultTable({
         </thead>
         <tbody>
           {rows.map((row, idx) => (
-            <tr
-              key={idx}
-              className={idx % 2 === 0 ? "bg-background" : "bg-muted/40"}
-            >
+            <tr key={idx} className={idx % 2 === 0 ? "bg-background" : "bg-muted/40"}>
               {showRowNumber && (
                 <td className="border border-border px-2 py-1 text-center text-muted-foreground whitespace-nowrap w-[50px]">
                   {rowNumberOffset + idx + 1}
@@ -169,9 +162,7 @@ export function QueryResultTable({
                   <td
                     key={col}
                     className={`border border-border px-2 py-1 whitespace-nowrap max-w-[400px] ${
-                      isEdited
-                        ? "bg-yellow-100 dark:bg-yellow-900/30"
-                        : ""
+                      isEdited ? "bg-yellow-100 dark:bg-yellow-900/30" : ""
                     }`}
                     title={displayValue == null ? "NULL" : String(displayValue)}
                     onDoubleClick={() => {
@@ -184,17 +175,11 @@ export function QueryResultTable({
                       <input
                         ref={inputRef}
                         className="w-full bg-transparent outline-none border-none p-0 m-0 text-xs font-mono"
-                        defaultValue={
-                          displayValue == null ? "" : String(displayValue)
-                        }
+                        defaultValue={displayValue == null ? "" : String(displayValue)}
                         onBlur={(e) => commitEdit(idx, col, e.target.value)}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") {
-                            commitEdit(
-                              idx,
-                              col,
-                              (e.target as HTMLInputElement).value
-                            );
+                            commitEdit(idx, col, (e.target as HTMLInputElement).value);
                           }
                           if (e.key === "Escape") {
                             setEditingCell(null);
@@ -202,13 +187,9 @@ export function QueryResultTable({
                         }}
                       />
                     ) : displayValue == null ? (
-                      <span className="text-muted-foreground italic">
-                        NULL
-                      </span>
+                      <span className="text-muted-foreground italic">NULL</span>
                     ) : (
-                      <span className="truncate block max-w-[400px]">
-                        {String(displayValue)}
-                      </span>
+                      <span className="truncate block max-w-[400px]">{String(displayValue)}</span>
                     )}
                   </td>
                 );
@@ -219,23 +200,24 @@ export function QueryResultTable({
       </table>
 
       {/* Cell context menu */}
-      {ctxMenu && createPortal(
-        <div
-          ref={ctxMenuRef}
-          className="z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95"
-          style={{ position: "fixed", top: ctxMenu.y + 2, left: ctxMenu.x + 2 }}
-        >
+      {ctxMenu &&
+        createPortal(
           <div
-            role="menuitem"
-            className="relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none hover:bg-accent hover:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground"
-            onClick={handleCopyCell}
+            ref={ctxMenuRef}
+            className="z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95"
+            style={{ position: "fixed", top: ctxMenu.y + 2, left: ctxMenu.x + 2 }}
           >
-            <Copy className="h-3.5 w-3.5" />
-            {t("query.copyValue")}
-          </div>
-        </div>,
-        document.body
-      )}
+            <div
+              role="menuitem"
+              className="relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none hover:bg-accent hover:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground"
+              onClick={handleCopyCell}
+            >
+              <Copy className="h-3.5 w-3.5" />
+              {t("query.copyValue")}
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }

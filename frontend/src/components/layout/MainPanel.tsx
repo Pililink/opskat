@@ -65,10 +65,7 @@ interface TabItemProps {
   extra?: React.ReactNode;
 }
 
-function TabItem({
-  tabKey, icon: Icon, iconStyle, label, title,
-  isActive, onClick, onClose, extra,
-}: TabItemProps) {
+function TabItem({ tabKey, icon: Icon, iconStyle, label, title, isActive, onClick, onClose, extra }: TabItemProps) {
   const { t } = useTranslation();
   const { tabs, dragKeyRef, reorder, moveTo } = useContext(TabBarContext);
   const noTabStyle = { "--wails-draggable": "no-drag" } as React.CSSProperties;
@@ -81,9 +78,7 @@ function TabItem({
         <div
           className={cn(
             "relative flex items-center gap-1.5 px-3 py-2 text-sm shrink-0 cursor-pointer transition-colors duration-150",
-            isActive
-              ? "text-foreground"
-              : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+            isActive ? "text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
           )}
           style={noTabStyle}
           title={title ?? label}
@@ -104,37 +99,32 @@ function TabItem({
             if (!dragKeyRef.current || dragKeyRef.current === tabKey) return;
             reorder(dragKeyRef.current, tabKey);
           }}
-          onDragEnd={() => { dragKeyRef.current = null; }}
+          onDragEnd={() => {
+            dragKeyRef.current = null;
+          }}
         >
           <Icon className="h-3.5 w-3.5 shrink-0" style={iconStyle} />
           <span className="max-w-24 truncate">{label}</span>
           {extra}
           <button
             className="ml-1.5 rounded-sm p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors duration-150"
-            onClick={(e) => { e.stopPropagation(); onClose(); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onClose();
+            }}
           >
             <X className="h-3 w-3" />
           </button>
-          {isActive && (
-            <span className="absolute bottom-0 left-1 right-1 h-0.5 rounded-full bg-primary" />
-          )}
+          {isActive && <span className="absolute bottom-0 left-1 right-1 h-0.5 rounded-full bg-primary" />}
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
-        <ContextMenuItem onClick={onClose}>
-          {t("tab.close")}
-        </ContextMenuItem>
-        <ContextMenuItem
-          onClick={() => useTabStore.getState().closeOtherTabs(tabKey)}
-          disabled={total <= 1}
-        >
+        <ContextMenuItem onClick={onClose}>{t("tab.close")}</ContextMenuItem>
+        <ContextMenuItem onClick={() => useTabStore.getState().closeOtherTabs(tabKey)} disabled={total <= 1}>
           {t("tab.closeOthers")}
         </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem
-          onClick={() => useTabStore.getState().closeLeftTabs(tabKey)}
-          disabled={globalIndex <= 0}
-        >
+        <ContextMenuItem onClick={() => useTabStore.getState().closeLeftTabs(tabKey)} disabled={globalIndex <= 0}>
           {t("tab.closeLeft")}
         </ContextMenuItem>
         <ContextMenuItem
@@ -146,28 +136,16 @@ function TabItem({
         {total > 1 && (
           <>
             <ContextMenuSeparator />
-            <ContextMenuItem
-              onClick={() => moveTo(tabKey, globalIndex - 1)}
-              disabled={globalIndex <= 0}
-            >
+            <ContextMenuItem onClick={() => moveTo(tabKey, globalIndex - 1)} disabled={globalIndex <= 0}>
               {t("tab.moveLeft")}
             </ContextMenuItem>
-            <ContextMenuItem
-              onClick={() => moveTo(tabKey, globalIndex + 1)}
-              disabled={globalIndex >= total - 1}
-            >
+            <ContextMenuItem onClick={() => moveTo(tabKey, globalIndex + 1)} disabled={globalIndex >= total - 1}>
               {t("tab.moveRight")}
             </ContextMenuItem>
-            <ContextMenuItem
-              onClick={() => moveTo(tabKey, 0)}
-              disabled={globalIndex <= 0}
-            >
+            <ContextMenuItem onClick={() => moveTo(tabKey, 0)} disabled={globalIndex <= 0}>
               {t("tab.moveToStart")}
             </ContextMenuItem>
-            <ContextMenuItem
-              onClick={() => moveTo(tabKey, total - 1)}
-              disabled={globalIndex >= total - 1}
-            >
+            <ContextMenuItem onClick={() => moveTo(tabKey, total - 1)} disabled={globalIndex >= total - 1}>
               {t("tab.moveToEnd")}
             </ContextMenuItem>
           </>
@@ -183,11 +161,7 @@ interface MainPanelProps {
   onConnectAsset: (asset: asset_entity.Asset) => void;
 }
 
-export function MainPanel({
-  onEditAsset,
-  onDeleteAsset,
-  onConnectAsset,
-}: MainPanelProps) {
+export function MainPanel({ onEditAsset, onDeleteAsset, onConnectAsset }: MainPanelProps) {
   const { t } = useTranslation();
   const isFullscreen = useFullscreen();
 
@@ -298,7 +272,7 @@ export function MainPanel({
 
       case "info": {
         const meta = tab.meta as InfoTabMeta;
-        const TabIcon = tab.icon ? getIconComponent(tab.icon) : (meta.targetType === "group" ? Folder : Server);
+        const TabIcon = tab.icon ? getIconComponent(tab.icon) : meta.targetType === "group" ? Folder : Server;
         const iconStyle = tab.icon ? { color: getIconColor(tab.icon) } : undefined;
         return (
           <TabItem
@@ -485,20 +459,14 @@ export function MainPanel({
                 pointerEvents: isActive ? "auto" : "none",
               }}
             >
-              {meta.assetType === "database" ? (
-                <DatabasePanel tabId={tab.id} />
-              ) : (
-                <RedisPanel tabId={tab.id} />
-              )}
+              {meta.assetType === "database" ? <DatabasePanel tabId={tab.id} /> : <RedisPanel tabId={tab.id} />}
             </div>
           );
         })}
 
         {/* Page and info tabs: rendered only when active */}
         {activeTab && (activeTab.type === "page" || activeTab.type === "info") && (
-          <div className="absolute inset-0 bg-background">
-            {renderActiveContent()}
-          </div>
+          <div className="absolute inset-0 bg-background">{renderActiveContent()}</div>
         )}
 
         {/* Welcome screen when no active tab */}
@@ -510,16 +478,10 @@ export function MainPanel({
                 <img src={logoDark} alt="opskat" className="h-10 w-10 rounded-lg hidden dark:block" />
               </div>
               <div className="space-y-1">
-                <h2 className="text-2xl font-semibold tracking-tight">
-                  {t("app.title")}
-                </h2>
-                <p className="text-sm text-muted-foreground">
-                  {t("app.subtitle")}
-                </p>
+                <h2 className="text-2xl font-semibold tracking-tight">{t("app.title")}</h2>
+                <p className="text-sm text-muted-foreground">{t("app.subtitle")}</p>
               </div>
-              <p className="text-xs text-muted-foreground/60">
-                {t("app.hint")}
-              </p>
+              <p className="text-xs text-muted-foreground/60">{t("app.hint")}</p>
             </div>
           </div>
         )}

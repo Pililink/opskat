@@ -1,12 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,14 +14,7 @@ interface ConnectDialogProps {
   authRetry?: boolean;
 }
 
-export function ConnectDialog({
-  open,
-  onOpenChange,
-  assetName,
-  authType,
-  onConnect,
-  authRetry,
-}: ConnectDialogProps) {
+export function ConnectDialog({ open, onOpenChange, assetName, authType, onConnect, authRetry }: ConnectDialogProps) {
   const { t } = useTranslation();
   const [password, setPassword] = useState("");
   const [connecting, setConnecting] = useState(false);
@@ -66,11 +53,7 @@ export function ConnectDialog({
           </DialogTitle>
         </DialogHeader>
         <div className="grid gap-4 py-2">
-          {authRetry && (
-            <p className="text-sm text-destructive">
-              {t("ssh.authFailed")}
-            </p>
-          )}
+          {authRetry && <p className="text-sm text-destructive">{t("ssh.authFailed")}</p>}
           {(authType === "password" || authRetry) && (
             <div className="grid gap-2">
               <Label>{t("ssh.password")}</Label>
@@ -91,14 +74,10 @@ export function ConnectDialog({
                 onChange={(e) => setUpdatePassword(e.target.checked)}
                 className="rounded border-input"
               />
-              <span className="text-sm">
-                {t("ssh.updatePassword")}
-              </span>
+              <span className="text-sm">{t("ssh.updatePassword")}</span>
             </label>
           )}
-          {error && (
-            <p className="text-sm text-destructive">{error}</p>
-          )}
+          {error && <p className="text-sm text-destructive">{error}</p>}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => handleOpenChange(false)}>

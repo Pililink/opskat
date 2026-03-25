@@ -26,11 +26,11 @@ type claudeAssistantMessage struct {
 }
 
 type claudeContentBlock struct {
-	Type      string `json:"type"`         // text, tool_use, thinking, server_tool_use, *_tool_result
-	Text      string `json:"text"`         // text/thinking 类型
-	Name      string `json:"name"`         // tool_use/server_tool_use 类型
-	ID        string `json:"id"`           // tool_use/server_tool_use 类型
-	ToolUseID string `json:"tool_use_id"`  // *_tool_result 类型，关联的 tool_use id
+	Type      string `json:"type"`        // text, tool_use, thinking, server_tool_use, *_tool_result
+	Text      string `json:"text"`        // text/thinking 类型
+	Name      string `json:"name"`        // tool_use/server_tool_use 类型
+	ID        string `json:"id"`          // tool_use/server_tool_use 类型
+	ToolUseID string `json:"tool_use_id"` // *_tool_result 类型，关联的 tool_use id
 }
 
 // pendingToolUse 记录 assistant 消息中的 tool_use，等待 CLI 内部执行后标记完成

@@ -145,7 +145,7 @@ export namespace audit_entity {
 	    Error: string;
 	    Success: number;
 	    ConversationID: number;
-	    PlanSessionID: string;
+	    GrantSessionID: string;
 	    SessionID: string;
 	    Decision: string;
 	    DecisionSource: string;
@@ -169,7 +169,7 @@ export namespace audit_entity {
 	        this.Error = source["Error"];
 	        this.Success = source["Success"];
 	        this.ConversationID = source["ConversationID"];
-	        this.PlanSessionID = source["PlanSessionID"];
+	        this.GrantSessionID = source["GrantSessionID"];
 	        this.SessionID = source["SessionID"];
 	        this.Decision = source["Decision"];
 	        this.DecisionSource = source["DecisionSource"];
@@ -205,6 +205,38 @@ export namespace audit_repo {
 
 export namespace backup_svc {
 	
+	export class BackupSummary {
+	    version: string;
+	    exported_at: string;
+	    encrypted: boolean;
+	    includes_credentials: boolean;
+	    asset_count: number;
+	    group_count: number;
+	    credential_count: number;
+	    policy_group_count: number;
+	    forward_count: number;
+	    has_shortcuts: boolean;
+	    has_custom_themes: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new BackupSummary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.version = source["version"];
+	        this.exported_at = source["exported_at"];
+	        this.encrypted = source["encrypted"];
+	        this.includes_credentials = source["includes_credentials"];
+	        this.asset_count = source["asset_count"];
+	        this.group_count = source["group_count"];
+	        this.credential_count = source["credential_count"];
+	        this.policy_group_count = source["policy_group_count"];
+	        this.forward_count = source["forward_count"];
+	        this.has_shortcuts = source["has_shortcuts"];
+	        this.has_custom_themes = source["has_custom_themes"];
+	    }
+	}
 	export class DeviceFlowInfo {
 	    deviceCode: string;
 	    userCode: string;
@@ -223,6 +255,28 @@ export namespace backup_svc {
 	        this.verificationUri = source["verificationUri"];
 	        this.expiresIn = source["expiresIn"];
 	        this.interval = source["interval"];
+	    }
+	}
+	export class ExportOptions {
+	    asset_ids: number[];
+	    include_credentials: boolean;
+	    include_forwards: boolean;
+	    include_policy_groups: boolean;
+	    shortcuts?: string;
+	    custom_themes?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExportOptions(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.asset_ids = source["asset_ids"];
+	        this.include_credentials = source["include_credentials"];
+	        this.include_forwards = source["include_forwards"];
+	        this.include_policy_groups = source["include_policy_groups"];
+	        this.shortcuts = source["shortcuts"];
+	        this.custom_themes = source["custom_themes"];
 	    }
 	}
 	export class GistInfo {
@@ -255,6 +309,54 @@ export namespace backup_svc {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.login = source["login"];
 	        this.avatarUrl = source["avatarUrl"];
+	    }
+	}
+	export class ImportOptions {
+	    import_assets: boolean;
+	    import_credentials: boolean;
+	    import_forwards: boolean;
+	    import_policy_groups: boolean;
+	    import_shortcuts: boolean;
+	    import_themes: boolean;
+	    mode: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ImportOptions(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.import_assets = source["import_assets"];
+	        this.import_credentials = source["import_credentials"];
+	        this.import_forwards = source["import_forwards"];
+	        this.import_policy_groups = source["import_policy_groups"];
+	        this.import_shortcuts = source["import_shortcuts"];
+	        this.import_themes = source["import_themes"];
+	        this.mode = source["mode"];
+	    }
+	}
+	export class ImportResult {
+	    assets_imported: number;
+	    groups_imported: number;
+	    credentials_imported: number;
+	    policy_groups_imported: number;
+	    forwards_imported: number;
+	    shortcuts?: string;
+	    custom_themes?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ImportResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.assets_imported = source["assets_imported"];
+	        this.groups_imported = source["groups_imported"];
+	        this.credentials_imported = source["credentials_imported"];
+	        this.policy_groups_imported = source["policy_groups_imported"];
+	        this.forwards_imported = source["forwards_imported"];
+	        this.shortcuts = source["shortcuts"];
+	        this.custom_themes = source["custom_themes"];
 	    }
 	}
 
@@ -739,9 +841,30 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class GrantItemEdit {
+	    asset_id: number;
+	    asset_name: string;
+	    group_id: number;
+	    group_name: string;
+	    command: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new GrantItemEdit(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.asset_id = source["asset_id"];
+	        this.asset_name = source["asset_name"];
+	        this.group_id = source["group_id"];
+	        this.group_name = source["group_name"];
+	        this.command = source["command"];
+	    }
+	}
 	export class ImportFileInfo {
 	    filePath: string;
 	    encrypted: boolean;
+	    summary?: backup_svc.BackupSummary;
 	
 	    static createFrom(source: any = {}) {
 	        return new ImportFileInfo(source);
@@ -751,7 +874,26 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.filePath = source["filePath"];
 	        this.encrypted = source["encrypted"];
+	        this.summary = this.convertValues(source["summary"], backup_svc.BackupSummary);
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class LocalSSHKeyInfo {
 	    path: string;
@@ -785,26 +927,6 @@ export namespace main {
 	        this.path = source["path"];
 	        this.version = source["version"];
 	        this.embedded = source["embedded"];
-	    }
-	}
-	export class PlanItemEdit {
-	    asset_id: number;
-	    asset_name: string;
-	    group_id: number;
-	    group_name: string;
-	    command: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new PlanItemEdit(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.asset_id = source["asset_id"];
-	        this.asset_name = source["asset_name"];
-	        this.group_id = source["group_id"];
-	        this.group_name = source["group_name"];
-	        this.command = source["command"];
 	    }
 	}
 	export class PolicyTestRequest {

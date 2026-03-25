@@ -23,10 +23,10 @@ func sessionScope() string {
 	// Check well-known terminal session env vars
 	candidates := []string{
 		"OPSKAT_SESSION_ID", // our own (desktop app injects this)
-		"TERM_SESSION_ID",    // macOS Terminal.app
-		"ITERM_SESSION_ID",   // iTerm2
-		"WT_SESSION",         // Windows Terminal
-		"WINDOWID",           // X11
+		"TERM_SESSION_ID",   // macOS Terminal.app
+		"ITERM_SESSION_ID",  // iTerm2
+		"WT_SESSION",        // Windows Terminal
+		"WINDOWID",          // X11
 	}
 	for _, key := range candidates {
 		if v := os.Getenv(key); v != "" {

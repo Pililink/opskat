@@ -34,8 +34,7 @@ function quoteIdent(name: string, driver?: string): string {
 
 export function DatabaseTree({ tabId }: DatabaseTreeProps) {
   const { t } = useTranslation();
-  const { dbStates, loadDatabases, toggleDbExpand, openTableTab, openSqlTab, refreshTables } =
-    useQueryStore();
+  const { dbStates, loadDatabases, toggleDbExpand, openTableTab, openSqlTab, refreshTables } = useQueryStore();
 
   const tab = useTabStore((s) => s.tabs.find((t) => t.id === tabId));
   const driver = (tab?.meta as QueryTabMeta | undefined)?.driver;
@@ -95,9 +94,7 @@ export function DatabaseTree({ tabId }: DatabaseTreeProps) {
               <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
             </div>
           ) : databases.length === 0 ? (
-            <div className="text-xs text-muted-foreground text-center py-4">
-              {t("query.databases")}
-            </div>
+            <div className="text-xs text-muted-foreground text-center py-4">{t("query.databases")}</div>
           ) : (
             databases.map((db) => {
               const isExpanded = expandedDbs.has(db);
@@ -122,16 +119,12 @@ export function DatabaseTree({ tabId }: DatabaseTreeProps) {
                       </div>
                     </ContextMenuTrigger>
                     <ContextMenuContent>
-                      <ContextMenuItem
-                        onClick={() => openSqlTab(tabId, db)}
-                      >
+                      <ContextMenuItem onClick={() => openSqlTab(tabId, db)}>
                         <Search className="h-3.5 w-3.5" />
                         {t("query.newSql")}
                       </ContextMenuItem>
                       <ContextMenuSeparator />
-                      <ContextMenuItem
-                        onClick={() => refreshTables(tabId, db)}
-                      >
+                      <ContextMenuItem onClick={() => refreshTables(tabId, db)}>
                         <RefreshCw className="h-3.5 w-3.5" />
                         {t("query.refreshTables")}
                       </ContextMenuItem>
@@ -146,35 +139,30 @@ export function DatabaseTree({ tabId }: DatabaseTreeProps) {
                           <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
                         </div>
                       ) : dbTables.length === 0 ? (
-                        <div className="px-2 py-1 text-xs text-muted-foreground italic">
-                          {t("query.noTables")}
-                        </div>
+                        <div className="px-2 py-1 text-xs text-muted-foreground italic">{t("query.noTables")}</div>
                       ) : (
                         dbTables.map((tbl) => (
                           <ContextMenu key={tbl}>
                             <ContextMenuTrigger className="block w-full">
                               <div
                                 className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs cursor-pointer hover:bg-accent transition-colors duration-150"
-                                onClick={() =>
-                                  openTableTab(tabId, db, tbl)
-                                }
+                                onClick={() => openTableTab(tabId, db, tbl)}
                               >
                                 <Table2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                                 <span className="truncate">{tbl}</span>
                               </div>
                             </ContextMenuTrigger>
                             <ContextMenuContent>
-                              <ContextMenuItem
-                                onClick={() => openTableTab(tabId, db, tbl)}
-                              >
+                              <ContextMenuItem onClick={() => openTableTab(tabId, db, tbl)}>
                                 <Table2 className="h-3.5 w-3.5" />
                                 {t("query.openTable")}
                               </ContextMenuItem>
                               <ContextMenuItem
                                 onClick={() => {
-                                  const tableName = driver === "postgresql"
-                                    ? `"${tbl}"`
-                                    : `${quoteIdent(db, driver)}.${quoteIdent(tbl, driver)}`;
+                                  const tableName =
+                                    driver === "postgresql"
+                                      ? `"${tbl}"`
+                                      : `${quoteIdent(db, driver)}.${quoteIdent(tbl, driver)}`;
                                   openSqlTab(tabId, db, `SELECT * FROM ${tableName} LIMIT 100`);
                                 }}
                               >

@@ -64,9 +64,7 @@ export function DatabasePanel({ tabId }: DatabasePanelProps) {
                     <Code2 className="h-3 w-3 shrink-0" />
                   )}
                   <span className="truncate max-w-[120px]">
-                    {tab.type === "table"
-                      ? `${tab.database}.${tab.table}`
-                      : tab.title}
+                    {tab.type === "table" ? `${tab.database}.${tab.table}` : tab.title}
                   </span>
                   <button
                     className="ml-1 rounded-sm p-0.5 hover:bg-muted transition-colors"
@@ -88,9 +86,7 @@ export function DatabasePanel({ tabId }: DatabasePanelProps) {
           {innerTabs.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
               <Database className="h-10 w-10 opacity-30" />
-              <p className="text-xs">
-                {t("query.openTable")}
-              </p>
+              <p className="text-xs">{t("query.openTable")}</p>
             </div>
           )}
           {innerTabs.map((tab) => {
@@ -105,11 +101,7 @@ export function DatabasePanel({ tabId }: DatabasePanelProps) {
                 }}
               >
                 {tab.type === "table" ? (
-                  <TableDataTab
-                    tabId={tabId}
-                    database={tab.database}
-                    table={tab.table}
-                  />
+                  <TableDataTab tabId={tabId} database={tab.database} table={tab.table} />
                 ) : (
                   <SqlEditorTab tabId={tabId} innerTabId={tab.id} />
                 )}

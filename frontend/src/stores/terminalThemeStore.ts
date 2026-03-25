@@ -33,19 +33,14 @@ export const useTerminalThemeStore = create<TerminalThemeState>()(
 
       updateCustomTheme: (theme) =>
         set((state) => ({
-          customThemes: state.customThemes.map((t) =>
-            t.id === theme.id ? theme : t
-          ),
+          customThemes: state.customThemes.map((t) => (t.id === theme.id ? theme : t)),
         })),
 
       removeCustomTheme: (id) =>
         set((state) => ({
           customThemes: state.customThemes.filter((t) => t.id !== id),
           // 如果删除的是当前选中的，回退到默认
-          selectedThemeId:
-            state.selectedThemeId === id
-              ? "default"
-              : state.selectedThemeId,
+          selectedThemeId: state.selectedThemeId === id ? "default" : state.selectedThemeId,
         })),
 
       getActiveTheme: () => {

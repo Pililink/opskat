@@ -13,14 +13,7 @@ interface SplitPaneProps {
   path: number[];
 }
 
-export function SplitPane({
-  node,
-  tabId,
-  isTabActive,
-  activePaneId,
-  showFocusRing,
-  path,
-}: SplitPaneProps) {
+export function SplitPane({ node, tabId, isTabActive, activePaneId, showFocusRing, path }: SplitPaneProps) {
   if (node.type === "terminal") {
     const isFocused = activePaneId === node.sessionId;
     return (
@@ -118,14 +111,8 @@ function SplitContainer({
   const transition = isDragging ? "none" : "flex 150ms ease-out";
 
   return (
-    <div
-      ref={containerRef}
-      className={`flex h-full w-full ${isVertical ? "flex-row" : "flex-col"}`}
-    >
-      <div
-        className="overflow-hidden min-w-0 min-h-0"
-        style={{ flex: node.ratio, transition }}
-      >
+    <div ref={containerRef} className={`flex h-full w-full ${isVertical ? "flex-row" : "flex-col"}`}>
+      <div className="overflow-hidden min-w-0 min-h-0" style={{ flex: node.ratio, transition }}>
         <SplitPane
           node={node.first}
           tabId={tabId}
@@ -141,10 +128,7 @@ function SplitContainer({
         }`}
         onMouseDown={handleDragStart}
       />
-      <div
-        className="overflow-hidden min-w-0 min-h-0"
-        style={{ flex: 1 - node.ratio, transition }}
-      >
+      <div className="overflow-hidden min-w-0 min-h-0" style={{ flex: 1 - node.ratio, transition }}>
         <SplitPane
           node={node.second}
           tabId={tabId}

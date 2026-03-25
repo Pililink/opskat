@@ -61,9 +61,7 @@ export function ToolBlock({ block }: ToolBlockProps) {
         ) : (
           <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         )}
-        <span className="font-medium text-foreground/80">
-          {block.toolName}
-        </span>
+        <span className="font-medium text-foreground/80">{block.toolName}</span>
         {block.toolInput && (
           <code className="min-w-0 break-all text-muted-foreground font-mono text-[11px] ml-0.5">
             {block.toolInput}
@@ -88,9 +86,7 @@ export function ToolBlock({ block }: ToolBlockProps) {
               size="sm"
               variant="outline"
               className="h-6 px-2 text-xs"
-              onClick={() =>
-                RespondCommandConfirm(block.confirmId!, "deny")
-              }
+              onClick={() => RespondCommandConfirm(block.confirmId!, "deny")}
             >
               {t("ai.commandConfirmDeny")}
             </Button>
@@ -98,18 +94,14 @@ export function ToolBlock({ block }: ToolBlockProps) {
               size="sm"
               variant="secondary"
               className="h-6 px-2 text-xs"
-              onClick={() =>
-                RespondCommandConfirm(block.confirmId!, "allowAll")
-              }
+              onClick={() => RespondCommandConfirm(block.confirmId!, "allowAll")}
             >
               {t("ai.commandConfirmAllowAll")}
             </Button>
             <Button
               size="sm"
               className="h-6 px-2 text-xs"
-              onClick={() =>
-                RespondCommandConfirm(block.confirmId!, "allow")
-              }
+              onClick={() => RespondCommandConfirm(block.confirmId!, "allow")}
             >
               {t("ai.commandConfirmAllow")}
             </Button>

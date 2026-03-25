@@ -14,6 +14,8 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+const auditOutputLimit = 32768 // 审计日志捕获输出大小限制
+
 func cmdExec(ctx context.Context, args []string, session string) int {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" {
 		printExecUsage()
@@ -63,13 +65,19 @@ func cmdExec(ctx context.Context, args []string, session string) int {
 		}
 	}
 
+	// 捕获输出用于审计日志
+	outBuf := ai.NewLimitedBuffer(auditOutputLimit)
+	errBuf := ai.NewLimitedBuffer(auditOutputLimit)
+	stdoutW := io.MultiWriter(os.Stdout, outBuf)
+	stderrW := io.MultiWriter(os.Stderr, errBuf)
+
 	// 尝试通过 proxy 执行（复用 ops-cat 连接池）
 	if proxy := getSSHProxyClient(); proxy != nil {
 		exitCode, execErr := proxy.Exec(sshpool.ProxyRequest{
 			AssetID: assetID,
 			Command: command,
-		}, stdin, os.Stdout, os.Stderr)
-		auditResult := fmt.Sprintf(`{"exit_code":%d}`, exitCode)
+		}, stdin, stdoutW, stderrW)
+		auditResult := buildExecAuditResult(exitCode, outBuf.String(), errBuf.String())
 		writeOpsctlAudit(auditCtx, "exec", argsJSON, auditResult, execErr, approvalResult.ToCheckResult())
 		if execErr != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", execErr)
@@ -79,16 +87,19 @@ func cmdExec(ctx context.Context, args []string, session string) int {
 	}
 
 	// Fallback: 直连
-	execErr := ai.ExecWithStdio(ctx, assetID, command, stdin, os.Stdout, os.Stderr)
+	execErr := ai.ExecWithStdio(ctx, assetID, command, stdin, stdoutW, stderrW)
 
 	// 审计日志
-	auditResult := `{"status":"completed"}`
+	exitCode := 0
 	if execErr != nil {
 		var exitErr *ssh.ExitError
 		if errors.As(execErr, &exitErr) {
-			auditResult = fmt.Sprintf(`{"exit_code":%d}`, exitErr.ExitStatus())
+			exitCode = exitErr.ExitStatus()
+		} else {
+			exitCode = -1
 		}
 	}
+	auditResult := buildExecAuditResult(exitCode, outBuf.String(), errBuf.String())
 	writeOpsctlAudit(auditCtx, "exec", argsJSON, auditResult, execErr, approvalResult.ToCheckResult())
 
 	if execErr != nil {
@@ -101,6 +112,22 @@ func cmdExec(ctx context.Context, args []string, session string) int {
 		return 1
 	}
 	return 0
+}
+
+// buildExecAuditResult 构建 exec 审计日志的 Result 内容
+func buildExecAuditResult(exitCode int, stdout, stderr string) string {
+	output := stdout
+	if stderr != "" {
+		if output != "" {
+			output += "\nSTDERR:\n" + stderr
+		} else {
+			output = "STDERR:\n" + stderr
+		}
+	}
+	if output == "" {
+		return fmt.Sprintf(`{"exit_code":%d}`, exitCode)
+	}
+	return fmt.Sprintf("exit_code: %d\n%s", exitCode, output)
 }
 
 func printExecUsage() {

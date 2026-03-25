@@ -14,19 +14,19 @@ import (
 
 // ApprovalRequest is sent from opsctl to the desktop app.
 type ApprovalRequest struct {
-	Token       string     `json:"token,omitempty"`       // 认证 token
-	Type        string     `json:"type"`                  // "exec"|"cp"|"create"|"update"|"plan"
-	AssetID     int64      `json:"asset_id,omitempty"`
-	AssetName   string     `json:"asset_name,omitempty"`
-	Command     string     `json:"command,omitempty"`
-	Detail      string     `json:"detail"`
-	SessionID   string     `json:"session_id,omitempty"`  // 统一 session 标识（审批 session 或 plan session）
-	PlanItems   []PlanItem `json:"plan_items,omitempty"`  // type="plan" 时使用
-	Description string     `json:"description,omitempty"` // 计划描述
+	Token       string      `json:"token,omitempty"` // 认证 token
+	Type        string      `json:"type"`            // "exec"|"cp"|"create"|"update"|"grant"
+	AssetID     int64       `json:"asset_id,omitempty"`
+	AssetName   string      `json:"asset_name,omitempty"`
+	Command     string      `json:"command,omitempty"`
+	Detail      string      `json:"detail"`
+	SessionID   string      `json:"session_id,omitempty"`  // 统一 session 标识（审批 session 或 grant session）
+	GrantItems  []GrantItem `json:"grant_items,omitempty"` // type="grant" 时使用
+	Description string      `json:"description,omitempty"` // 授权描述
 }
 
-// PlanItem 计划中的单条操作
-type PlanItem struct {
+// GrantItem 授权中的单条操作
+type GrantItem struct {
 	Type      string `json:"type"` // "exec", "cp", "create", "update"
 	AssetID   int64  `json:"asset_id"`
 	AssetName string `json:"asset_name"`
@@ -38,10 +38,12 @@ type PlanItem struct {
 
 // ApprovalResponse is sent from the desktop app back to opsctl.
 type ApprovalResponse struct {
-	Approved       bool   `json:"approved"`
-	Reason         string `json:"reason,omitempty"`
-	SessionID      string `json:"session_id,omitempty"`      // plan 审批返回 / session 标识
-	ApproveSession bool   `json:"approve_session,omitempty"` // 用户选择了"允许当前会话"
+	Approved       bool        `json:"approved"`
+	Reason         string      `json:"reason,omitempty"`
+	SessionID      string      `json:"session_id,omitempty"`      // grant 审批返回 / session 标识
+	ApproveGrant   bool        `json:"approve_grant,omitempty"`   // 用户选择了"记住并允许"
+	MatchedPattern string      `json:"matched_pattern,omitempty"` // session 匹配时命中的规则模式
+	EditedItems    []GrantItem `json:"edited_items,omitempty"`    // 用户编辑后的 grant items
 }
 
 // SocketPath returns the approval socket path for the given data directory.

@@ -28,15 +28,15 @@ func TestApprovalRequest_JSON(t *testing.T) {
 			assert.Equal(t, int64(1), decoded.AssetID)
 			assert.Equal(t, "uptime", decoded.Command)
 			assert.Empty(t, decoded.SessionID)
-			assert.Empty(t, decoded.PlanItems)
+			assert.Empty(t, decoded.GrantItems)
 		})
 
-		convey.Convey("计划审批请求", func() {
+		convey.Convey("授权审批请求", func() {
 			req := ApprovalRequest{
-				Type:        "plan",
+				Type:        "grant",
 				SessionID:   "abc-123",
 				Description: "deploy nginx",
-				PlanItems: []PlanItem{
+				GrantItems: []GrantItem{
 					{Type: "exec", AssetID: 1, AssetName: "web-01", Command: "systemctl stop nginx"},
 					{Type: "cp", AssetID: 1, AssetName: "web-01", Detail: "upload config"},
 					{Type: "exec", AssetID: 1, AssetName: "web-01", Command: "systemctl start nginx"},
@@ -48,11 +48,11 @@ func TestApprovalRequest_JSON(t *testing.T) {
 			var decoded ApprovalRequest
 			err = json.Unmarshal(data, &decoded)
 			assert.NoError(t, err)
-			assert.Equal(t, "plan", decoded.Type)
+			assert.Equal(t, "grant", decoded.Type)
 			assert.Equal(t, "abc-123", decoded.SessionID)
-			assert.Len(t, decoded.PlanItems, 3)
-			assert.Equal(t, "systemctl stop nginx", decoded.PlanItems[0].Command)
-			assert.Equal(t, "cp", decoded.PlanItems[1].Type)
+			assert.Len(t, decoded.GrantItems, 3)
+			assert.Equal(t, "systemctl stop nginx", decoded.GrantItems[0].Command)
+			assert.Equal(t, "cp", decoded.GrantItems[1].Type)
 		})
 
 		convey.Convey("带 session 的 exec 请求", func() {
@@ -89,8 +89,8 @@ func TestApprovalResponse_JSON(t *testing.T) {
 			assert.Empty(t, decoded.SessionID)
 		})
 
-		convey.Convey("计划审批响应带 session ID", func() {
-			resp := ApprovalResponse{Approved: true, SessionID: "plan-abc"}
+		convey.Convey("授权审批响应带 session ID", func() {
+			resp := ApprovalResponse{Approved: true, SessionID: "grant-abc"}
 			data, err := json.Marshal(resp)
 			assert.NoError(t, err)
 
@@ -98,7 +98,7 @@ func TestApprovalResponse_JSON(t *testing.T) {
 			err = json.Unmarshal(data, &decoded)
 			assert.NoError(t, err)
 			assert.True(t, decoded.Approved)
-			assert.Equal(t, "plan-abc", decoded.SessionID)
+			assert.Equal(t, "grant-abc", decoded.SessionID)
 		})
 
 		convey.Convey("拒绝响应带原因", func() {

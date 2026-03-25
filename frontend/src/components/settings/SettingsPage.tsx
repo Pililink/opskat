@@ -3,20 +3,8 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -31,9 +19,7 @@ import { useTheme } from "@/components/theme-provider";
 import { useAIStore } from "@/stores/aiStore";
 import { useAssetStore } from "@/stores/assetStore";
 import {
-  ExportToFile,
   SelectImportFile,
-  ExecuteImportFile,
   StartGitHubDeviceFlow,
   WaitGitHubDeviceAuth,
   CancelGitHubAuth,
@@ -66,10 +52,32 @@ import {
 import { backup_svc } from "../../../wailsjs/go/models";
 import { import_svc } from "../../../wailsjs/go/models";
 import { ImportDialog, ImportCallOptions } from "@/components/settings/ImportDialog";
+import { ExportDialog } from "@/components/settings/ExportDialog";
+import { BackupImportDialog } from "@/components/settings/BackupImportDialog";
 import {
-  Bot, Palette, Check, HardDrive, Download, Upload, Import,
-  Github, LogOut, Loader2, Copy, ExternalLink, Eye, EyeOff, Shuffle, Keyboard,
-  Plus, Pencil, Trash2, MonitorDot, RefreshCw, ChevronDown, ChevronUp,
+  Bot,
+  Palette,
+  Check,
+  HardDrive,
+  Download,
+  Upload,
+  Import,
+  Github,
+  LogOut,
+  Loader2,
+  Copy,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  Shuffle,
+  Keyboard,
+  Plus,
+  Pencil,
+  Trash2,
+  MonitorDot,
+  RefreshCw,
+  ChevronDown,
+  ChevronUp,
   Info,
 } from "lucide-react";
 import { ShortcutSettings } from "@/components/settings/ShortcutSettings";
@@ -80,6 +88,8 @@ import { toast } from "sonner";
 import { BrowserOpenURL, Quit } from "../../../wailsjs/runtime/runtime";
 import { EventsOn } from "../../../wailsjs/runtime/runtime";
 import { cn } from "@/lib/utils";
+
+const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 function generatePassword(length = 20): string {
   const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
@@ -105,13 +115,21 @@ function PasswordInput({
         className={cn(showGenerate ? "pr-18" : "pr-9", className)}
       />
       <div className="absolute right-1 top-1/2 -translate-y-1/2 flex">
-        <Button type="button" variant="ghost" size="icon" className="h-7 w-7"
-          onClick={() => setVisible(!visible)}>
+        <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => setVisible(!visible)}>
           {visible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
         </Button>
         {showGenerate && (
-          <Button type="button" variant="ghost" size="icon" className="h-7 w-7"
-            onClick={() => { const p = generatePassword(); setVisible(true); onGenerate?.(p); }}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={() => {
+              const p = generatePassword();
+              setVisible(true);
+              onGenerate?.(p);
+            }}
+          >
             <Shuffle className="h-3.5 w-3.5" />
           </Button>
         )}
@@ -122,8 +140,13 @@ function PasswordInput({
 
 function IntegrationSection() {
   const { t } = useTranslation();
-  const [opsctlInfo, setOpsctlInfo] = useState<{installed: boolean; path: string; version: string; embedded: boolean}>({installed: false, path: "", version: "", embedded: false});
-  const [skillTargets, setSkillTargets] = useState<{name: string; installed: boolean; path: string}[]>([]);
+  const [opsctlInfo, setOpsctlInfo] = useState<{
+    installed: boolean;
+    path: string;
+    version: string;
+    embedded: boolean;
+  }>({ installed: false, path: "", version: "", embedded: false });
+  const [skillTargets, setSkillTargets] = useState<{ name: string; installed: boolean; path: string }[]>([]);
   const [installDir, setInstallDir] = useState("");
   const [installing, setInstalling] = useState(false);
   const [skillInstalling, setSkillInstalling] = useState(false);
@@ -146,10 +169,14 @@ function IntegrationSection() {
       setInstallDir(dir);
       setDataDir(dd);
       setAppVersion(ver);
-    } catch {}
+    } catch {
+      // detection is optional
+    }
   }, []);
 
-  useEffect(() => { detect(); }, [detect]);
+  useEffect(() => {
+    detect();
+  }, [detect]);
 
   const handleInstallCLI = async () => {
     setInstalling(true);
@@ -158,8 +185,8 @@ function IntegrationSection() {
       toast.success(t("integration.installSuccess"));
       await detect();
       toast.info(`${t("integration.pathHint")}: ${installDir}`);
-    } catch (e: any) {
-      toast.error(`${t("integration.installFailed")}: ${e?.message || String(e)}`);
+    } catch (e: unknown) {
+      toast.error(`${t("integration.installFailed")}: ${errMsg(e)}`);
     } finally {
       setInstalling(false);
     }
@@ -171,8 +198,8 @@ function IntegrationSection() {
       await InstallSkills();
       toast.success(t("integration.skillInstallSuccess"));
       await detect();
-    } catch (e: any) {
-      toast.error(e?.message || String(e));
+    } catch (e: unknown) {
+      toast.error(errMsg(e));
     } finally {
       setSkillInstalling(false);
     }
@@ -187,7 +214,9 @@ function IntegrationSection() {
       const content = await GetSkillPreview();
       setSkillPreview(content);
       setShowPreview(true);
-    } catch {}
+    } catch {
+      // preview is optional
+    }
   };
 
   return (
@@ -246,7 +275,10 @@ function IntegrationSection() {
                   </div>
                   <Button onClick={handleInstallCLI} disabled={installing} size="sm" variant="outline">
                     {installing ? (
-                      <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />{t("integration.installing")}</>
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                        {t("integration.installing")}
+                      </>
                     ) : (
                       t("integration.reinstall")
                     )}
@@ -270,7 +302,10 @@ function IntegrationSection() {
                   </div>
                   <Button onClick={handleInstallCLI} disabled={installing} size="sm">
                     {installing ? (
-                      <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />{t("integration.installing")}</>
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                        {t("integration.installing")}
+                      </>
                     ) : (
                       t("integration.install")
                     )}
@@ -316,32 +351,42 @@ function IntegrationSection() {
               <CardDescription>{t("integration.skillDesc")}</CardDescription>
             </div>
             <div className="flex items-center gap-2">
-              {skillTargets.filter(s => s.installed).map(s => (
-                <span key={s.name} className="inline-flex items-center gap-1 text-xs font-medium text-green-600 dark:text-green-400">
-                  <Check className="h-3.5 w-3.5" />
-                  {s.name}
-                </span>
-              ))}
+              {skillTargets
+                .filter((s) => s.installed)
+                .map((s) => (
+                  <span
+                    key={s.name}
+                    className="inline-flex items-center gap-1 text-xs font-medium text-green-600 dark:text-green-400"
+                  >
+                    <Check className="h-3.5 w-3.5" />
+                    {s.name}
+                  </span>
+                ))}
             </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
-          {skillTargets.some(s => s.installed) && (
+          {skillTargets.some((s) => s.installed) && (
             <div className="space-y-1">
-              {skillTargets.filter(s => s.installed).map(s => (
-                <div key={s.name} className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">{s.name}</span>
-                  <span className="font-mono text-xs truncate max-w-[300px]">{s.path}</span>
-                </div>
-              ))}
+              {skillTargets
+                .filter((s) => s.installed)
+                .map((s) => (
+                  <div key={s.name} className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">{s.name}</span>
+                    <span className="font-mono text-xs truncate max-w-[300px]">{s.path}</span>
+                  </div>
+                ))}
             </div>
           )}
 
           <div className="flex gap-2">
             <Button onClick={handleInstallSkill} disabled={skillInstalling} size="sm">
               {skillInstalling ? (
-                <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />{t("integration.skillInstalling")}</>
-              ) : skillTargets.every(s => s.installed) ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                  {t("integration.skillInstalling")}
+                </>
+              ) : skillTargets.every((s) => s.installed) ? (
                 t("integration.skillUpdate")
               ) : (
                 t("integration.skillInstall")
@@ -354,7 +399,9 @@ function IntegrationSection() {
           </div>
 
           {showPreview && (
-            <pre className="text-xs bg-muted p-3 rounded-md overflow-auto max-h-[300px] whitespace-pre-wrap">{skillPreview}</pre>
+            <pre className="text-xs bg-muted p-3 rounded-md overflow-auto max-h-[300px] whitespace-pre-wrap">
+              {skillPreview}
+            </pre>
           )}
         </CardContent>
       </Card>
@@ -379,8 +426,12 @@ function UpdateSection() {
   const [updateDone, setUpdateDone] = useState(false);
 
   useEffect(() => {
-    GetAppVersion().then(setCurrentVersion).catch(() => {});
-    GetUpdateChannel().then(setChannel).catch(() => {});
+    GetAppVersion()
+      .then(setCurrentVersion)
+      .catch(() => {});
+    GetUpdateChannel()
+      .then(setChannel)
+      .catch(() => {});
   }, []);
 
   const handleChannelChange = async (value: string) => {
@@ -388,8 +439,8 @@ function UpdateSection() {
     setUpdateInfo(null);
     try {
       await SetUpdateChannel(value);
-    } catch (e: any) {
-      toast.error(String(e?.message || e));
+    } catch (e: unknown) {
+      toast.error(errMsg(e));
     }
   };
 
@@ -421,8 +472,8 @@ function UpdateSection() {
       if (!info.hasUpdate) {
         toast.success(t("appUpdate.latestVersion"));
       }
-    } catch (e: any) {
-      toast.error(`${t("appUpdate.checkFailed")}: ${e?.message || String(e)}`);
+    } catch (e: unknown) {
+      toast.error(`${t("appUpdate.checkFailed")}: ${errMsg(e)}`);
     } finally {
       setChecking(false);
     }
@@ -435,8 +486,8 @@ function UpdateSection() {
       await DownloadAndInstallUpdate();
       setUpdateDone(true);
       toast.success(t("appUpdate.updateSuccess"));
-    } catch (e: any) {
-      toast.error(`${t("appUpdate.updateFailed")}: ${e?.message || String(e)}`);
+    } catch (e: unknown) {
+      toast.error(`${t("appUpdate.updateFailed")}: ${errMsg(e)}`);
     } finally {
       setUpdating(false);
     }
@@ -467,19 +518,21 @@ function UpdateSection() {
             </SelectContent>
           </Select>
         </div>
-        {channel === "nightly" && (
-          <p className="text-xs text-muted-foreground">{t("appUpdate.nightlyWarning")}</p>
-        )}
-        {channel === "beta" && (
-          <p className="text-xs text-muted-foreground">{t("appUpdate.betaWarning")}</p>
-        )}
+        {channel === "nightly" && <p className="text-xs text-muted-foreground">{t("appUpdate.nightlyWarning")}</p>}
+        {channel === "beta" && <p className="text-xs text-muted-foreground">{t("appUpdate.betaWarning")}</p>}
 
         <div className="flex gap-2">
           <Button onClick={handleCheck} disabled={checking || updating} size="sm" variant="outline">
             {checking ? (
-              <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />{t("appUpdate.checking")}</>
+              <>
+                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                {t("appUpdate.checking")}
+              </>
             ) : (
-              <><RefreshCw className="h-3.5 w-3.5 mr-1.5" />{t("appUpdate.checkUpdate")}</>
+              <>
+                <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                {t("appUpdate.checkUpdate")}
+              </>
             )}
           </Button>
         </div>
@@ -487,9 +540,13 @@ function UpdateSection() {
         {updateInfo?.hasUpdate && (
           <div className="space-y-3 border rounded-md p-3">
             <div className="flex items-center justify-between">
-              <span className="text-sm font-medium">{t("appUpdate.newVersion")}: {updateInfo.latestVersion}</span>
+              <span className="text-sm font-medium">
+                {t("appUpdate.newVersion")}: {updateInfo.latestVersion}
+              </span>
               <Button
-                variant="link" size="sm" className="h-auto p-0 text-xs"
+                variant="link"
+                size="sm"
+                className="h-auto p-0 text-xs"
                 onClick={() => BrowserOpenURL(updateInfo.releaseURL)}
               >
                 <ExternalLink className="h-3 w-3 mr-1" />
@@ -509,10 +566,7 @@ function UpdateSection() {
             {updating && (
               <div className="space-y-1">
                 <div className="w-full bg-muted rounded-full h-2">
-                  <div
-                    className="bg-primary h-2 rounded-full transition-all"
-                    style={{ width: `${progress}%` }}
-                  />
+                  <div className="bg-primary h-2 rounded-full transition-all" style={{ width: `${progress}%` }} />
                 </div>
                 <p className="text-xs text-muted-foreground text-center">
                   {t("appUpdate.downloadProgress", { percent: progress })}
@@ -523,9 +577,15 @@ function UpdateSection() {
             {!updateDone ? (
               <Button onClick={handleUpdate} disabled={updating} size="sm">
                 {updating ? (
-                  <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />{t("appUpdate.downloading")}</>
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                    {t("appUpdate.downloading")}
+                  </>
                 ) : (
-                  <><Download className="h-3.5 w-3.5 mr-1.5" />{t("appUpdate.download")}</>
+                  <>
+                    <Download className="h-3.5 w-3.5 mr-1.5" />
+                    {t("appUpdate.download")}
+                  </>
                 )}
               </Button>
             ) : (
@@ -557,9 +617,7 @@ export function SettingsPage() {
   const { refresh } = useAssetStore();
 
   // 启动 Tab 设置
-  const [startupTab, setStartupTab] = useState(
-    () => localStorage.getItem("startup_tab") || "last"
-  );
+  const [startupTab, setStartupTab] = useState(() => localStorage.getItem("startup_tab") || "last");
 
   // AI Provider
   const [providerType, setProviderType] = useState("openai");
@@ -570,19 +628,20 @@ export function SettingsPage() {
   const [saved, setSaved] = useState(false);
 
   // 文件备份
-  const [fileExporting, setFileExporting] = useState(false);
-  const [fileImporting, setFileImporting] = useState(false);
-  const [exportPasswordOpen, setExportPasswordOpen] = useState(false);
-  const [exportPassword, setExportPassword] = useState("");
-  const [importPasswordOpen, setImportPasswordOpen] = useState(false);
-  const [importPassword, setImportPassword] = useState("");
-  const [importFilePath, setImportFilePath] = useState("");
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [exportDialogMode, setExportDialogMode] = useState<"file" | "gist">("file");
+  const [backupImportOpen, setBackupImportOpen] = useState(false);
+  const [backupImportFilePath, setBackupImportFilePath] = useState("");
+  const [backupImportEncrypted, setBackupImportEncrypted] = useState(false);
+  const [backupImportSummary, setBackupImportSummary] = useState<backup_svc.BackupSummary | null>(null);
 
   // 导入
   const [importPreview, setImportPreview] = useState<import_svc.PreviewResult | null>(null);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [importDialogTitle, setImportDialogTitle] = useState("");
-  const [importFn, setImportFn] = useState<((indexes: number[], options: ImportCallOptions) => Promise<import_svc.ImportResult>) | null>(null);
+  const [importFn, setImportFn] = useState<
+    ((indexes: number[], options: ImportCallOptions) => Promise<import_svc.ImportResult>) | null
+  >(null);
   const [tabbyLoading, setTabbyLoading] = useState(false);
   const [sshConfigLoading, setSSHConfigLoading] = useState(false);
 
@@ -598,32 +657,39 @@ export function SettingsPage() {
   const [selectedGistId, setSelectedGistId] = useState("");
   const [gistPushing, setGistPushing] = useState(false);
   const [gistPulling, setGistPulling] = useState(false);
-  const [gistPasswordOpen, setGistPasswordOpen] = useState(false);
-  const [gistPassword, setGistPassword] = useState("");
   const [gistPullPasswordOpen, setGistPullPasswordOpen] = useState(false);
   const [gistPullPassword, setGistPullPassword] = useState("");
 
   // 终端主题
   const {
-    selectedThemeId, setSelectedThemeId,
-    fontSize, setFontSize,
-    customThemes, addCustomTheme, updateCustomTheme, removeCustomTheme,
+    selectedThemeId,
+    setSelectedThemeId,
+    fontSize,
+    setFontSize,
+    customThemes,
+    addCustomTheme,
+    updateCustomTheme,
+    removeCustomTheme,
   } = useTerminalThemeStore();
   const [themeEditorOpen, setThemeEditorOpen] = useState(false);
   const [editingTheme, setEditingTheme] = useState<TerminalTheme | undefined>(undefined);
 
-  useEffect(() => { detectCLIs(); }, [detectCLIs]);
+  useEffect(() => {
+    detectCLIs();
+  }, [detectCLIs]);
 
   // 从后端加载 AI 配置
   useEffect(() => {
-    LoadAISetting().then(info => {
-      if (info && info.configured) {
-        setProviderType(info.providerType);
-        setApiBase(info.apiBase);
-        setModel(info.model);
-        setApiKeyPlaceholder(info.maskedApiKey || "");
-      }
-    }).catch(() => {});
+    LoadAISetting()
+      .then((info) => {
+        if (info && info.configured) {
+          setProviderType(info.providerType);
+          setApiBase(info.apiBase);
+          setModel(info.model);
+          setApiKeyPlaceholder(info.maskedApiKey || "");
+        }
+      })
+      .catch(() => {});
   }, []);
 
   // 从后端加载 GitHub token
@@ -636,18 +702,22 @@ export function SettingsPage() {
           setGhToken(token);
           setGhUser(user || "");
           // 验证 token 是否仍有效
-          GetGitHubUser(token).then(u => {
-            setGhUser(u.login);
-            SaveGitHubToken(token, u.login).catch(() => {});
-          }).catch(() => {
-            setGhToken("");
-            setGhUser("");
-            ClearGitHubToken().catch(() => {});
-          });
+          GetGitHubUser(token)
+            .then((u) => {
+              setGhUser(u.login);
+              SaveGitHubToken(token, u.login).catch(() => {});
+            })
+            .catch(() => {
+              setGhToken("");
+              setGhUser("");
+              ClearGitHubToken().catch(() => {});
+            });
         }
-      } catch { /* not configured */ }
+      } catch {
+        /* not configured */
+      }
     })();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   const loadGists = useCallback(async () => {
     if (!ghToken) return;
@@ -659,7 +729,9 @@ export function SettingsPage() {
     }
   }, [ghToken]);
 
-  useEffect(() => { loadGists(); }, [loadGists]);
+  useEffect(() => {
+    loadGists();
+  }, [loadGists]);
 
   // --- AI ---
   const handleSaveAI = async () => {
@@ -683,55 +755,20 @@ export function SettingsPage() {
 
   // --- 文件备份 ---
   const handleFileExport = () => {
-    setExportPassword("");
-    setExportPasswordOpen(true);
-  };
-
-  const doFileExport = async () => {
-    setExportPasswordOpen(false);
-    setFileExporting(true);
-    try {
-      await ExportToFile(exportPassword);
-      toast.success(t("backup.exportSuccess"));
-    } catch (e: any) {
-      toast.error(e?.message || String(e));
-    } finally {
-      setFileExporting(false);
-    }
+    setExportDialogMode("file");
+    setExportDialogOpen(true);
   };
 
   const handleFileImport = async () => {
     try {
       const info = await SelectImportFile();
       if (!info || !info.filePath) return;
-      if (info.encrypted) {
-        setImportFilePath(info.filePath);
-        setImportPassword("");
-        setImportPasswordOpen(true);
-      } else {
-        setFileImporting(true);
-        await ExecuteImportFile(info.filePath, "");
-        toast.success(t("backup.importSuccess"));
-        await refresh();
-        setFileImporting(false);
-      }
-    } catch (e: any) {
-      toast.error(e?.message || String(e));
-      setFileImporting(false);
-    }
-  };
-
-  const doFileImportWithPassword = async () => {
-    setImportPasswordOpen(false);
-    setFileImporting(true);
-    try {
-      await ExecuteImportFile(importFilePath, importPassword);
-      toast.success(t("backup.importSuccess"));
-      await refresh();
-    } catch (e: any) {
-      toast.error(e?.message || String(e));
-    } finally {
-      setFileImporting(false);
+      setBackupImportFilePath(info.filePath);
+      setBackupImportEncrypted(info.encrypted);
+      setBackupImportSummary(info.summary ?? null);
+      setBackupImportOpen(true);
+    } catch (e: unknown) {
+      toast.error(errMsg(e));
     }
   };
 
@@ -743,13 +780,14 @@ export function SettingsPage() {
       if (result) {
         setImportPreview(result);
         setImportDialogTitle(t("import.tabby"));
-        setImportFn(() => (indexes: number[], opts: ImportCallOptions) =>
-          ImportTabbySelected(indexes, opts.passphrase, opts.overwrite)
+        setImportFn(
+          () => (indexes: number[], opts: ImportCallOptions) =>
+            ImportTabbySelected(indexes, opts.passphrase, opts.overwrite)
         );
         setImportDialogOpen(true);
       }
-    } catch (e: any) {
-      toast.error(e?.message || String(e));
+    } catch (e: unknown) {
+      toast.error(errMsg(e));
     } finally {
       setTabbyLoading(false);
     }
@@ -763,13 +801,13 @@ export function SettingsPage() {
       if (result) {
         setImportPreview(result);
         setImportDialogTitle(t("import.sshConfig"));
-        setImportFn(() => (indexes: number[], opts: ImportCallOptions) =>
-          ImportSSHConfigSelected(indexes, opts.overwrite)
+        setImportFn(
+          () => (indexes: number[], opts: ImportCallOptions) => ImportSSHConfigSelected(indexes, opts.overwrite)
         );
         setImportDialogOpen(true);
       }
-    } catch (e: any) {
-      toast.error(e?.message || String(e));
+    } catch (e: unknown) {
+      toast.error(errMsg(e));
     } finally {
       setSSHConfigLoading(false);
     }
@@ -791,9 +829,9 @@ export function SettingsPage() {
       setGhUser(user.login);
       await SaveGitHubToken(token, user.login);
       toast.success(t("backup.gistLoggedIn", { user: user.login }));
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (!String(e).includes("取消")) {
-        toast.error(e?.message || String(e));
+        toast.error(errMsg(e));
       }
     } finally {
       setDeviceFlowOpen(false);
@@ -815,33 +853,32 @@ export function SettingsPage() {
 
   // --- Gist ---
   const handleGistPush = () => {
-    setGistPassword("");
-    setGistPasswordOpen(true);
+    setExportDialogMode("gist");
+    setExportDialogOpen(true);
   };
 
-  const doGistPush = async () => {
-    if (!gistPassword) {
+  const handleGistExport = async (password: string, opts: backup_svc.ExportOptions) => {
+    if (!password) {
       toast.error(t("backup.passwordRequired"));
       return;
     }
-    setGistPasswordOpen(false);
     setGistPushing(true);
     try {
       const gistId = selectedGistId === "__new__" ? "" : selectedGistId;
-      const result = await ExportToGist(gistPassword, ghToken, gistId);
+      const result = await ExportToGist(password, ghToken, gistId, opts);
       toast.success(t("backup.gistPushSuccess"));
       if (result) {
         await loadGists();
         setSelectedGistId(result.id);
       }
-    } catch (e: any) {
-      toast.error(e?.message || String(e));
+    } catch (e: unknown) {
+      toast.error(errMsg(e));
     } finally {
       setGistPushing(false);
     }
   };
 
-  const handleGistPull = () => {
+  const handleGistPull = async () => {
     if (!selectedGistId || selectedGistId === "__new__") {
       toast.error(t("backup.gistNoBackup"));
       return;
@@ -858,11 +895,22 @@ export function SettingsPage() {
     setGistPullPasswordOpen(false);
     setGistPulling(true);
     try {
-      await ImportFromGist(selectedGistId, gistPullPassword, ghToken);
+      // Preview first to get summary, then open import dialog
+      // For now, simple full import with default options
+      const opts = new backup_svc.ImportOptions({
+        import_assets: true,
+        import_credentials: true,
+        import_forwards: true,
+        import_policy_groups: true,
+        import_shortcuts: true,
+        import_themes: true,
+        mode: "replace",
+      });
+      await ImportFromGist(selectedGistId, gistPullPassword, ghToken, opts);
       toast.success(t("backup.gistPullSuccess"));
       await refresh();
-    } catch (e: any) {
-      toast.error(e?.message || String(e));
+    } catch (e: unknown) {
+      toast.error(errMsg(e));
     } finally {
       setGistPulling(false);
     }
@@ -888,7 +936,7 @@ export function SettingsPage() {
               <HardDrive className="h-3.5 w-3.5" />
               {t("backup.title")}
             </TabsTrigger>
-<TabsTrigger value="shortcuts" className="gap-1">
+            <TabsTrigger value="shortcuts" className="gap-1">
               <Keyboard className="h-3.5 w-3.5" />
               {t("shortcut.title")}
             </TabsTrigger>
@@ -919,9 +967,13 @@ export function SettingsPage() {
                 <div className="grid gap-2">
                   <Label>{t("settings.providerType")}</Label>
                   <Select value={providerType} onValueChange={setProviderType}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="openai" disabled>OpenAI Compatible ({t("setup.developing")})</SelectItem>
+                      <SelectItem value="openai" disabled>
+                        OpenAI Compatible ({t("setup.developing")})
+                      </SelectItem>
                       <SelectItem value="local_cli">Local CLI</SelectItem>
                     </SelectContent>
                   </Select>
@@ -934,7 +986,12 @@ export function SettingsPage() {
                     </div>
                     <div className="grid gap-2">
                       <Label>API Key</Label>
-                      <Input type="password" value={apiKey} placeholder={apiKeyPlaceholder || "sk-..."} onChange={(e) => setApiKey(e.target.value)} />
+                      <Input
+                        type="password"
+                        value={apiKey}
+                        placeholder={apiKeyPlaceholder || "sk-..."}
+                        onChange={(e) => setApiKey(e.target.value)}
+                      />
                     </div>
                     <div className="grid gap-2">
                       <Label>{t("settings.model")}</Label>
@@ -946,13 +1003,18 @@ export function SettingsPage() {
                   <>
                     <div className="grid gap-2">
                       <Label>{t("settings.cliType")}</Label>
-                      <Select value={model} onValueChange={(v) => {
-                        setModel(v);
-                        // 切换类型时，如果用户没有手动指定路径，自动填充检测到的路径
-                        const detected = localCLIs.find((c) => c.type === v);
-                        setApiBase(detected ? detected.path : "");
-                      }}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
+                      <Select
+                        value={model}
+                        onValueChange={(v) => {
+                          setModel(v);
+                          // 切换类型时，如果用户没有手动指定路径，自动填充检测到的路径
+                          const detected = localCLIs.find((c) => c.type === v);
+                          setApiBase(detected ? detected.path : "");
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="claude">Claude Code</SelectItem>
                           <SelectItem value="codex">Codex</SelectItem>
@@ -961,7 +1023,11 @@ export function SettingsPage() {
                     </div>
                     <div className="grid gap-2">
                       <Label>{t("settings.cliPath")}</Label>
-                      <Input value={apiBase} onChange={(e) => setApiBase(e.target.value)} placeholder={localCLIs.find((c) => c.type === model)?.path || t("settings.cliPathHint")} />
+                      <Input
+                        value={apiBase}
+                        onChange={(e) => setApiBase(e.target.value)}
+                        placeholder={localCLIs.find((c) => c.type === model)?.path || t("settings.cliPathHint")}
+                      />
                       <p className="text-xs text-muted-foreground">{t("settings.cliPathHint")}</p>
                     </div>
                     {localCLIs.length > 0 && (
@@ -1000,7 +1066,12 @@ export function SettingsPage() {
                 <CardDescription>{t("import.sshConfigDesc")}</CardDescription>
               </CardHeader>
               <CardContent>
-                <Button onClick={handlePreviewSSHConfig} disabled={sshConfigLoading} variant="outline" className="gap-1">
+                <Button
+                  onClick={handlePreviewSSHConfig}
+                  disabled={sshConfigLoading}
+                  variant="outline"
+                  className="gap-1"
+                >
                   <Import className="h-4 w-4" />
                   {sshConfigLoading ? t("import.importing") : t("import.sshConfig")}
                 </Button>
@@ -1017,13 +1088,13 @@ export function SettingsPage() {
                 <CardDescription>{t("backup.fileDesc")}</CardDescription>
               </CardHeader>
               <CardContent className="flex gap-2">
-                <Button onClick={handleFileExport} disabled={fileExporting} variant="outline" className="gap-1">
+                <Button onClick={handleFileExport} variant="outline" className="gap-1">
                   <Download className="h-4 w-4" />
-                  {fileExporting ? t("backup.exporting") : t("backup.export")}
+                  {t("backup.export")}
                 </Button>
-                <Button onClick={handleFileImport} disabled={fileImporting} variant="outline" className="gap-1">
+                <Button onClick={handleFileImport} variant="outline" className="gap-1">
                   <Upload className="h-4 w-4" />
-                  {fileImporting ? t("backup.importing") : t("backup.import")}
+                  {t("backup.import")}
                 </Button>
               </CardContent>
             </Card>
@@ -1057,7 +1128,9 @@ export function SettingsPage() {
                     <div className="grid gap-2">
                       <Label>{t("backup.gistSelect")}</Label>
                       <Select value={selectedGistId} onValueChange={setSelectedGistId}>
-                        <SelectTrigger><SelectValue placeholder={t("backup.gistSelect")} /></SelectTrigger>
+                        <SelectTrigger>
+                          <SelectValue placeholder={t("backup.gistSelect")} />
+                        </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="__new__">{t("backup.gistCreateNew")}</SelectItem>
                           {gists.map((g) => (
@@ -1159,15 +1232,9 @@ export function SettingsPage() {
                           className="rounded h-10 mb-1.5 flex items-end p-1 gap-0.5"
                           style={{ background: bt.background }}
                         >
-                          {[bt.red, bt.green, bt.yellow, bt.blue, bt.magenta, bt.cyan].map(
-                            (c, i) => (
-                              <div
-                                key={i}
-                                className="w-2 h-3 rounded-sm"
-                                style={{ background: c }}
-                              />
-                            )
-                          )}
+                          {[bt.red, bt.green, bt.yellow, bt.blue, bt.magenta, bt.cyan].map((c, i) => (
+                            <div key={i} className="w-2 h-3 rounded-sm" style={{ background: c }} />
+                          ))}
                         </div>
                         <div className="text-xs truncate font-medium">{bt.name}</div>
                       </button>
@@ -1211,15 +1278,9 @@ export function SettingsPage() {
                             className="rounded h-10 mb-1.5 flex items-end p-1 gap-0.5"
                             style={{ background: ct.background }}
                           >
-                            {[ct.red, ct.green, ct.yellow, ct.blue, ct.magenta, ct.cyan].map(
-                              (c, i) => (
-                                <div
-                                  key={i}
-                                  className="w-2 h-3 rounded-sm"
-                                  style={{ background: c }}
-                                />
-                              )
-                            )}
+                            {[ct.red, ct.green, ct.yellow, ct.blue, ct.magenta, ct.cyan].map((c, i) => (
+                              <div key={i} className="w-2 h-3 rounded-sm" style={{ background: c }} />
+                            ))}
                           </div>
                           <div className="text-xs truncate font-medium">{ct.name}</div>
                           {/* 编辑/删除 */}
@@ -1263,7 +1324,9 @@ export function SettingsPage() {
                 <div className="grid gap-2">
                   <Label>{t("theme.toggle")}</Label>
                   <Select value={theme} onValueChange={setTheme as (v: string) => void}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="light">{t("theme.light")}</SelectItem>
                       <SelectItem value="dark">{t("theme.dark")}</SelectItem>
@@ -1275,7 +1338,9 @@ export function SettingsPage() {
                 <div className="grid gap-2">
                   <Label>{t("language.label")}</Label>
                   <Select value={i18n.language} onValueChange={handleLanguageChange}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="zh-CN">{t("language.zh-CN")}</SelectItem>
                       <SelectItem value="en">{t("language.en")}</SelectItem>
@@ -1285,11 +1350,16 @@ export function SettingsPage() {
                 <Separator />
                 <div className="grid gap-2">
                   <Label>{t("appearance.startupTab")}</Label>
-                  <Select value={startupTab} onValueChange={(v) => {
-                    localStorage.setItem("startup_tab", v);
-                    setStartupTab(v);
-                  }}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
+                  <Select
+                    value={startupTab}
+                    onValueChange={(v) => {
+                      localStorage.setItem("startup_tab", v);
+                      setStartupTab(v);
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="last">{t("appearance.startupTabLast")}</SelectItem>
                       <SelectItem value="home">{t("appearance.startupTabHome")}</SelectItem>
@@ -1307,7 +1377,7 @@ export function SettingsPage() {
         </Tabs>
       </div>
 
-      {/* 导入对话框 */}
+      {/* Tabby/SSH Config 导入对话框 */}
       <ImportDialog
         open={importDialogOpen}
         onOpenChange={setImportDialogOpen}
@@ -1316,50 +1386,22 @@ export function SettingsPage() {
         onImport={importFn!}
       />
 
-      {/* 导出密码对话框 */}
-      <Dialog open={exportPasswordOpen} onOpenChange={setExportPasswordOpen}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>{t("backup.export")}</DialogTitle>
-            <DialogDescription>{t("backup.passwordOptional")}</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-1.5">
-            <Label>{t("backup.password")}</Label>
-            <PasswordInput
-              value={exportPassword}
-              onChange={(e) => setExportPassword(e.target.value)}
-              showGenerate
-              onGenerate={(p) => setExportPassword(p)}
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setExportPasswordOpen(false)}>{t("action.cancel")}</Button>
-            <Button onClick={doFileExport}>{t("backup.export")}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* 导出对话框 */}
+      <ExportDialog
+        open={exportDialogOpen}
+        onOpenChange={setExportDialogOpen}
+        mode={exportDialogMode}
+        onGistExport={handleGistExport}
+      />
 
-      {/* 导入密码对话框 */}
-      <Dialog open={importPasswordOpen} onOpenChange={setImportPasswordOpen}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>{t("backup.import")}</DialogTitle>
-            <DialogDescription>{t("backup.enterPassword")}</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-1.5">
-            <Label>{t("backup.password")}</Label>
-            <PasswordInput
-              value={importPassword}
-              onChange={(e) => setImportPassword(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && doFileImportWithPassword()}
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setImportPasswordOpen(false)}>{t("action.cancel")}</Button>
-            <Button onClick={doFileImportWithPassword} disabled={!importPassword}>{t("backup.import")}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* 备份导入对话框 */}
+      <BackupImportDialog
+        open={backupImportOpen}
+        onOpenChange={setBackupImportOpen}
+        filePath={backupImportFilePath}
+        encrypted={backupImportEncrypted}
+        initialSummary={backupImportSummary}
+      />
 
       {/* GitHub Device Flow 对话框 */}
       <Dialog open={deviceFlowOpen}>
@@ -1377,7 +1419,10 @@ export function SettingsPage() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => { navigator.clipboard.writeText(deviceFlowInfo.userCode); toast.success("Copied"); }}
+                  onClick={() => {
+                    navigator.clipboard.writeText(deviceFlowInfo.userCode);
+                    toast.success("Copied");
+                  }}
                 >
                   <Copy className="h-4 w-4" />
                 </Button>
@@ -1393,30 +1438,9 @@ export function SettingsPage() {
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={handleCancelDeviceFlow}>{t("action.cancel")}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Gist 推送密码对话框 */}
-      <Dialog open={gistPasswordOpen} onOpenChange={setGistPasswordOpen}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>{t("backup.gistPush")}</DialogTitle>
-            <DialogDescription>{t("backup.passwordRequired")}</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-1.5">
-            <Label>{t("backup.password")}</Label>
-            <PasswordInput
-              value={gistPassword}
-              onChange={(e) => setGistPassword(e.target.value)}
-              showGenerate
-              onGenerate={(p) => setGistPassword(p)}
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setGistPasswordOpen(false)}>{t("action.cancel")}</Button>
-            <Button onClick={doGistPush} disabled={!gistPassword}>{t("backup.gistPush")}</Button>
+            <Button variant="outline" onClick={handleCancelDeviceFlow}>
+              {t("action.cancel")}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1437,8 +1461,12 @@ export function SettingsPage() {
             />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setGistPullPasswordOpen(false)}>{t("action.cancel")}</Button>
-            <Button onClick={doGistPull} disabled={!gistPullPassword}>{t("backup.gistPull")}</Button>
+            <Button variant="outline" onClick={() => setGistPullPasswordOpen(false)}>
+              {t("action.cancel")}
+            </Button>
+            <Button onClick={doGistPull} disabled={!gistPullPassword}>
+              {t("backup.gistPull")}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -1,12 +1,18 @@
-import { Home, Settings, KeyRound, PanelLeftClose, PanelLeftOpen, EyeOff, Bot, ScrollText, ArrowRightLeft } from "lucide-react";
+import {
+  Home,
+  Settings,
+  KeyRound,
+  PanelLeftClose,
+  PanelLeftOpen,
+  EyeOff,
+  Bot,
+  ScrollText,
+  ArrowRightLeft,
+} from "lucide-react";
 import logoLight from "@/assets/images/logo.png";
 import logoDark from "@/assets/images/logo-dark.png";
 import { useTranslation } from "react-i18next";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ModeToggle } from "@/components/mode-toggle";
 import { cn } from "@/lib/utils";
 import { useFullscreen } from "@/hooks/useFullscreen";
@@ -21,7 +27,15 @@ interface SidebarProps {
   onToggleAIPanel: () => void;
 }
 
-export function Sidebar({ activePage, onPageChange, sidebarCollapsed, onToggleSidebar, onHideSidebar, aiPanelCollapsed, onToggleAIPanel }: SidebarProps) {
+export function Sidebar({
+  activePage,
+  onPageChange,
+  sidebarCollapsed,
+  onToggleSidebar,
+  onHideSidebar,
+  aiPanelCollapsed,
+  onToggleAIPanel,
+}: SidebarProps) {
   const { t } = useTranslation();
   const isFullscreen = useFullscreen();
 
@@ -113,11 +127,7 @@ export function Sidebar({ activePage, onPageChange, sidebarCollapsed, onToggleSi
               className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors duration-150"
               onClick={onToggleSidebar}
             >
-              {sidebarCollapsed ? (
-                <PanelLeftOpen className="h-4 w-4" />
-              ) : (
-                <PanelLeftClose className="h-4 w-4" />
-              )}
+              {sidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
             </button>
           </TooltipTrigger>
           <TooltipContent side="right">{t("panel.toggleSidebar")}</TooltipContent>

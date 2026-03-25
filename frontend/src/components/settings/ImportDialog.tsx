@@ -2,13 +2,7 @@ import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Server, Folder, ChevronDown, ChevronRight, KeyRound } from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { import_svc } from "../../../wailsjs/go/models";
@@ -40,7 +34,7 @@ export function ImportDialog({ open, onOpenChange, preview, title, onImport }: I
   useMemo(() => {
     if (preview) {
       const defaultSelected = new Set<number>();
-      for (const item of (preview.items || [])) {
+      for (const item of preview.items || []) {
         if (!item.exists) {
           defaultSelected.add(item.index);
         }
@@ -61,12 +55,12 @@ export function ImportDialog({ open, onOpenChange, preview, title, onImport }: I
 
   // 按分组归类
   const groupMap = new Map<string, string>();
-  for (const g of (preview.groups || [])) {
+  for (const g of preview.groups || []) {
     groupMap.set(g.id, g.name);
   }
 
   const groupedItems = new Map<string, import_svc.PreviewItem[]>();
-  for (const item of (preview.items || [])) {
+  for (const item of preview.items || []) {
     const gid = item.groupId || "__ungrouped__";
     if (!groupedItems.has(gid)) groupedItems.set(gid, []);
     groupedItems.get(gid)!.push(item);
@@ -185,14 +179,10 @@ export function ImportDialog({ open, onOpenChange, preview, title, onImport }: I
             {groupOrder.map((gid) => {
               const items = groupedItems.get(gid) || [];
               if (items.length === 0) return null;
-              const groupName =
-                gid === "__ungrouped__"
-                  ? t("asset.ungrouped")
-                  : groupMap.get(gid) || gid;
+              const groupName = gid === "__ungrouped__" ? t("asset.ungrouped") : groupMap.get(gid) || gid;
               const expanded = expandedGroups.has(gid);
               const allSelected = items.every((i) => selected.has(i.index));
-              const someSelected =
-                !allSelected && items.some((i) => selected.has(i.index));
+              const someSelected = !allSelected && items.some((i) => selected.has(i.index));
 
               return (
                 <div key={gid}>
@@ -220,9 +210,7 @@ export function ImportDialog({ open, onOpenChange, preview, title, onImport }: I
                     )}
                     <Folder className="h-3.5 w-3.5 text-muted-foreground" />
                     <span>{groupName}</span>
-                    <span className="ml-auto text-muted-foreground">
-                      {items.length}
-                    </span>
+                    <span className="ml-auto text-muted-foreground">{items.length}</span>
                   </div>
                   {expanded && (
                     <div>
@@ -276,13 +264,8 @@ export function ImportDialog({ open, onOpenChange, preview, title, onImport }: I
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             {t("action.cancel")}
           </Button>
-          <Button
-            onClick={handleImport}
-            disabled={importing || selected.size === 0}
-          >
-            {importing
-              ? t("import.importing")
-              : t("import.confirmImport", { count: selected.size })}
+          <Button onClick={handleImport} disabled={importing || selected.size === 0}>
+            {importing ? t("import.importing") : t("import.confirmImport", { count: selected.size })}
           </Button>
         </DialogFooter>
       </DialogContent>

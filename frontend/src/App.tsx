@@ -12,7 +12,7 @@ import { AssetForm } from "@/components/asset/AssetForm";
 import { GroupDialog } from "@/components/asset/GroupDialog";
 import { PermissionDialog } from "@/components/ai/PermissionDialog";
 import { OpsctlApprovalDialog } from "@/components/approval/OpsctlApprovalDialog";
-import { PlanApprovalDialog } from "@/components/approval/PlanApprovalDialog";
+import { GrantApprovalDialog } from "@/components/approval/GrantApprovalDialog";
 
 import { useAssetStore } from "@/stores/assetStore";
 import { useTerminalStore } from "@/stores/terminalStore";
@@ -28,7 +28,9 @@ function App() {
     const cancel = EventsOn("data:changed", () => {
       useAssetStore.getState().refresh();
     });
-    return () => { cancel(); };
+    return () => {
+      cancel();
+    };
   }, []);
 
   // 双击拖拽区域最大化/还原窗口
@@ -49,15 +51,11 @@ function App() {
     return () => window.removeEventListener("dblclick", handleDblClick);
   }, []);
 
-  const [sidebarHidden, setSidebarHidden] = useState(
-    () => localStorage.getItem("sidebar_hidden") === "true"
-  );
+  const [sidebarHidden, setSidebarHidden] = useState(() => localStorage.getItem("sidebar_hidden") === "true");
   const [assetTreeCollapsed, setAssetTreeCollapsed] = useState(
     () => localStorage.getItem("sidebar_collapsed") === "true"
   );
-  const [aiPanelCollapsed, setAiPanelCollapsed] = useState(
-    () => localStorage.getItem("ai_panel_collapsed") === "true"
-  );
+  const [aiPanelCollapsed, setAiPanelCollapsed] = useState(() => localStorage.getItem("ai_panel_collapsed") === "true");
   const [assetTreeWidth, setAssetTreeWidth] = useState(() => {
     const saved = localStorage.getItem("asset_tree_width");
     return saved ? Math.max(160, Math.min(480, Number(saved))) : 224;
@@ -165,12 +163,18 @@ function App() {
         type: "info",
         label: asset.Name,
         icon: asset.Icon || undefined,
-        meta: { type: "info", targetType: "asset", targetId: asset.ID, name: asset.Name, icon: asset.Icon || undefined },
+        meta: {
+          type: "info",
+          targetType: "asset",
+          targetId: asset.ID,
+          name: asset.Name,
+          icon: asset.Icon || undefined,
+        },
       });
     }
   };
 
-  const handleOpenInfoTab = useCallback((type: 'asset' | 'group', id: number, name: string, icon?: string) => {
+  const handleOpenInfoTab = useCallback((type: "asset" | "group", id: number, name: string, icon?: string) => {
     const tabStore = useTabStore.getState();
     const infoTabId = `info-${type}-${id}`;
     const existing = tabStore.tabs.find((t) => t.id === infoTabId);
@@ -233,10 +237,13 @@ function App() {
 
   // Derive active page for sidebar highlighting
   const activeTab = useTabStore((s) => s.tabs.find((t) => t.id === s.activeTabId));
-  const activePage = !activeTab ? "home"
-    : activeTab.type === "page" ? activeTab.id
-    : activeTab.type === "terminal" || activeTab.type === "info" ? "home"
-    : "other";
+  const activePage = !activeTab
+    ? "home"
+    : activeTab.type === "page"
+      ? activeTab.id
+      : activeTab.type === "terminal" || activeTab.type === "info"
+        ? "home"
+        : "other";
 
   return (
     <ThemeProvider defaultTheme="system">
@@ -309,14 +316,10 @@ function App() {
           editAsset={editingAsset}
           defaultGroupId={defaultGroupId}
         />
-        <GroupDialog
-          open={groupDialogOpen}
-          onOpenChange={setGroupDialogOpen}
-          editGroup={editingGroup}
-        />
+        <GroupDialog open={groupDialogOpen} onOpenChange={setGroupDialogOpen} editGroup={editingGroup} />
         <PermissionDialog />
         <OpsctlApprovalDialog />
-        <PlanApprovalDialog />
+        <GrantApprovalDialog />
         <Toaster richColors />
       </TooltipProvider>
     </ThemeProvider>

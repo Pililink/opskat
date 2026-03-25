@@ -102,8 +102,8 @@ export function EncryptPassword(arg1) {
   return window['go']['main']['App']['EncryptPassword'](arg1);
 }
 
-export function ExecuteImportFile(arg1, arg2) {
-  return window['go']['main']['App']['ExecuteImportFile'](arg1, arg2);
+export function ExecuteImportFile(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ExecuteImportFile'](arg1, arg2, arg3);
 }
 
 export function ExecuteRedis(arg1, arg2, arg3) {
@@ -122,12 +122,12 @@ export function ExportData() {
   return window['go']['main']['App']['ExportData']();
 }
 
-export function ExportToFile(arg1) {
-  return window['go']['main']['App']['ExportToFile'](arg1);
+export function ExportToFile(arg1, arg2) {
+  return window['go']['main']['App']['ExportToFile'](arg1, arg2);
 }
 
-export function ExportToGist(arg1, arg2, arg3) {
-  return window['go']['main']['App']['ExportToGist'](arg1, arg2, arg3);
+export function ExportToGist(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['ExportToGist'](arg1, arg2, arg3, arg4);
 }
 
 export function GenerateSSHKey(arg1, arg2, arg3, arg4) {
@@ -198,8 +198,8 @@ export function GetUpdateChannel() {
   return window['go']['main']['App']['GetUpdateChannel']();
 }
 
-export function ImportFromGist(arg1, arg2, arg3) {
-  return window['go']['main']['App']['ImportFromGist'](arg1, arg2, arg3);
+export function ImportFromGist(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['ImportFromGist'](arg1, arg2, arg3, arg4);
 }
 
 export function ImportSSHConfigSelected(arg1, arg2) {
@@ -282,6 +282,14 @@ export function MoveGroup(arg1, arg2) {
   return window['go']['main']['App']['MoveGroup'](arg1, arg2);
 }
 
+export function PreviewGistBackup(arg1, arg2, arg3) {
+  return window['go']['main']['App']['PreviewGistBackup'](arg1, arg2, arg3);
+}
+
+export function PreviewImportFile(arg1, arg2) {
+  return window['go']['main']['App']['PreviewImportFile'](arg1, arg2);
+}
+
 export function PreviewSSHConfig() {
   return window['go']['main']['App']['PreviewSSHConfig']();
 }
@@ -306,24 +314,24 @@ export function RespondCommandConfirm(arg1, arg2) {
   return window['go']['main']['App']['RespondCommandConfirm'](arg1, arg2);
 }
 
+export function RespondGrantApproval(arg1, arg2) {
+  return window['go']['main']['App']['RespondGrantApproval'](arg1, arg2);
+}
+
+export function RespondGrantApprovalWithEdits(arg1, arg2, arg3) {
+  return window['go']['main']['App']['RespondGrantApprovalWithEdits'](arg1, arg2, arg3);
+}
+
 export function RespondOpsctlApproval(arg1, arg2) {
   return window['go']['main']['App']['RespondOpsctlApproval'](arg1, arg2);
 }
 
-export function RespondOpsctlApprovalSession(arg1, arg2, arg3, arg4, arg5) {
-  return window['go']['main']['App']['RespondOpsctlApprovalSession'](arg1, arg2, arg3, arg4, arg5);
+export function RespondOpsctlApprovalGrant(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['main']['App']['RespondOpsctlApprovalGrant'](arg1, arg2, arg3, arg4, arg5, arg6);
 }
 
 export function RespondPermission(arg1, arg2) {
   return window['go']['main']['App']['RespondPermission'](arg1, arg2);
-}
-
-export function RespondPlanApproval(arg1, arg2) {
-  return window['go']['main']['App']['RespondPlanApproval'](arg1, arg2);
-}
-
-export function RespondPlanApprovalWithEdits(arg1, arg2, arg3) {
-  return window['go']['main']['App']['RespondPlanApprovalWithEdits'](arg1, arg2, arg3);
 }
 
 export function SFTPCancelTransfer(arg1) {

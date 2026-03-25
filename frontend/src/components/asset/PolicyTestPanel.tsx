@@ -122,9 +122,7 @@ export function PolicyTestPanel({ policyType, buildPolicyJSON, assetID, groupID 
           {result.matchedSource && result.matchedSource !== "default" && (
             <>
               <span className="text-muted-foreground">|</span>
-              <span className="opacity-80">
-                {t("asset.policyTestSourceGroup", { name: result.matchedSource })}
-              </span>
+              <span className="opacity-80">{t("asset.policyTestSourceGroup", { name: result.matchedSource })}</span>
             </>
           )}
           {result.matchedPattern && (

@@ -71,7 +71,7 @@ Execute remote command via SSH with stdio piping.
 
 **Approval flow**:
 1. Command policy check (allow-list/deny-list per asset)
-2. Session check (plan item consumption or session auto-approve)
+2. Session check (grant item consumption or session auto-approve)
 3. Desktop app approval (blocks until response)
 
 ```bash
@@ -137,16 +137,16 @@ SCP-style file transfer via SFTP. Requires approval.
 - Remote → Local: `opsctl cp 1:/var/log/app.log ./app.log`
 - Remote → Remote: `opsctl cp 1:/etc/hosts 2:/tmp/hosts` (direct streaming, no local disk)
 
-## plan
+## grant
 
-### `plan submit`
+### `grant submit`
 
-Submit batch plan for approval. Read JSON from stdin.
+Submit batch grant for approval. Read JSON from stdin.
 
 **Input JSON**:
 ```json
 {
-  "description": "Plan description",
+  "description": "Grant description",
   "items": [
     {"type": "exec", "asset": "web-server", "command": "uptime"},
     {"type": "cp", "asset": "web-server", "detail": "upload config.yml"},
@@ -165,7 +165,7 @@ Submit batch plan for approval. Read JSON from stdin.
 **Output**: Session ID (UUID) on approval, error on denial.
 
 ```bash
-SESSION=$(opsctl plan submit < plan.json)
+SESSION=$(opsctl grant submit < grant.json)
 opsctl --session $SESSION exec web-01 -- uptime
 ```
 

@@ -6,11 +6,15 @@ export function useFullscreen() {
 
   useEffect(() => {
     // Check initial state
-    WindowIsFullscreen().then(setIsFullscreen).catch(() => {});
+    WindowIsFullscreen()
+      .then(setIsFullscreen)
+      .catch(() => {});
 
     // Re-check on resize since Mac fullscreen triggers a resize
     const handleResize = () => {
-      WindowIsFullscreen().then(setIsFullscreen).catch(() => {});
+      WindowIsFullscreen()
+        .then(setIsFullscreen)
+        .catch(() => {});
     };
 
     window.addEventListener("resize", handleResize);

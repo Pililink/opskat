@@ -167,7 +167,7 @@ func testSSHPolicy(ctx context.Context, current *asset_entity.CommandPolicy, gro
 	}
 
 	// allow 检查
-	if len(allowFlat) > 0 && allSubCommandsAllowed(subCmds, allowFlat) {
+	if ok, _ := allSubCommandsAllowed(subCmds, allowFlat); len(allowFlat) > 0 && ok {
 		source := ""
 		for _, cmd := range subCmds {
 			for _, tr := range allowRules {
@@ -415,14 +415,12 @@ func CheckGroupGenericPolicy(ctx context.Context, assetID int64, command string,
 			continue
 		}
 		// 解析引用的权限组
-		var allDeny, allAllow []string
+		var allDeny []string
 		if len(p.Groups) > 0 {
-			grpAllow, grpDeny := resolveCommandGroups(ctx, p.Groups)
-			allAllow = append(allAllow, grpAllow...)
+			_, grpDeny := resolveCommandGroups(ctx, p.Groups)
 			allDeny = append(allDeny, grpDeny...)
 		}
 		allDeny = append(allDeny, p.DenyList...)
-		allAllow = append(allAllow, p.AllowList...)
 
 		// deny 检查
 		for _, rule := range allDeny {

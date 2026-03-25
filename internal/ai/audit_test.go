@@ -65,16 +65,16 @@ func TestContext_ConversationID(t *testing.T) {
 	})
 }
 
-func TestContext_PlanSessionID(t *testing.T) {
-	convey.Convey("计划会话 ID context", t, func() {
+func TestContext_GrantSessionID(t *testing.T) {
+	convey.Convey("授权会话 ID context", t, func() {
 		convey.Convey("默认返回空字符串", func() {
 			ctx := context.Background()
-			assert.Equal(t, "", GetPlanSessionID(ctx))
+			assert.Equal(t, "", GetGrantSessionID(ctx))
 		})
 
 		convey.Convey("设置后可以获取", func() {
-			ctx := WithPlanSessionID(context.Background(), "plan-abc-123")
-			assert.Equal(t, "plan-abc-123", GetPlanSessionID(ctx))
+			ctx := WithGrantSessionID(context.Background(), "grant-abc-123")
+			assert.Equal(t, "grant-abc-123", GetGrantSessionID(ctx))
 		})
 	})
 }
@@ -106,12 +106,12 @@ func TestCheckResult_Context(t *testing.T) {
 
 			setCheckResult(ctx, CheckResult{
 				Decision:       Allow,
-				DecisionSource: SourcePlanAllow,
+				DecisionSource: SourceGrantAllow,
 				MatchedPattern: "cat *",
 			})
 
 			assert.Equal(t, Allow, holder.Decision)
-			assert.Equal(t, SourcePlanAllow, holder.DecisionSource)
+			assert.Equal(t, SourceGrantAllow, holder.DecisionSource)
 			assert.Equal(t, "cat *", holder.MatchedPattern)
 		})
 
@@ -195,10 +195,9 @@ func TestTruncateString(t *testing.T) {
 			assert.Equal(t, "hello", truncateString("hello", 10))
 		})
 
-		convey.Convey("超长字符串截断到指定长度", func() {
+		convey.Convey("超长字符串截断到指定长度并追加标记", func() {
 			result := truncateString("abcdefghij", 5)
-			assert.Equal(t, "abcde", result)
-			assert.Len(t, result, 5)
+			assert.Equal(t, "abcde\n...[truncated]", result)
 		})
 
 		convey.Convey("空字符串返回空", func() {

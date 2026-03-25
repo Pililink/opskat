@@ -117,8 +117,8 @@ func MakeHostKeyCallback(host string, port int, verifyFn HostKeyVerifyFunc) ssh.
 				LastSeen:    now,
 			}
 			if err := host_key_repo.HostKey().Upsert(ctx, newKey); err != nil {
-					logger.Default().Warn("upsert new host key", zap.String("host", host), zap.Int("port", port), zap.Error(err))
-				}
+				logger.Default().Warn("upsert new host key", zap.String("host", host), zap.Int("port", port), zap.Error(err))
+			}
 			return nil
 		case HostKeyAcceptOnce:
 			return nil

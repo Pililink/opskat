@@ -222,7 +222,9 @@
       "nameRequired": "Group name is required",
       "saveSuccess": "Policy group saved",
       "copySuccess": "Policy group copied",
-      "deleteSuccess": "Policy group deleted"
+      "deleteSuccess": "Policy group deleted",
+      "deleteConfirmTitle": "Confirm Delete Policy Group",
+      "deleteConfirm": "Delete policy group \"{{name}}\"? This action cannot be undone."
     }
   },
   "sshKey": {
@@ -344,7 +346,10 @@
     "cliPathHint": "Leave empty to auto-detect from PATH",
     "detectedCLIs": "Detected local CLIs",
     "configured": "Configured",
-    "saved": "Saved"
+    "saved": "Saved",
+    "sendBehavior": "Send Behavior",
+    "sendBehaviorDesc": "Configure how AI chat messages are sent",
+    "enterToSend": "Press Enter to send message"
   },
   "backup": {
     "title": "Backup",
@@ -359,7 +364,7 @@
     "confirmImport": "Import will replace all existing data. Continue?",
     "password": "Encryption Password",
     "passwordOptional": "Leave empty for no encryption",
-    "passwordRequired": "Gist backup requires a password",
+    "passwordRequired": "Backup password is required",
     "passwordConfirm": "Confirm Password",
     "passwordMismatch": "Passwords do not match",
     "enterPassword": "Enter backup password",
@@ -383,7 +388,37 @@
     "deviceFlowWaiting": "Waiting for authorization...",
     "deviceFlowOpen": "Open Browser",
     "gistCreateNew": "Create new backup",
-    "gistUpdate": "Update: {{desc}}"
+    "gistUpdate": "Update: {{desc}}",
+    "exportTitle": "Export Backup",
+    "importTitle": "Import Backup",
+    "assetSelection": "Asset Selection",
+    "allAssets": "All Assets",
+    "selectedAssets": "Select Assets ({{count}})",
+    "selectedCount": "{{selected}}/{{total}} selected",
+    "selectAll": "Select All",
+    "selectNone": "Select None",
+    "exportContent": "Export Content",
+    "includeCredentials": "Include credentials",
+    "includeForwards": "Port forwarding rules",
+    "includePolicyGroups": "Policy groups",
+    "includeShortcuts": "Keyboard shortcuts",
+    "includeThemes": "Custom terminal themes",
+    "credentialWarning": "Backup file will be encrypted with the password. Keep the password safe.",
+    "passwordPlaceholder": "Enter backup password",
+    "generatePassword": "Generate random password",
+    "encryptedFile": "This backup is encrypted. Enter password to decrypt.",
+    "decryptPreview": "Decrypt & Preview",
+    "backupFrom": "Backup date",
+    "importAssets": "Assets & Groups",
+    "importCredentials": "Credentials",
+    "importForwards": "Port Forwarding",
+    "importPolicyGroups": "Policy Groups",
+    "importShortcuts": "Keyboard Shortcuts",
+    "importThemes": "Custom Terminal Themes",
+    "importMode": "Import Mode",
+    "modeMerge": "Merge (append)",
+    "modeReplace": "Replace (clear existing data)",
+    "replaceWarning": "Replace mode will delete all existing data in selected modules. This cannot be undone!"
   },
   "setup": {
     "title": "Configure AI Provider",
@@ -577,7 +612,7 @@
     "patternPlaceholder": "e.g. cat /var/log/*",
     "patternHint": "Future commands matching this pattern will be auto-approved"
   },
-  "planApproval": {
+  "grantApproval": {
     "title": "Permission Approval",
     "description": "Requesting the following command permissions. Matching commands will be auto-approved:",
     "approveAll": "Approve",
@@ -636,7 +671,8 @@
     "sessionGroupYesterday": "Yesterday",
     "sessionGroupThisWeek": "This week",
     "sessionGroupEarlier": "Earlier",
-    "sessionOps": "{{count}} ops"
+    "sessionOps": "{{count}} ops",
+    "sessionPatterns": "Session approved patterns"
   },
   "sftp": {
     "upload": "Upload File",

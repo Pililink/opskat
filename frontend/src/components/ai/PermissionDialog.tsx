@@ -51,17 +51,15 @@ export function PermissionDialog() {
 
   return (
     <AlertDialog open={!!request}>
-      <AlertDialogContent>
+      <AlertDialogContent className="max-h-[80vh] flex flex-col">
         <AlertDialogHeader>
           <AlertDialogTitle className="flex items-center gap-2">
             <Shield className="h-5 w-5 text-amber-500" />
             {t("ai.permissionTitle")}
           </AlertDialogTitle>
           <AlertDialogDescription asChild>
-            <div className="space-y-2">
-              <div className="text-sm font-medium text-foreground">
-                {request.tool_name}
-              </div>
+            <div className="space-y-2 overflow-y-auto flex-1 min-h-0">
+              <div className="text-sm font-medium text-foreground">{request.tool_name}</div>
               <pre className="text-xs bg-muted p-2 rounded-md overflow-auto max-h-48 whitespace-pre-wrap break-all">
                 {formatInput(request)}
               </pre>
@@ -75,9 +73,7 @@ export function PermissionDialog() {
           <Button variant="secondary" onClick={() => respond("allowAll")}>
             {t("ai.permissionAllowAll")}
           </Button>
-          <Button onClick={() => respond("allow")}>
-            {t("ai.permissionAllow")}
-          </Button>
+          <Button onClick={() => respond("allow")}>{t("ai.permissionAllow")}</Button>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

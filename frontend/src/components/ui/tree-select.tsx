@@ -39,12 +39,10 @@ function filterTree(nodes: TreeNode[], query: string): TreeNode[] {
     return false;
   }
 
-  return nodes
-    .filter(matches)
-    .map((node) => ({
-      ...node,
-      children: node.children ? filterTree(node.children, query) : undefined,
-    }));
+  return nodes.filter(matches).map((node) => ({
+    ...node,
+    children: node.children ? filterTree(node.children, query) : undefined,
+  }));
 }
 
 function TreeItem({
@@ -80,31 +78,19 @@ function TreeItem({
               setExpanded(!expanded);
             }}
           >
-            {expanded ? (
-              <ChevronDown className="h-3 w-3" />
-            ) : (
-              <ChevronRight className="h-3 w-3" />
-            )}
+            {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
           </button>
         ) : (
           <span className="w-4 shrink-0" />
         )}
         {node.icon && <span className="shrink-0">{node.icon}</span>}
         <span className="truncate flex-1">{node.label}</span>
-        {selectable && selectedId === node.id && (
-          <Check className="h-3.5 w-3.5 shrink-0 text-primary" />
-        )}
+        {selectable && selectedId === node.id && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
       </div>
       {hasChildren && expanded && (
         <div>
           {node.children!.map((child) => (
-            <TreeItem
-              key={child.id}
-              node={child}
-              selectedId={selectedId}
-              onSelect={onSelect}
-              depth={depth + 1}
-            />
+            <TreeItem key={child.id} node={child} selectedId={selectedId} onSelect={onSelect} depth={depth + 1} />
           ))}
         </div>
       )}
@@ -223,9 +209,7 @@ export function TreeSelect({
                 <span className="w-4 shrink-0" />
                 {placeholderIcon && <span className="shrink-0">{placeholderIcon}</span>}
                 <span className="truncate flex-1">{placeholder}</span>
-                {value === 0 && (
-                  <Check className="h-3.5 w-3.5 shrink-0 text-primary" />
-                )}
+                {value === 0 && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
               </div>
             )}
             {filteredNodes.map((node) => (
@@ -240,9 +224,7 @@ export function TreeSelect({
               />
             ))}
             {searchable && search && filteredNodes.length === 0 && (
-              <div className="px-2 py-3 text-center text-sm text-muted-foreground">
-                --
-              </div>
+              <div className="px-2 py-3 text-center text-sm text-muted-foreground">--</div>
             )}
           </div>
         </div>

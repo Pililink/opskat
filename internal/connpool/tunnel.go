@@ -16,8 +16,8 @@ type noDeadlineConn struct {
 }
 
 func (c *noDeadlineConn) SetDeadline(_ time.Time) error      { return nil }
-func (c *noDeadlineConn) SetReadDeadline(_ time.Time) error   { return nil }
-func (c *noDeadlineConn) SetWriteDeadline(_ time.Time) error  { return nil }
+func (c *noDeadlineConn) SetReadDeadline(_ time.Time) error  { return nil }
+func (c *noDeadlineConn) SetWriteDeadline(_ time.Time) error { return nil }
 
 // SSHTunnel 管理通过 SSH 资产建立的 TCP 隧道
 type SSHTunnel struct {

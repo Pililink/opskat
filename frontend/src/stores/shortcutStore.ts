@@ -89,13 +89,7 @@ function saveCustom(shortcuts: Record<ShortcutAction, ShortcutBinding>) {
   const custom: Partial<Record<ShortcutAction, ShortcutBinding>> = {};
   for (const [key, val] of Object.entries(shortcuts)) {
     const def = DEFAULT_SHORTCUTS[key as ShortcutAction];
-    if (
-      def &&
-      (val.code !== def.code ||
-        val.mod !== def.mod ||
-        val.shift !== def.shift ||
-        val.alt !== def.alt)
-    ) {
+    if (def && (val.code !== def.code || val.mod !== def.mod || val.shift !== def.shift || val.alt !== def.alt)) {
       custom[key as ShortcutAction] = val;
     }
   }

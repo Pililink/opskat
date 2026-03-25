@@ -1,11 +1,4 @@
-import {
-  useState,
-  useEffect,
-  useCallback,
-  useRef,
-  useMemo,
-  useLayoutEffect,
-} from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -115,12 +108,7 @@ function FloatingMenu({
     };
   }, [onClose]);
 
-  const item = (
-    action: string,
-    icon: React.ReactNode,
-    label: string,
-    variant?: "destructive"
-  ) => (
+  const item = (action: string, icon: React.ReactNode, label: string, variant?: "destructive") => (
     <div
       key={action}
       className={cn(
@@ -198,24 +186,15 @@ function TransferRow({
   const cancelTransfer = useSFTPStore((s) => s.cancelTransfer);
   const clearTransfer = useSFTPStore((s) => s.clearTransfer);
 
-  const percent =
-    transfer.bytesTotal > 0
-      ? Math.round((transfer.bytesDone / transfer.bytesTotal) * 100)
-      : 0;
+  const percent = transfer.bytesTotal > 0 ? Math.round((transfer.bytesDone / transfer.bytesTotal) * 100) : 0;
 
-  const fileName = transfer.currentFile
-    ? transfer.currentFile.split("/").pop() || transfer.currentFile
-    : "";
+  const fileName = transfer.currentFile ? transfer.currentFile.split("/").pop() || transfer.currentFile : "";
 
   return (
     <div className="flex items-center gap-1.5 text-[11px]">
       <div className="shrink-0">
-        {transfer.status === "active" && (
-          <Loader2 className="h-3 w-3 animate-spin text-primary" />
-        )}
-        {transfer.status === "done" && (
-          <CheckCircle2 className="h-3 w-3 text-green-500" />
-        )}
+        {transfer.status === "active" && <Loader2 className="h-3 w-3 animate-spin text-primary" />}
+        {transfer.status === "done" && <CheckCircle2 className="h-3 w-3 text-green-500" />}
         {(transfer.status === "error" || transfer.status === "cancelled") && (
           <XCircle className="h-3 w-3 text-destructive" />
         )}
@@ -229,11 +208,7 @@ function TransferRow({
             <Download className="h-2.5 w-2.5 text-muted-foreground shrink-0" />
           )}
           <span className="truncate">{fileName}</span>
-          {transfer.status === "active" && (
-            <span className="shrink-0 text-muted-foreground ml-auto">
-              {percent}%
-            </span>
-          )}
+          {transfer.status === "active" && <span className="shrink-0 text-muted-foreground ml-auto">{percent}%</span>}
         </div>
         {transfer.status === "active" && (
           <div className="h-1 rounded-full bg-muted overflow-hidden mt-0.5">
@@ -244,10 +219,7 @@ function TransferRow({
           </div>
         )}
         {transfer.status === "error" && transfer.error && (
-          <span
-            className="text-destructive truncate block text-[10px]"
-            title={transfer.error}
-          >
+          <span className="text-destructive truncate block text-[10px]" title={transfer.error}>
             {transfer.error}
           </span>
         )}
@@ -258,9 +230,7 @@ function TransferRow({
         size="icon-xs"
         className="shrink-0 h-4 w-4"
         onClick={() =>
-          transfer.status === "active"
-            ? cancelTransfer(transfer.transferId)
-            : clearTransfer(transfer.transferId)
+          transfer.status === "active" ? cancelTransfer(transfer.transferId) : clearTransfer(transfer.transferId)
         }
       >
         <X className="h-2.5 w-2.5" />
@@ -279,12 +249,7 @@ interface FileManagerPanelProps {
   onWidthChange: (width: number) => void;
 }
 
-export function FileManagerPanel({
-  sessionId,
-  isOpen,
-  width,
-  onWidthChange,
-}: FileManagerPanelProps) {
+export function FileManagerPanel({ sessionId, isOpen, width, onWidthChange }: FileManagerPanelProps) {
   const { t } = useTranslation();
 
   // File browsing state
@@ -327,9 +292,7 @@ export function FileManagerPanel({
   const startDownload = useSFTPStore((s) => s.startDownload);
   const startDownloadDir = useSFTPStore((s) => s.startDownloadDir);
   const allTransfers = useSFTPStore((s) => s.transfers);
-  const clearCompletedForSession = useSFTPStore(
-    (s) => s.clearCompletedForSession
-  );
+  const clearCompletedForSession = useSFTPStore((s) => s.clearCompletedForSession);
 
   const sessionTransfers = useMemo(
     () => Object.values(allTransfers).filter((t) => t.sessionId === sessionId),
@@ -372,9 +335,7 @@ export function FileManagerPanel({
   }, [sessionId, isOpen, loadDir]);
 
   // Auto-refresh after upload completes
-  const doneUploadCount = sessionTransfers.filter(
-    (t) => t.status === "done" && t.direction === "upload"
-  ).length;
+  const doneUploadCount = sessionTransfers.filter((t) => t.status === "done" && t.direction === "upload").length;
   const prevDoneCount = useRef(0);
   useEffect(() => {
     if (doneUploadCount > prevDoneCount.current) {
@@ -386,10 +347,7 @@ export function FileManagerPanel({
 
   // === Navigation helpers ===
   const getFullPath = useCallback(
-    (entry: sftp_svc.FileEntry) =>
-      currentPath === "/"
-        ? "/" + entry.name
-        : currentPath + "/" + entry.name,
+    (entry: sftp_svc.FileEntry) => (currentPath === "/" ? "/" + entry.name : currentPath + "/" + entry.name),
     [currentPath]
   );
 
@@ -488,16 +446,10 @@ export function FileManagerPanel({
           if (entry) startDownloadDir(sessionId, getFullPath(entry));
           break;
         case "upload":
-          startUpload(
-            sessionId,
-            currentPath.endsWith("/") ? currentPath : currentPath + "/"
-          );
+          startUpload(sessionId, currentPath.endsWith("/") ? currentPath : currentPath + "/");
           break;
         case "uploadDir":
-          startUploadDir(
-            sessionId,
-            currentPath.endsWith("/") ? currentPath : currentPath + "/"
-          );
+          startUploadDir(sessionId, currentPath.endsWith("/") ? currentPath : currentPath + "/");
           break;
         case "delete":
           if (entry) {
@@ -591,12 +543,7 @@ export function FileManagerPanel({
               >
                 <ArrowUp className="h-3.5 w-3.5" />
               </Button>
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                onClick={goHome}
-                title={t("sftp.home")}
-              >
+              <Button variant="ghost" size="icon-xs" onClick={goHome} title={t("sftp.home")}>
                 <Home className="h-3.5 w-3.5" />
               </Button>
               <Input
@@ -607,12 +554,7 @@ export function FileManagerPanel({
                   if (e.key === "Enter") loadDir(pathInput.trim());
                 }}
               />
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                onClick={() => loadDir(currentPath)}
-                title={t("sftp.refresh")}
-              >
+              <Button variant="ghost" size="icon-xs" onClick={() => loadDir(currentPath)} title={t("sftp.refresh")}>
                 <RefreshCw className="h-3.5 w-3.5" />
               </Button>
             </div>
@@ -633,27 +575,16 @@ export function FileManagerPanel({
                 )}
                 {error && !loading && (
                   <div className="flex flex-col items-center justify-center py-8 gap-1 px-2">
-                    <span className="text-destructive text-center text-xs">
-                      {t("sftp.loadError")}
-                    </span>
-                    <span className="text-muted-foreground text-center break-all text-[10px]">
-                      {error}
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="xs"
-                      onClick={() => loadDir(currentPath)}
-                      className="mt-1"
-                    >
+                    <span className="text-destructive text-center text-xs">{t("sftp.loadError")}</span>
+                    <span className="text-muted-foreground text-center break-all text-[10px]">{error}</span>
+                    <Button variant="outline" size="xs" onClick={() => loadDir(currentPath)} className="mt-1">
                       {t("sftp.retry")}
                     </Button>
                   </div>
                 )}
                 {!loading && !error && entries.length === 0 && (
                   <div className="flex items-center justify-center py-8">
-                    <span className="text-muted-foreground">
-                      {t("sftp.empty")}
-                    </span>
+                    <span className="text-muted-foreground">{t("sftp.empty")}</span>
                   </div>
                 )}
                 {!loading && !error && (
@@ -675,9 +606,7 @@ export function FileManagerPanel({
                           key={entry.name}
                           className={cn(
                             "flex items-center gap-1.5 px-2 py-1 cursor-pointer transition-colors",
-                            isSelected
-                              ? "bg-primary/10 text-primary"
-                              : "hover:bg-muted/50"
+                            isSelected ? "bg-primary/10 text-primary" : "hover:bg-muted/50"
                           )}
                           onClick={() => setSelected(fullPath)}
                           onDoubleClick={() => {
@@ -720,9 +649,7 @@ export function FileManagerPanel({
             {sessionTransfers.length > 0 && (
               <div className="border-t shrink-0">
                 <div className="flex items-center justify-between px-2 py-0.5">
-                  <span className="text-[11px] font-medium text-muted-foreground">
-                    {t("sftp.transfers")}
-                  </span>
+                  <span className="text-[11px] font-medium text-muted-foreground">{t("sftp.transfers")}</span>
                   <Button
                     variant="ghost"
                     size="icon-xs"
@@ -736,10 +663,7 @@ export function FileManagerPanel({
                 <ScrollArea className="max-h-28">
                   <div className="px-2 pb-1 space-y-0.5">
                     {sessionTransfers.map((transfer) => (
-                      <TransferRow
-                        key={transfer.transferId}
-                        transfer={transfer}
-                      />
+                      <TransferRow key={transfer.transferId} transfer={transfer} />
                     ))}
                   </div>
                 </ScrollArea>
@@ -750,13 +674,7 @@ export function FileManagerPanel({
       </div>
 
       {/* Context menu */}
-      {ctxMenu && (
-        <FloatingMenu
-          ctx={ctxMenu}
-          onAction={handleCtxAction}
-          onClose={() => setCtxMenu(null)}
-        />
-      )}
+      {ctxMenu && <FloatingMenu ctx={ctxMenu} onAction={handleCtxAction} onClose={() => setCtxMenu(null)} />}
 
       {/* Delete confirmation */}
       <ConfirmDialog

@@ -13,11 +13,11 @@ type AuditLog struct {
 	Error          string `gorm:"column:error;type:text"`
 	Success        int    `gorm:"column:success;default:1"` // 1=成功, 0=失败
 	ConversationID int64  `gorm:"column:conversation_id;default:0;index"`
-	PlanSessionID  string `gorm:"column:plan_session_id;type:varchar(36)"`
-	SessionID      string `gorm:"column:session_id;type:varchar(64);index"`      // opsctl/AI 会话 ID
-	Decision       string `gorm:"column:decision;type:varchar(10)"`              // "allow" | "deny"
-	DecisionSource string `gorm:"column:decision_source;type:varchar(30)"`       // 决策来源
-	MatchedPattern string `gorm:"column:matched_pattern;type:varchar(500)"`      // 匹配的命令模式
+	GrantSessionID string `gorm:"column:grant_session_id;type:varchar(36)"`
+	SessionID      string `gorm:"column:session_id;type:varchar(64);index"` // opsctl/AI 会话 ID
+	Decision       string `gorm:"column:decision;type:varchar(10)"`         // "allow" | "deny"
+	DecisionSource string `gorm:"column:decision_source;type:varchar(30)"`  // 决策来源
+	MatchedPattern string `gorm:"column:matched_pattern;type:varchar(500)"` // 匹配的命令模式
 	Createtime     int64  `gorm:"column:createtime;not null;index"`
 }
 

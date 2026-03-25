@@ -65,7 +65,7 @@ export function DownloadAndInstallUpdate():Promise<void>;
 
 export function EncryptPassword(arg1:string):Promise<string>;
 
-export function ExecuteImportFile(arg1:string,arg2:string):Promise<void>;
+export function ExecuteImportFile(arg1:string,arg2:string,arg3:backup_svc.ImportOptions):Promise<backup_svc.ImportResult>;
 
 export function ExecuteRedis(arg1:number,arg2:string,arg3:number):Promise<string>;
 
@@ -75,9 +75,9 @@ export function ExecuteSQL(arg1:number,arg2:string,arg3:string):Promise<string>;
 
 export function ExportData():Promise<string>;
 
-export function ExportToFile(arg1:string):Promise<void>;
+export function ExportToFile(arg1:string,arg2:backup_svc.ExportOptions):Promise<void>;
 
-export function ExportToGist(arg1:string,arg2:string,arg3:string):Promise<backup_svc.GistInfo>;
+export function ExportToGist(arg1:string,arg2:string,arg3:string,arg4:backup_svc.ExportOptions):Promise<backup_svc.GistInfo>;
 
 export function GenerateSSHKey(arg1:string,arg2:string,arg3:string,arg4:number):Promise<credential_entity.Credential>;
 
@@ -113,7 +113,7 @@ export function GetStoredGitHubUser():Promise<string>;
 
 export function GetUpdateChannel():Promise<string>;
 
-export function ImportFromGist(arg1:string,arg2:string,arg3:string):Promise<void>;
+export function ImportFromGist(arg1:string,arg2:string,arg3:string,arg4:backup_svc.ImportOptions):Promise<backup_svc.ImportResult>;
 
 export function ImportSSHConfigSelected(arg1:Array<number>,arg2:boolean):Promise<import_svc.ImportResult>;
 
@@ -155,6 +155,10 @@ export function MoveAsset(arg1:number,arg2:string):Promise<void>;
 
 export function MoveGroup(arg1:number,arg2:string):Promise<void>;
 
+export function PreviewGistBackup(arg1:string,arg2:string,arg3:string):Promise<backup_svc.BackupSummary>;
+
+export function PreviewImportFile(arg1:string,arg2:string):Promise<backup_svc.BackupSummary>;
+
 export function PreviewSSHConfig():Promise<import_svc.PreviewResult>;
 
 export function PreviewTabbyConfig():Promise<import_svc.PreviewResult>;
@@ -167,15 +171,15 @@ export function RespondAuthChallenge(arg1:string,arg2:Array<string>):Promise<voi
 
 export function RespondCommandConfirm(arg1:string,arg2:string):Promise<void>;
 
+export function RespondGrantApproval(arg1:string,arg2:boolean):Promise<void>;
+
+export function RespondGrantApprovalWithEdits(arg1:string,arg2:boolean,arg3:Array<main.GrantItemEdit>):Promise<void>;
+
 export function RespondOpsctlApproval(arg1:string,arg2:boolean):Promise<void>;
 
-export function RespondOpsctlApprovalSession(arg1:string,arg2:boolean,arg3:string,arg4:number,arg5:string):Promise<void>;
+export function RespondOpsctlApprovalGrant(arg1:string,arg2:boolean,arg3:string,arg4:number,arg5:string,arg6:string):Promise<void>;
 
 export function RespondPermission(arg1:string,arg2:string):Promise<void>;
-
-export function RespondPlanApproval(arg1:string,arg2:boolean):Promise<void>;
-
-export function RespondPlanApprovalWithEdits(arg1:string,arg2:boolean,arg3:Array<main.PlanItemEdit>):Promise<void>;
 
 export function SFTPCancelTransfer(arg1:string):Promise<void>;
 

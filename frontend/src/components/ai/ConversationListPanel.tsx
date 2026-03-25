@@ -29,11 +29,7 @@ interface ConversationListPanelProps {
   onOpenConversation?: (tabId: string) => void;
 }
 
-export function ConversationListPanel({
-  collapsed,
-  onToggle,
-  onOpenConversation,
-}: ConversationListPanelProps) {
+export function ConversationListPanel({ collapsed, onToggle, onOpenConversation }: ConversationListPanelProps) {
   const { t } = useTranslation();
   const isFullscreen = useFullscreen();
   const {
@@ -50,7 +46,11 @@ export function ConversationListPanel({
 
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
 
-  const { width, isResizing: resizing, handleMouseDown: handleResizeStart } = useResizeHandle({
+  const {
+    width,
+    isResizing: resizing,
+    handleMouseDown: handleResizeStart,
+  } = useResizeHandle({
     defaultWidth: 240,
     minWidth: 200,
     maxWidth: 400,
@@ -100,9 +100,7 @@ export function ConversationListPanel({
   };
 
   // 已打开的会话 ID 集合
-  const openConversationIds = new Set(
-    aiTabs.map((t) => (t.meta as AITabMeta).conversationId).filter(Boolean)
-  );
+  const openConversationIds = new Set(aiTabs.map((t) => (t.meta as AITabMeta).conversationId).filter(Boolean));
 
   return (
     <>
@@ -143,12 +141,7 @@ export function ConversationListPanel({
               >
                 <Plus className="h-3.5 w-3.5" />
               </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6"
-                onClick={onToggle}
-              >
+              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onToggle}>
                 <PanelRightClose className="h-3.5 w-3.5" />
               </Button>
             </div>
@@ -157,9 +150,7 @@ export function ConversationListPanel({
           {/* 会话列表 */}
           <ScrollArea className="flex-1 min-h-0">
             {conversations.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-6">
-                {t("ai.noConversations", "暂无对话")}
-              </p>
+              <p className="text-sm text-muted-foreground text-center py-6">{t("ai.noConversations", "暂无对话")}</p>
             ) : (
               <div className="py-1">
                 {conversations.map((conv) => {
@@ -175,12 +166,8 @@ export function ConversationListPanel({
                     >
                       <MessageSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm truncate text-sidebar-foreground">
-                          {conv.Title}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {formatRelativeTime(conv.Updatetime)}
-                        </p>
+                        <p className="text-sm truncate text-sidebar-foreground">{conv.Title}</p>
+                        <p className="text-xs text-muted-foreground">{formatRelativeTime(conv.Updatetime)}</p>
                       </div>
                       <Button
                         variant="ghost"

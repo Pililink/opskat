@@ -32,10 +32,7 @@ export function WindowControls() {
   };
 
   return (
-    <div
-      className="fixed top-0 right-0 z-50 flex"
-      style={{ "--wails-draggable": "no-drag" } as React.CSSProperties}
-    >
+    <div className="fixed top-0 right-0 z-50 flex" style={{ "--wails-draggable": "no-drag" } as React.CSSProperties}>
       <button
         className="flex h-8 w-11 items-center justify-center text-muted-foreground hover:bg-muted/80 hover:text-foreground transition-colors"
         onClick={() => WindowMinimise()}
@@ -46,11 +43,7 @@ export function WindowControls() {
         className="flex h-8 w-11 items-center justify-center text-muted-foreground hover:bg-muted/80 hover:text-foreground transition-colors"
         onClick={handleToggleMaximise}
       >
-        {maximised ? (
-          <Copy className="h-3 w-3" />
-        ) : (
-          <Square className="h-3 w-3" />
-        )}
+        {maximised ? <Copy className="h-3 w-3" /> : <Square className="h-3 w-3" />}
       </button>
       <button
         className="flex h-8 w-11 items-center justify-center text-muted-foreground hover:bg-destructive hover:text-destructive-foreground transition-colors"

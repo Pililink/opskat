@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useFullscreen } from "@/hooks/useFullscreen";
 import {
   ChevronRight,
@@ -60,7 +60,7 @@ interface AssetTreeProps {
   onCopyAsset: (asset: asset_entity.Asset) => void;
   onConnectAsset: (asset: asset_entity.Asset) => void;
   onSelectAsset: (asset: asset_entity.Asset) => void;
-  onOpenInfoTab?: (type: 'asset' | 'group', id: number, name: string, icon?: string) => void;
+  onOpenInfoTab?: (type: "asset" | "group", id: number, name: string, icon?: string) => void;
 }
 
 export function AssetTree({
@@ -97,11 +97,7 @@ export function AssetTree({
 
   if (collapsed) return null;
 
-  const filteredAssets = filter
-    ? assets.filter((a) =>
-        a.Name.toLowerCase().includes(filter.toLowerCase())
-      )
-    : assets;
+  const filteredAssets = filter ? assets.filter((a) => a.Name.toLowerCase().includes(filter.toLowerCase())) : assets;
 
   // Group assets by GroupID
   const groupedAssets = new Map<number, asset_entity.Asset[]>();
@@ -111,8 +107,7 @@ export function AssetTree({
     groupedAssets.get(gid)!.push(asset);
   }
 
-  const childGroups = (parentId: number) =>
-    groups.filter((g) => (g.ParentID || 0) === parentId);
+  const childGroups = (parentId: number) => groups.filter((g) => (g.ParentID || 0) === parentId);
 
   const countAssetsInGroup = (groupId: number): number => {
     let count = (groupedAssets.get(groupId) || []).length;
@@ -217,89 +212,84 @@ export function AssetTree({
       </div>
       <ScrollArea className="flex-1 min-h-0">
         <ContextMenu>
-        <ContextMenuTrigger className="block min-h-full">
-        <div className="p-2 space-y-0.5">
-          {childGroups(0).map((group) => (
-            <GroupItem
-              key={group.ID}
-              group={group}
-              assets={groupedAssets.get(group.ID) || []}
-              allGroupedAssets={groupedAssets}
-              childGroups={childGroups}
-              countAssetsInGroup={countAssetsInGroup}
-              selectedAssetId={selectedAssetId}
-              activeAssetIds={activeAssetIds}
-              connectingAssetIds={connectingAssetIds}
-              onSelectAsset={onSelectAsset}
-              onAddAsset={() => onAddAsset(group.ID)}
-              onEditAsset={onEditAsset}
-              onCopyAsset={onCopyAsset}
-              onConnectAsset={onConnectAsset}
-              onEditGroup={onEditGroup}
-              onGroupDetail={onGroupDetail}
-              onDeleteGroup={handleDeleteGroup}
-              onDeleteAsset={(asset: asset_entity.Asset) => setDeleteAssetConfirm(asset)}
-              onMoveAsset={handleMoveAsset}
-              onMoveGroup={handleMoveGroup}
-              onOpenInfoTab={onOpenInfoTab}
-              depth={0}
-              t={t}
-            />
-          ))}
-          {(groupedAssets.get(0) || []).length > 0 && (
-            <GroupItem
-              group={
-                new group_entity.Group({
-                  ID: 0,
-                  Name: t("asset.ungrouped"),
-                })
-              }
-              assets={groupedAssets.get(0) || []}
-              allGroupedAssets={groupedAssets}
-              childGroups={() => []}
-              countAssetsInGroup={() => (groupedAssets.get(0) || []).length}
-              selectedAssetId={selectedAssetId}
-              activeAssetIds={activeAssetIds}
-              connectingAssetIds={connectingAssetIds}
-              onSelectAsset={onSelectAsset}
-              onAddAsset={() => onAddAsset(0)}
-              onEditAsset={onEditAsset}
-              onCopyAsset={onCopyAsset}
-              onConnectAsset={onConnectAsset}
-              onEditGroup={onEditGroup}
-              onGroupDetail={onGroupDetail}
-              onDeleteGroup={handleDeleteGroup}
-              onDeleteAsset={(asset) => setDeleteAssetConfirm(asset)}
-              onMoveAsset={handleMoveAsset}
-              onMoveGroup={handleMoveGroup}
-              onOpenInfoTab={onOpenInfoTab}
-              depth={0}
-              t={t}
-            />
-          )}
-          {filteredAssets.length === 0 && groups.length === 0 && (
-            <p className="text-xs text-muted-foreground text-center py-4">
+          <ContextMenuTrigger className="block min-h-full">
+            <div className="p-2 space-y-0.5">
+              {childGroups(0).map((group) => (
+                <GroupItem
+                  key={group.ID}
+                  group={group}
+                  assets={groupedAssets.get(group.ID) || []}
+                  allGroupedAssets={groupedAssets}
+                  childGroups={childGroups}
+                  countAssetsInGroup={countAssetsInGroup}
+                  selectedAssetId={selectedAssetId}
+                  activeAssetIds={activeAssetIds}
+                  connectingAssetIds={connectingAssetIds}
+                  onSelectAsset={onSelectAsset}
+                  onAddAsset={() => onAddAsset(group.ID)}
+                  onEditAsset={onEditAsset}
+                  onCopyAsset={onCopyAsset}
+                  onConnectAsset={onConnectAsset}
+                  onEditGroup={onEditGroup}
+                  onGroupDetail={onGroupDetail}
+                  onDeleteGroup={handleDeleteGroup}
+                  onDeleteAsset={(asset: asset_entity.Asset) => setDeleteAssetConfirm(asset)}
+                  onMoveAsset={handleMoveAsset}
+                  onMoveGroup={handleMoveGroup}
+                  onOpenInfoTab={onOpenInfoTab}
+                  depth={0}
+                  t={t}
+                />
+              ))}
+              {(groupedAssets.get(0) || []).length > 0 && (
+                <GroupItem
+                  group={
+                    new group_entity.Group({
+                      ID: 0,
+                      Name: t("asset.ungrouped"),
+                    })
+                  }
+                  assets={groupedAssets.get(0) || []}
+                  allGroupedAssets={groupedAssets}
+                  childGroups={() => []}
+                  countAssetsInGroup={() => (groupedAssets.get(0) || []).length}
+                  selectedAssetId={selectedAssetId}
+                  activeAssetIds={activeAssetIds}
+                  connectingAssetIds={connectingAssetIds}
+                  onSelectAsset={onSelectAsset}
+                  onAddAsset={() => onAddAsset(0)}
+                  onEditAsset={onEditAsset}
+                  onCopyAsset={onCopyAsset}
+                  onConnectAsset={onConnectAsset}
+                  onEditGroup={onEditGroup}
+                  onGroupDetail={onGroupDetail}
+                  onDeleteGroup={handleDeleteGroup}
+                  onDeleteAsset={(asset) => setDeleteAssetConfirm(asset)}
+                  onMoveAsset={handleMoveAsset}
+                  onMoveGroup={handleMoveGroup}
+                  onOpenInfoTab={onOpenInfoTab}
+                  depth={0}
+                  t={t}
+                />
+              )}
+              {filteredAssets.length === 0 && groups.length === 0 && (
+                <p className="text-xs text-muted-foreground text-center py-4">{t("asset.addAsset")}</p>
+              )}
+            </div>
+          </ContextMenuTrigger>
+          <ContextMenuContent>
+            <ContextMenuItem onClick={() => onAddAsset()}>
+              <Plus className="h-3.5 w-3.5 mr-1.5" />
               {t("asset.addAsset")}
-            </p>
-          )}
-        </div>
-        </ContextMenuTrigger>
-        <ContextMenuContent>
-          <ContextMenuItem onClick={() => onAddAsset()}>
-            <Plus className="h-3.5 w-3.5 mr-1.5" />
-            {t("asset.addAsset")}
-          </ContextMenuItem>
-          <ContextMenuItem onClick={() => onAddGroup()}>
-            <FolderPlus className="h-3.5 w-3.5 mr-1.5" />
-            {t("asset.addGroup")}
-          </ContextMenuItem>
-        </ContextMenuContent>
+            </ContextMenuItem>
+            <ContextMenuItem onClick={() => onAddGroup()}>
+              <FolderPlus className="h-3.5 w-3.5 mr-1.5" />
+              {t("asset.addGroup")}
+            </ContextMenuItem>
+          </ContextMenuContent>
         </ContextMenu>
       </ScrollArea>
-      <AlertDialog
-        open={!!deleteConfirm}
-        onOpenChange={(open) => !open && setDeleteConfirm(null)}
-      >
+      <AlertDialog open={!!deleteConfirm} onOpenChange={(open) => !open && setDeleteConfirm(null)}>
         <AlertDialogContent onOverlayClick={() => setDeleteConfirm(null)}>
           <AlertDialogHeader>
             <AlertDialogTitle>{t("asset.deleteGroupTitle")}</AlertDialogTitle>
@@ -312,10 +302,7 @@ export function AssetTree({
             <AlertDialogAction onClick={() => handleConfirmDelete(false)}>
               {t("asset.moveToUngrouped")}
             </AlertDialogAction>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={() => handleConfirmDelete(true)}
-            >
+            <AlertDialogAction variant="destructive" onClick={() => handleConfirmDelete(true)}>
               {t("asset.deleteAssets")}
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -337,6 +324,10 @@ export function AssetTree({
       />
     </div>
   );
+}
+
+function DynamicIcon({ icon, className, style }: { icon?: string; className?: string; style?: React.CSSProperties }) {
+  return React.createElement(icon ? getIconComponent(icon) : Folder, { className, style });
 }
 
 function GroupItem({
@@ -382,7 +373,7 @@ function GroupItem({
   onDeleteAsset: (asset: asset_entity.Asset) => void;
   onMoveAsset: (id: number, direction: string) => void;
   onMoveGroup: (id: number, direction: string) => void;
-  onOpenInfoTab?: (type: 'asset' | 'group', id: number, name: string, icon?: string) => void;
+  onOpenInfoTab?: (type: "asset" | "group", id: number, name: string, icon?: string) => void;
   depth: number;
   t: (key: string) => string;
 }) {
@@ -390,7 +381,6 @@ function GroupItem({
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const children = group.ID > 0 ? childGroups(group.ID) : [];
   const totalCount = countAssetsInGroup(group.ID);
-  const GroupIcon = group.Icon ? getIconComponent(group.Icon) : Folder;
 
   const groupRow = (
     <div
@@ -403,11 +393,13 @@ function GroupItem({
       ) : (
         <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       )}
-      <GroupIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" style={group.Icon ? { color: getIconColor(group.Icon) } : undefined} />
+      <DynamicIcon
+        icon={group.Icon}
+        className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+        style={group.Icon ? { color: getIconColor(group.Icon) } : undefined}
+      />
       <span className="truncate text-sidebar-foreground">{group.Name}</span>
-      <span className="ml-auto text-xs text-muted-foreground">
-        {totalCount}
-      </span>
+      <span className="ml-auto text-xs text-muted-foreground">{totalCount}</span>
     </div>
   );
 
@@ -427,7 +419,7 @@ function GroupItem({
               {t("asset.groupDetail")}
             </ContextMenuItem>
             {onOpenInfoTab && (
-              <ContextMenuItem onClick={() => onOpenInfoTab('group', group.ID, group.Name, group.Icon)}>
+              <ContextMenuItem onClick={() => onOpenInfoTab("group", group.ID, group.Name, group.Icon)}>
                 <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
                 {t("action.openInTab")}
               </ContextMenuItem>
@@ -450,10 +442,7 @@ function GroupItem({
               {t("asset.moveTop")}
             </ContextMenuItem>
             <ContextMenuSeparator />
-            <ContextMenuItem
-              className="text-destructive"
-              onClick={() => onDeleteGroup(group.ID)}
-            >
+            <ContextMenuItem className="text-destructive" onClick={() => onDeleteGroup(group.ID)}>
               <Trash2 className="h-3.5 w-3.5 mr-1.5" />
               {t("action.delete")}
             </ContextMenuItem>
@@ -462,10 +451,7 @@ function GroupItem({
       ) : (
         groupRow
       )}
-      <div
-        className="tree-group-content"
-        data-collapsed={!expanded ? "true" : undefined}
-      >
+      <div className="tree-group-content" data-collapsed={!expanded ? "true" : undefined}>
         <div>
           {children.map((child) => (
             <GroupItem
@@ -527,25 +513,28 @@ function GroupItem({
                     {isConnecting ? (
                       <Loader2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground animate-spin" />
                     ) : (
-                      <AssetIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" style={asset.Icon ? { color: getIconColor(asset.Icon) } : undefined} />
+                      <AssetIcon
+                        className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+                        style={asset.Icon ? { color: getIconColor(asset.Icon) } : undefined}
+                      />
                     )}
-                    {activeAssetIds.has(asset.ID) && (
-                      <span className="h-1.5 w-1.5 rounded-full bg-success shrink-0" />
-                    )}
-                    <span className="truncate text-sidebar-foreground">
-                      {asset.Name}
-                    </span>
+                    {activeAssetIds.has(asset.ID) && <span className="h-1.5 w-1.5 rounded-full bg-success shrink-0" />}
+                    <span className="truncate text-sidebar-foreground">{asset.Name}</span>
                   </div>
                 </ContextMenuTrigger>
                 <ContextMenuContent>
                   {asset.Type === "ssh" && (
                     <ContextMenuItem onClick={() => onConnectAsset(asset)} disabled={isConnecting}>
-                      {isConnecting ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <TerminalSquare className="h-3.5 w-3.5 mr-1.5" />}
+                      {isConnecting ? (
+                        <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                      ) : (
+                        <TerminalSquare className="h-3.5 w-3.5 mr-1.5" />
+                      )}
                       {t("asset.connect")}
                     </ContextMenuItem>
                   )}
                   {onOpenInfoTab && (
-                    <ContextMenuItem onClick={() => onOpenInfoTab('asset', asset.ID, asset.Name, asset.Icon)}>
+                    <ContextMenuItem onClick={() => onOpenInfoTab("asset", asset.ID, asset.Name, asset.Icon)}>
                       <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
                       {t("action.openInTab")}
                     </ContextMenuItem>
@@ -572,10 +561,7 @@ function GroupItem({
                     {t("asset.moveTop")}
                   </ContextMenuItem>
                   <ContextMenuSeparator />
-                  <ContextMenuItem
-                    className="text-destructive"
-                    onClick={() => onDeleteAsset(asset)}
-                  >
+                  <ContextMenuItem className="text-destructive" onClick={() => onDeleteAsset(asset)}>
                     <Trash2 className="h-3.5 w-3.5 mr-1.5" />
                     {t("action.delete")}
                   </ContextMenuItem>

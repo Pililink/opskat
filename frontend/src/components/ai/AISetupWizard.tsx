@@ -3,13 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAIStore } from "@/stores/aiStore";
 import {
   DetectOpsctl,
@@ -18,21 +12,12 @@ import {
   InstallOpsctl,
   GetOpsctlInstallDir,
 } from "../../../wailsjs/go/main/App";
-import {
-  Bot,
-  Terminal,
-  Check,
-  Loader2,
-  ArrowRight,
-  Download,
-  AlertTriangle,
-} from "lucide-react";
+import { Bot, Terminal, Check, Loader2, ArrowRight, Download, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 
 export function AISetupWizard() {
   const { t } = useTranslation();
-  const { configure, detectCLIs, localCLIs, fetchConversations } =
-    useAIStore();
+  const { configure, detectCLIs, localCLIs, fetchConversations } = useAIStore();
 
   // Provider selection
   const [providerType, setProviderType] = useState<string | null>(null);
@@ -78,15 +63,13 @@ export function AISetupWizard() {
 
   const detectIntegration = useCallback(async () => {
     try {
-      const [info, skills, dir] = await Promise.all([
-        DetectOpsctl(),
-        DetectSkills(),
-        GetOpsctlInstallDir(),
-      ]);
+      const [info, skills, dir] = await Promise.all([DetectOpsctl(), DetectSkills(), GetOpsctlInstallDir()]);
       setOpsctlInfo(info);
       setSkillsInstalled((skills || []).some((s: { installed: boolean }) => s.installed));
       setInstallDir(dir);
-    } catch {}
+    } catch {
+      // detection is optional, ignore errors
+    }
   }, []);
 
   useEffect(() => {
@@ -102,8 +85,7 @@ export function AISetupWizard() {
       toast.success(t("integration.installSuccess"));
       await detectIntegration();
     } catch (e: unknown) {
-      const msg =
-        e instanceof Error ? e.message : String(e);
+      const msg = e instanceof Error ? e.message : String(e);
       toast.error(`${t("integration.installFailed")}: ${msg}`);
     } finally {
       setOpsctlInstalling(false);
@@ -141,9 +123,7 @@ export function AISetupWizard() {
         <div className="text-center space-y-2">
           <Bot className="h-10 w-10 text-primary mx-auto" />
           <h2 className="text-lg font-semibold">{t("setup.title")}</h2>
-          <p className="text-sm text-muted-foreground">
-            {t("setup.subtitle")}
-          </p>
+          <p className="text-sm text-muted-foreground">{t("setup.subtitle")}</p>
         </div>
 
         {/* Provider Selection */}
@@ -151,36 +131,25 @@ export function AISetupWizard() {
           <button
             onClick={() => setProviderType("local_cli")}
             className={`rounded-lg border-2 p-4 text-left transition-all hover:border-primary/50 ${
-              providerType === "local_cli"
-                ? "border-primary bg-primary/5"
-                : "border-border"
+              providerType === "local_cli" ? "border-primary bg-primary/5" : "border-border"
             }`}
           >
             <div className="flex items-center gap-2 mb-2">
               <Terminal className="h-5 w-5" />
-              <span className="font-medium text-sm">
-                {t("setup.localCLI")}
-              </span>
+              <span className="font-medium text-sm">{t("setup.localCLI")}</span>
             </div>
-            <p className="text-xs text-muted-foreground">
-              {t("setup.localCLIDesc")}
-            </p>
+            <p className="text-xs text-muted-foreground">{t("setup.localCLIDesc")}</p>
             <span className="inline-block mt-2 text-xs font-medium text-primary bg-primary/10 px-2 py-0.5 rounded">
               {t("setup.recommended")}
             </span>
           </button>
 
-          <button
-            disabled
-            className="rounded-lg border-2 p-4 text-left border-border opacity-50 cursor-not-allowed"
-          >
+          <button disabled className="rounded-lg border-2 p-4 text-left border-border opacity-50 cursor-not-allowed">
             <div className="flex items-center gap-2 mb-2">
               <Bot className="h-5 w-5" />
               <span className="font-medium text-sm">OpenAI API</span>
             </div>
-            <p className="text-xs text-muted-foreground">
-              {t("setup.openAIDesc")}
-            </p>
+            <p className="text-xs text-muted-foreground">{t("setup.openAIDesc")}</p>
             <span className="inline-block mt-2 text-xs font-medium text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30 px-2 py-0.5 rounded">
               {t("setup.developing")}
             </span>
@@ -196,20 +165,20 @@ export function AISetupWizard() {
 
               {localCLIs.length > 0 && (
                 <div className="text-xs text-muted-foreground">
-                  {t("settings.detectedCLIs")}:{" "}
-                  {localCLIs
-                    .map((c) => `${c.name} (${c.path})`)
-                    .join(", ")}
+                  {t("settings.detectedCLIs")}: {localCLIs.map((c) => `${c.name} (${c.path})`).join(", ")}
                 </div>
               )}
 
               <div className="grid gap-2">
                 <Label className="text-xs">{t("settings.cliType")}</Label>
-                <Select value={cliType} onValueChange={(v) => {
-                  setCliType(v);
-                  const detected = localCLIs.find((c) => c.type === v);
-                  setCliPath(detected ? detected.path : "");
-                }}>
+                <Select
+                  value={cliType}
+                  onValueChange={(v) => {
+                    setCliType(v);
+                    const detected = localCLIs.find((c) => c.type === v);
+                    setCliPath(detected ? detected.path : "");
+                  }}
+                >
                   <SelectTrigger className="h-8 text-sm">
                     <SelectValue />
                   </SelectTrigger>
@@ -234,9 +203,7 @@ export function AISetupWizard() {
 
             {/* Integration Status */}
             <div className="rounded-lg border p-4 space-y-3">
-              <h3 className="text-sm font-medium">
-                {t("setup.integration")}
-              </h3>
+              <h3 className="text-sm font-medium">{t("setup.integration")}</h3>
 
               {/* opsctl CLI */}
               <div className="flex items-center justify-between">
@@ -265,9 +232,7 @@ export function AISetupWizard() {
                     {t("integration.install")}
                   </Button>
                 ) : (
-                  <span className="text-xs text-muted-foreground">
-                    {t("setup.opsctlManualHint")}
-                  </span>
+                  <span className="text-xs text-muted-foreground">{t("setup.opsctlManualHint")}</span>
                 )}
               </div>
 
@@ -283,9 +248,7 @@ export function AISetupWizard() {
                     {t("integration.skillInstalled")}
                   </span>
                 ) : (
-                  <span className="text-xs text-muted-foreground">
-                    {t("setup.autoInstall")}
-                  </span>
+                  <span className="text-xs text-muted-foreground">{t("setup.autoInstall")}</span>
                 )}
               </div>
 
@@ -297,16 +260,8 @@ export function AISetupWizard() {
               )}
             </div>
 
-            <Button
-              onClick={handleComplete}
-              disabled={completing}
-              className="w-full"
-            >
-              {completing ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <ArrowRight className="h-4 w-4 mr-2" />
-              )}
+            <Button onClick={handleComplete} disabled={completing} className="w-full">
+              {completing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <ArrowRight className="h-4 w-4 mr-2" />}
               {t("setup.complete")}
             </Button>
           </div>
@@ -317,9 +272,7 @@ export function AISetupWizard() {
           <div className="space-y-4">
             <div className="rounded-lg border p-4 space-y-3">
               <div className="flex items-center gap-2">
-                <h3 className="text-sm font-medium">
-                  API {t("setup.config")}
-                </h3>
+                <h3 className="text-sm font-medium">API {t("setup.config")}</h3>
                 <span className="text-xs text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30 px-1.5 py-0.5 rounded">
                   {t("setup.notComplete")}
                 </span>
@@ -327,11 +280,7 @@ export function AISetupWizard() {
 
               <div className="grid gap-2">
                 <Label className="text-xs">API Base URL</Label>
-                <Input
-                  value={apiBase}
-                  onChange={(e) => setApiBase(e.target.value)}
-                  className="h-8 text-sm"
-                />
+                <Input value={apiBase} onChange={(e) => setApiBase(e.target.value)} className="h-8 text-sm" />
               </div>
               <div className="grid gap-2">
                 <Label className="text-xs">API Key</Label>
@@ -344,11 +293,7 @@ export function AISetupWizard() {
               </div>
               <div className="grid gap-2">
                 <Label className="text-xs">{t("settings.model")}</Label>
-                <Input
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                  className="h-8 text-sm"
-                />
+                <Input value={model} onChange={(e) => setModel(e.target.value)} className="h-8 text-sm" />
               </div>
             </div>
 
@@ -357,11 +302,7 @@ export function AISetupWizard() {
               disabled={!apiBase.trim() || !apiKey.trim() || completing}
               className="w-full"
             >
-              {completing ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <ArrowRight className="h-4 w-4 mr-2" />
-              )}
+              {completing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <ArrowRight className="h-4 w-4 mr-2" />}
               {t("setup.complete")}
             </Button>
           </div>

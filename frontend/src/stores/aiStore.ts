@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { create } from "zustand";
 import {
   SendAIMessage,
@@ -48,10 +49,7 @@ interface TabState {
 }
 
 // 模块级 per-tab 事件监听管理（不放 zustand，因为含函数引用）
-const tabEventListeners = new Map<
-  string,
-  { cancel: (() => void) | null; generation: number }
->();
+const tabEventListeners = new Map<string, { cancel: (() => void) | null; generation: number }>();
 
 function getOrCreateListener(tabId: string) {
   if (!tabEventListeners.has(tabId)) {
@@ -68,10 +66,7 @@ function cleanupListener(tabId: string) {
 
 // === 辅助函数 ===
 
-function updateLastAssistant(
-  msgs: ChatMessage[],
-  updater: (msg: ChatMessage) => ChatMessage
-): ChatMessage[] | null {
+function updateLastAssistant(msgs: ChatMessage[], updater: (msg: ChatMessage) => ChatMessage): ChatMessage[] | null {
   const lastIdx = msgs.length - 1;
   if (lastIdx < 0 || msgs[lastIdx].role !== "assistant") return null;
   const updated = [...msgs];
@@ -93,9 +88,7 @@ function appendText(blocks: ContentBlock[], text: string): ContentBlock[] {
   return newBlocks;
 }
 
-function toDisplayMessages(
-  msgs: ChatMessage[]
-): main.ConversationDisplayMessage[] {
+function toDisplayMessages(msgs: ChatMessage[]): main.ConversationDisplayMessage[] {
   return msgs
     .filter((m) => !m.streaming)
     .map(
@@ -117,29 +110,19 @@ function toDisplayMessages(
     );
 }
 
-function convertDisplayMessages(
-  displayMsgs: main.ConversationDisplayMessage[]
-): ChatMessage[] {
-  return (displayMsgs || []).map(
-    (dm: main.ConversationDisplayMessage) => ({
-      role: dm.role as "user" | "assistant" | "tool",
-      content: dm.content,
-      blocks: (dm.blocks || []).map(
-        (b: conversation_entity.ContentBlock) => ({
-          type: b.type as "text" | "tool",
-          content: b.content,
-          toolName: b.toolName,
-          toolInput: b.toolInput,
-          status: b.status as
-            | "running"
-            | "completed"
-            | "error"
-            | undefined,
-        })
-      ),
-      streaming: false,
-    })
-  );
+function convertDisplayMessages(displayMsgs: main.ConversationDisplayMessage[]): ChatMessage[] {
+  return (displayMsgs || []).map((dm: main.ConversationDisplayMessage) => ({
+    role: dm.role as "user" | "assistant" | "tool",
+    content: dm.content,
+    blocks: (dm.blocks || []).map((b: conversation_entity.ContentBlock) => ({
+      type: b.type as "text" | "tool",
+      content: b.content,
+      toolName: b.toolName,
+      toolInput: b.toolInput,
+      status: b.status as "running" | "completed" | "error" | undefined,
+    })),
+    streaming: false,
+  }));
 }
 
 // === Store ===
@@ -153,12 +136,7 @@ interface AIState {
   localCLIs: ai.CLIInfo[];
 
   // 配置
-  configure: (
-    providerType: string,
-    apiBase: string,
-    apiKey: string,
-    model: string
-  ) => Promise<void>;
+  configure: (providerType: string, apiBase: string, apiKey: string, model: string) => Promise<void>;
   detectCLIs: () => Promise<void>;
 
   // 发送
@@ -180,10 +158,7 @@ interface AIState {
 }
 
 export const useAIStore = create<AIState>((set, get) => {
-  function updateTab(
-    tabId: string,
-    updates: Partial<TabState>
-  ) {
+  function updateTab(tabId: string, updates: Partial<TabState>) {
     set((state) => {
       const current = state.tabStates[tabId] || {
         messages: [],
@@ -225,9 +200,7 @@ export const useAIStore = create<AIState>((set, get) => {
         await DeleteConversation(id);
         // If there's an open tab for this conversation, close it
         const tabStore = useTabStore.getState();
-        const tab = tabStore.tabs.find(
-          (t) => t.type === "ai" && (t.meta as AITabMeta).conversationId === id
-        );
+        const tab = tabStore.tabs.find((t) => t.type === "ai" && (t.meta as AITabMeta).conversationId === id);
         if (tab) {
           tabStore.closeTab(tab.id);
         }
@@ -253,9 +226,7 @@ export const useAIStore = create<AIState>((set, get) => {
 
       const tabId = `ai-${conversationId}`;
       const state = get();
-      const conv = state.conversations.find(
-        (c) => c.ID === conversationId
-      );
+      const conv = state.conversations.find((c) => c.ID === conversationId);
       const title = conv?.Title || "对话";
 
       // Load messages
@@ -311,9 +282,7 @@ export const useAIStore = create<AIState>((set, get) => {
 
     send: async (content: string) => {
       const tabStore = useTabStore.getState();
-      const activeTab = tabStore.tabs.find(
-        (t) => t.id === tabStore.activeTabId && t.type === "ai"
-      );
+      const activeTab = tabStore.tabs.find((t) => t.id === tabStore.activeTabId && t.type === "ai");
       if (!activeTab) {
         const newTabId = get().openNewConversationTab();
         await get().sendToTab(newTabId, content);
@@ -324,9 +293,7 @@ export const useAIStore = create<AIState>((set, get) => {
 
     clear: () => {
       const tabStore = useTabStore.getState();
-      const activeTab = tabStore.tabs.find(
-        (t) => t.id === tabStore.activeTabId && t.type === "ai"
-      );
+      const activeTab = tabStore.tabs.find((t) => t.id === tabStore.activeTabId && t.type === "ai");
       if (activeTab) {
         tabStore.closeTab(activeTab.id);
       }
@@ -352,10 +319,7 @@ export const useAIStore = create<AIState>((set, get) => {
 
       // First message becomes conversation title
       if (tabState.messages.length === 0) {
-        const title =
-          displayContent.length > 30
-            ? displayContent.slice(0, 30) + "…"
-            : displayContent;
+        const title = displayContent.length > 30 ? displayContent.slice(0, 30) + "…" : displayContent;
         useTabStore.getState().updateTab(tabId, {
           label: title,
           meta: { ...useTabStore.getState().tabs.find((t) => t.id === tabId)!.meta, title } as AITabMeta,
@@ -403,143 +367,143 @@ export const useAIStore = create<AIState>((set, get) => {
       }
 
       const eventName = `ai:event:${convId}`;
-      listener.cancel = EventsOn(
-        eventName,
-        (event: StreamEventData) => {
-          if (myGeneration !== listener.generation) return;
+      listener.cancel = EventsOn(eventName, (event: StreamEventData) => {
+        if (myGeneration !== listener.generation) return;
 
-          const currentTabState = get().tabStates[tabId];
-          if (!currentTabState) return;
-          const msgs = currentTabState.messages;
+        const currentTabState = get().tabStates[tabId];
+        if (!currentTabState) return;
+        const msgs = currentTabState.messages;
 
-          switch (event.type) {
-            case "content": {
-              const updated = updateLastAssistant(msgs, (msg) => ({
-                ...msg,
-                content: msg.content + (event.content || ""),
-                blocks: appendText(msg.blocks, event.content || ""),
-              }));
-              if (updated) updateTab(tabId, { messages: updated });
-              break;
-            }
+        switch (event.type) {
+          case "content": {
+            const updated = updateLastAssistant(msgs, (msg) => ({
+              ...msg,
+              content: msg.content + (event.content || ""),
+              blocks: appendText(msg.blocks, event.content || ""),
+            }));
+            if (updated) updateTab(tabId, { messages: updated });
+            break;
+          }
 
-            case "tool_start": {
-              const updated = updateLastAssistant(msgs, (msg) => ({
-                ...msg,
-                blocks: [
-                  ...msg.blocks,
-                  {
-                    type: "tool" as const,
-                    content: "",
-                    toolName: event.tool_name || "Tool",
-                    toolInput: event.tool_input || "",
-                    status: "running" as const,
-                  },
-                ],
-              }));
-              if (updated) updateTab(tabId, { messages: updated });
-              break;
-            }
+          case "tool_start": {
+            const updated = updateLastAssistant(msgs, (msg) => ({
+              ...msg,
+              blocks: [
+                ...msg.blocks,
+                {
+                  type: "tool" as const,
+                  content: "",
+                  toolName: event.tool_name || "Tool",
+                  toolInput: event.tool_input || "",
+                  status: "running" as const,
+                },
+              ],
+            }));
+            if (updated) updateTab(tabId, { messages: updated });
+            break;
+          }
 
-            case "tool_result": {
-              const updated = updateLastAssistant(msgs, (msg) => {
-                const newBlocks = [...msg.blocks];
-                let matchIdx = -1;
+          case "tool_result": {
+            const updated = updateLastAssistant(msgs, (msg) => {
+              const newBlocks = [...msg.blocks];
+              let matchIdx = -1;
+              for (let i = newBlocks.length - 1; i >= 0; i--) {
+                const b = newBlocks[i];
+                if (b.type === "tool" && b.status === "running" && b.toolName === event.tool_name) {
+                  matchIdx = i;
+                  break;
+                }
+              }
+              if (matchIdx === -1) {
                 for (let i = newBlocks.length - 1; i >= 0; i--) {
                   const b = newBlocks[i];
-                  if (b.type === "tool" && b.status === "running" && b.toolName === event.tool_name) {
+                  if (b.type === "tool" && b.status === "running") {
                     matchIdx = i;
                     break;
                   }
                 }
-                if (matchIdx === -1) {
-                  for (let i = newBlocks.length - 1; i >= 0; i--) {
-                    const b = newBlocks[i];
-                    if (b.type === "tool" && b.status === "running") {
-                      matchIdx = i;
-                      break;
-                    }
-                  }
-                }
-                if (matchIdx !== -1) {
-                  newBlocks[matchIdx] = { ...newBlocks[matchIdx], content: event.content || "", status: "completed" };
-                }
-                return { ...msg, blocks: newBlocks };
-              });
-              if (updated) updateTab(tabId, { messages: updated });
-              break;
-            }
+              }
+              if (matchIdx !== -1) {
+                newBlocks[matchIdx] = { ...newBlocks[matchIdx], content: event.content || "", status: "completed" };
+              }
+              return { ...msg, blocks: newBlocks };
+            });
+            if (updated) updateTab(tabId, { messages: updated });
+            break;
+          }
 
-            case "tool_confirm": {
-              const confirmName = event.tool_name || "run_command";
-              const updated = updateLastAssistant(msgs, (msg) => {
-                const newBlocks = [...msg.blocks];
-                let existIdx = -1;
-                for (let i = newBlocks.length - 1; i >= 0; i--) {
-                  if (newBlocks[i].type === "tool" && newBlocks[i].status === "running") {
-                    existIdx = i;
-                    break;
-                  }
+          case "tool_confirm": {
+            const confirmName = event.tool_name || "run_command";
+            const updated = updateLastAssistant(msgs, (msg) => {
+              const newBlocks = [...msg.blocks];
+              let existIdx = -1;
+              for (let i = newBlocks.length - 1; i >= 0; i--) {
+                if (newBlocks[i].type === "tool" && newBlocks[i].status === "running") {
+                  existIdx = i;
+                  break;
                 }
-                if (existIdx !== -1) {
-                  newBlocks[existIdx] = {
-                    ...newBlocks[existIdx],
-                    toolName: confirmName,
-                    toolInput: event.tool_input || newBlocks[existIdx].toolInput,
-                    status: "pending_confirm" as const,
-                    confirmId: event.confirm_id,
-                  };
-                } else {
-                  newBlocks.push({
-                    type: "tool" as const,
-                    content: "",
-                    toolName: confirmName,
-                    toolInput: event.tool_input || "",
-                    status: "pending_confirm" as const,
-                    confirmId: event.confirm_id,
-                  });
-                }
-                return { ...msg, blocks: newBlocks };
-              });
-              if (updated) updateTab(tabId, { messages: updated });
-              break;
-            }
-
-            case "tool_confirm_result": {
-              const updated = updateLastAssistant(msgs, (msg) => {
-                const newBlocks = msg.blocks.map((b) =>
-                  b.confirmId === event.confirm_id && b.status === "pending_confirm"
-                    ? { ...b, status: event.content === "deny" ? ("error" as const) : ("running" as const) }
-                    : b
-                );
-                return { ...msg, blocks: newBlocks };
-              });
-              if (updated) updateTab(tabId, { messages: updated });
-              break;
-            }
-
-            case "done": {
-              const updated = updateLastAssistant(msgs, (msg) => {
-                const newBlocks = msg.blocks.map((b) =>
-                  b.type === "tool" && (b.status === "running" || b.status === "pending_confirm")
-                    ? { ...b, status: "completed" as const }
-                    : b
-                );
-                return { ...msg, blocks: newBlocks, streaming: false };
-              });
-              if (updated) {
-                updateTab(tabId, { messages: updated, sending: false });
+              }
+              if (existIdx !== -1) {
+                newBlocks[existIdx] = {
+                  ...newBlocks[existIdx],
+                  toolName: confirmName,
+                  toolInput: event.tool_input || newBlocks[existIdx].toolInput,
+                  status: "pending_confirm" as const,
+                  confirmId: event.confirm_id,
+                };
               } else {
-                updateTab(tabId, { sending: false });
+                newBlocks.push({
+                  type: "tool" as const,
+                  content: "",
+                  toolName: confirmName,
+                  toolInput: event.tool_input || "",
+                  status: "pending_confirm" as const,
+                  confirmId: event.confirm_id,
+                });
               }
+              return { ...msg, blocks: newBlocks };
+            });
+            if (updated) updateTab(tabId, { messages: updated });
+            break;
+          }
 
-              // Persist messages
-              const finalMsgs = get().tabStates[tabId]?.messages || [];
-              if (convId) {
-                SaveConversationMessages(convId, toDisplayMessages(finalMsgs)).catch(() => {});
-              }
-              // Refresh conversations (title may have updated)
-              get().fetchConversations().then(() => {
+          case "tool_confirm_result": {
+            const updated = updateLastAssistant(msgs, (msg) => {
+              const newBlocks = msg.blocks.map((b) =>
+                b.confirmId === event.confirm_id && b.status === "pending_confirm"
+                  ? { ...b, status: event.content === "deny" ? ("error" as const) : ("running" as const) }
+                  : b
+              );
+              return { ...msg, blocks: newBlocks };
+            });
+            if (updated) updateTab(tabId, { messages: updated });
+            break;
+          }
+
+          case "done": {
+            const updated = updateLastAssistant(msgs, (msg) => {
+              const newBlocks = msg.blocks.map((b) =>
+                b.type === "tool" && (b.status === "running" || b.status === "pending_confirm")
+                  ? { ...b, status: "completed" as const }
+                  : b
+              );
+              return { ...msg, blocks: newBlocks, streaming: false };
+            });
+            if (updated) {
+              updateTab(tabId, { messages: updated, sending: false });
+            } else {
+              updateTab(tabId, { sending: false });
+            }
+
+            // Persist messages
+            const finalMsgs = get().tabStates[tabId]?.messages || [];
+            if (convId) {
+              SaveConversationMessages(convId, toDisplayMessages(finalMsgs)).catch(() => {});
+            }
+            // Refresh conversations (title may have updated)
+            get()
+              .fetchConversations()
+              .then(() => {
                 const convs = get().conversations;
                 const currentTab = useTabStore.getState().tabs.find((t) => t.id === tabId);
                 if (currentTab) {
@@ -555,25 +519,24 @@ export const useAIStore = create<AIState>((set, get) => {
                   }
                 }
               });
-              break;
-            }
+            break;
+          }
 
-            case "error": {
-              const updated = updateLastAssistant(msgs, (msg) => ({
-                ...msg,
-                blocks: appendText(msg.blocks, `\n\n**Error:** ${event.error}`),
-                streaming: false,
-              }));
-              if (updated) {
-                updateTab(tabId, { messages: updated, sending: false });
-              } else {
-                updateTab(tabId, { sending: false });
-              }
-              break;
+          case "error": {
+            const updated = updateLastAssistant(msgs, (msg) => ({
+              ...msg,
+              blocks: appendText(msg.blocks, `\n\n**Error:** ${event.error}`),
+              streaming: false,
+            }));
+            if (updated) {
+              updateTab(tabId, { messages: updated, sending: false });
+            } else {
+              updateTab(tabId, { sending: false });
             }
+            break;
           }
         }
-      );
+      });
 
       const apiMessages = newMessages.map((m) => {
         return new ai.Message({
@@ -598,9 +561,7 @@ export const useAIStore = create<AIState>((set, get) => {
     },
 
     getTabState: (tabId: string) => {
-      return (
-        get().tabStates[tabId] || { messages: [], sending: false }
-      );
+      return get().tabStates[tabId] || { messages: [], sending: false };
     },
   };
 });
@@ -616,10 +577,7 @@ registerTabCloseHook((tab) => {
 
   // Save messages
   if (meta.conversationId && tabState?.messages.length) {
-    SaveConversationMessages(
-      meta.conversationId,
-      toDisplayMessages(tabState.messages)
-    ).catch(() => {});
+    SaveConversationMessages(meta.conversationId, toDisplayMessages(tabState.messages)).catch(() => {});
   }
 
   // Clean up event listener
@@ -680,3 +638,27 @@ async function restoreAITabs(tabs: Tab[]) {
 registerTabRestoreHook("ai", (tabs) => {
   restoreAITabs(tabs).catch(() => {});
 });
+
+// === AI Send on Enter 设置 ===
+
+const SEND_ON_ENTER_KEY = "ai_send_on_enter";
+
+export function getAISendOnEnter(): boolean {
+  const val = localStorage.getItem(SEND_ON_ENTER_KEY);
+  return val === null ? true : val === "true";
+}
+
+export function setAISendOnEnter(value: boolean) {
+  localStorage.setItem(SEND_ON_ENTER_KEY, String(value));
+  window.dispatchEvent(new Event("ai-send-on-enter-change"));
+}
+
+export function useAISendOnEnter(): boolean {
+  const [value, setValue] = useState(getAISendOnEnter);
+  useEffect(() => {
+    const handler = () => setValue(getAISendOnEnter());
+    window.addEventListener("ai-send-on-enter-change", handler);
+    return () => window.removeEventListener("ai-send-on-enter-change", handler);
+  }, []);
+  return value;
+}

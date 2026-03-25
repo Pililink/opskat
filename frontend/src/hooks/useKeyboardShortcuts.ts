@@ -8,10 +8,7 @@ interface ShortcutHandlers {
   onToggleSidebar: () => void;
 }
 
-export function useKeyboardShortcuts({
-  onToggleAIPanel,
-  onToggleSidebar,
-}: ShortcutHandlers) {
+export function useKeyboardShortcuts({ onToggleAIPanel, onToggleSidebar }: ShortcutHandlers) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const { shortcuts, isRecording } = useShortcutStore.getState();

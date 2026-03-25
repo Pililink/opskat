@@ -2,13 +2,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Play, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useQueryStore } from "@/stores/queryStore";
 import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
@@ -44,9 +38,7 @@ export function SqlEditorTab({ tabId, innerTabId }: SqlEditorTabProps) {
   const persistedDb = innerTab?.type === "sql" ? innerTab.selectedDb : undefined;
 
   const [sql, setSql] = useState(persistedSql || "");
-  const [selectedDb, setSelectedDb] = useState(
-    persistedDb || queryMeta?.defaultDatabase || ""
-  );
+  const [selectedDb, setSelectedDb] = useState(persistedDb || queryMeta?.defaultDatabase || "");
   const [columns, setColumns] = useState<string[]>([]);
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [affectedRows, setAffectedRows] = useState<number | null>(null);
@@ -135,11 +127,7 @@ export function SqlEditorTab({ tabId, innerTabId }: SqlEditorTabProps) {
             onClick={execute}
             disabled={loading || !sql.trim()}
           >
-            {loading ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Play className="h-3.5 w-3.5" />
-            )}
+            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
             {loading ? t("query.executing") : t("query.execute")}
           </Button>
           <Select value={selectedDb} onValueChange={setSelectedDb}>
@@ -182,13 +170,7 @@ export function SqlEditorTab({ tabId, innerTabId }: SqlEditorTabProps) {
             {t("query.rows", { count: rows.length })}
           </div>
         )}
-        <QueryResultTable
-          columns={columns}
-          rows={rows}
-          loading={loading}
-          error={error ?? undefined}
-          showRowNumber
-        />
+        <QueryResultTable columns={columns} rows={rows} loading={loading} error={error ?? undefined} showRowNumber />
       </div>
 
       {/* Dangerous SQL confirmation */}

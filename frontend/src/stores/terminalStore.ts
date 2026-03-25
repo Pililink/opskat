@@ -77,15 +77,10 @@ export function getSessionIds(node: SplitNode): string[] {
 }
 
 // Helper: replace a leaf node (terminal, pending, or connecting) by ID
-function replaceNode(
-  tree: SplitNode,
-  id: string,
-  replacement: SplitNode
-): SplitNode {
+function replaceNode(tree: SplitNode, id: string, replacement: SplitNode): SplitNode {
   if (tree.type === "terminal" && tree.sessionId === id) return replacement;
   if (tree.type === "pending" && tree.pendingId === id) return replacement;
-  if (tree.type === "connecting" && tree.connectionId === id)
-    return replacement;
+  if (tree.type === "connecting" && tree.connectionId === id) return replacement;
   if (tree.type === "split") {
     return {
       ...tree,
@@ -113,18 +108,13 @@ function removeNode(tree: SplitNode, id: string): SplitNode | null {
 }
 
 // Helper: update ratio at path
-function setRatioAtPath(
-  tree: SplitNode,
-  path: number[],
-  ratio: number
-): SplitNode {
+function setRatioAtPath(tree: SplitNode, path: number[], ratio: number): SplitNode {
   if (path.length === 0 && tree.type === "split") {
     return { ...tree, ratio };
   }
   if (tree.type === "split" && path.length > 0) {
     const [head, ...rest] = path;
-    if (head === 0)
-      return { ...tree, first: setRatioAtPath(tree.first, rest, ratio) };
+    if (head === 0) return { ...tree, first: setRatioAtPath(tree.first, rest, ratio) };
     return { ...tree, second: setRatioAtPath(tree.second, rest, ratio) };
   }
   return tree;
@@ -158,88 +148,91 @@ export function getTerminalActiveAssetIds(): Set<number> {
 function setupConnectionListener(
   connectionId: string,
   onConnected: (sessionId: string) => void,
-  onFinished?: () => void,
+  onFinished?: () => void
 ) {
   const eventName = `ssh:connect:${connectionId}`;
-  EventsOn(eventName, (event: {
-    type: string;
-    step?: string;
-    message?: string;
-    sessionId?: string;
-    error?: string;
-    authFailed?: boolean;
-    challengeId?: string;
-    prompts?: string[];
-    echo?: boolean[];
-  }) => {
-    const state = useTerminalStore.getState();
-    const conn = state.connections[connectionId];
-    if (!conn) return;
+  EventsOn(
+    eventName,
+    (event: {
+      type: string;
+      step?: string;
+      message?: string;
+      sessionId?: string;
+      error?: string;
+      authFailed?: boolean;
+      challengeId?: string;
+      prompts?: string[];
+      echo?: boolean[];
+    }) => {
+      const state = useTerminalStore.getState();
+      const conn = state.connections[connectionId];
+      if (!conn) return;
 
-    switch (event.type) {
-      case "progress":
-        useTerminalStore.setState((s) => ({
-          connections: {
-            ...s.connections,
-            [connectionId]: {
-              ...s.connections[connectionId],
-              currentStep: (event.step as ConnectionStep) || s.connections[connectionId].currentStep,
-              logs: [
-                ...s.connections[connectionId].logs,
-                { message: event.message || "", timestamp: Date.now(), type: "info" as const },
-              ],
-            },
-          },
-        }));
-        break;
-
-      case "connected":
-        onConnected(event.sessionId!);
-        EventsOff(eventName);
-        onFinished?.();
-        break;
-
-      case "error":
-        useTerminalStore.setState((s) => ({
-          connections: {
-            ...s.connections,
-            [connectionId]: {
-              ...s.connections[connectionId],
-              status: "error",
-              error: event.error,
-              authFailed: event.authFailed,
-              logs: [
-                ...s.connections[connectionId].logs,
-                { message: event.error || "连接失败", timestamp: Date.now(), type: "error" as const },
-              ],
-            },
-          },
-        }));
-        onFinished?.();
-        break;
-
-      case "auth_challenge":
-        useTerminalStore.setState((s) => ({
-          connections: {
-            ...s.connections,
-            [connectionId]: {
-              ...s.connections[connectionId],
-              status: "auth_challenge",
-              challenge: {
-                challengeId: event.challengeId!,
-                prompts: event.prompts || [],
-                echo: event.echo || [],
+      switch (event.type) {
+        case "progress":
+          useTerminalStore.setState((s) => ({
+            connections: {
+              ...s.connections,
+              [connectionId]: {
+                ...s.connections[connectionId],
+                currentStep: (event.step as ConnectionStep) || s.connections[connectionId].currentStep,
+                logs: [
+                  ...s.connections[connectionId].logs,
+                  { message: event.message || "", timestamp: Date.now(), type: "info" as const },
+                ],
               },
-              logs: [
-                ...s.connections[connectionId].logs,
-                { message: "等待用户输入认证信息...", timestamp: Date.now(), type: "info" as const },
-              ],
             },
-          },
-        }));
-        break;
+          }));
+          break;
+
+        case "connected":
+          onConnected(event.sessionId!);
+          EventsOff(eventName);
+          onFinished?.();
+          break;
+
+        case "error":
+          useTerminalStore.setState((s) => ({
+            connections: {
+              ...s.connections,
+              [connectionId]: {
+                ...s.connections[connectionId],
+                status: "error",
+                error: event.error,
+                authFailed: event.authFailed,
+                logs: [
+                  ...s.connections[connectionId].logs,
+                  { message: event.error || "连接失败", timestamp: Date.now(), type: "error" as const },
+                ],
+              },
+            },
+          }));
+          onFinished?.();
+          break;
+
+        case "auth_challenge":
+          useTerminalStore.setState((s) => ({
+            connections: {
+              ...s.connections,
+              [connectionId]: {
+                ...s.connections[connectionId],
+                status: "auth_challenge",
+                challenge: {
+                  challengeId: event.challengeId!,
+                  prompts: event.prompts || [],
+                  echo: event.echo || [],
+                },
+                logs: [
+                  ...s.connections[connectionId].logs,
+                  { message: "等待用户输入认证信息...", timestamp: Date.now(), type: "info" as const },
+                ],
+              },
+            },
+          }));
+          break;
+      }
     }
-  });
+  );
 }
 
 interface TerminalState {
@@ -248,10 +241,7 @@ interface TerminalState {
   connectingAssetIds: Set<number>;
   connections: Record<string, ConnectionState>;
 
-  connect: (
-    asset: asset_entity.Asset,
-    password?: string,
-  ) => Promise<string>;
+  connect: (asset: asset_entity.Asset, password?: string) => Promise<string>;
   reconnect: (tabId: string) => void;
   disconnect: (sessionId: string) => void;
   markClosed: (sessionId: string) => void;
@@ -263,10 +253,7 @@ interface TerminalState {
 
   // Split pane actions
   setActivePaneId: (tabId: string, paneId: string) => void;
-  splitPane: (
-    tabId: string,
-    direction: "horizontal" | "vertical"
-  ) => void;
+  splitPane: (tabId: string, direction: "horizontal" | "vertical") => void;
   closePane: (tabId: string, sessionId: string) => void;
   setSplitRatio: (tabId: string, path: number[], ratio: number) => void;
 }
@@ -284,7 +271,9 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     try {
       const cfg = JSON.parse(asset.Config || "{}");
       metadata = { host: cfg.host || "", port: cfg.port || 22, username: cfg.username || "" };
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
 
     const tabStore = useTabStore.getState();
 
@@ -322,7 +311,15 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         type: "terminal",
         label: assetPath,
         icon: assetIcon || undefined,
-        meta: { type: "terminal", assetId, assetName: assetPath, assetIcon: assetIcon || "", host: metadata?.host || "", port: metadata?.port || 22, username: metadata?.username || "" },
+        meta: {
+          type: "terminal",
+          assetId,
+          assetName: assetPath,
+          assetIcon: assetIcon || "",
+          host: metadata?.host || "",
+          port: metadata?.port || 22,
+          username: metadata?.username || "",
+        },
       });
 
       // Create business data
@@ -386,7 +383,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
             next.delete(assetId);
             return { connectingAssetIds: next };
           });
-        },
+        }
       );
 
       return connectionId;
@@ -424,42 +421,41 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       rows: 24,
     });
 
-    ConnectSSHAsync(req).then((connectionId) => {
-      set((s) => {
-        const d = s.tabData[tabId];
-        if (!d) return s;
+    ConnectSSHAsync(req)
+      .then((connectionId) => {
+        set((s) => {
+          const d = s.tabData[tabId];
+          if (!d) return s;
 
-        const newTree = replaceNode(d.splitTree, sessionId, {
-          type: "connecting",
-          connectionId,
+          const newTree = replaceNode(d.splitTree, sessionId, {
+            type: "connecting",
+            connectionId,
+          });
+
+          const newPanes = { ...d.panes };
+          delete newPanes[sessionId];
+
+          return {
+            tabData: {
+              ...s.tabData,
+              [tabId]: { ...d, splitTree: newTree, activePaneId: connectionId, panes: newPanes },
+            },
+            connections: {
+              ...s.connections,
+              [connectionId]: {
+                connectionId,
+                assetId: meta.assetId,
+                assetName: meta.assetName,
+                password: "",
+                logs: [],
+                status: "connecting" as const,
+                currentStep: "resolve" as const,
+              },
+            },
+          };
         });
 
-        const newPanes = { ...d.panes };
-        delete newPanes[sessionId];
-
-        return {
-          tabData: {
-            ...s.tabData,
-            [tabId]: { ...d, splitTree: newTree, activePaneId: connectionId, panes: newPanes },
-          },
-          connections: {
-            ...s.connections,
-            [connectionId]: {
-              connectionId,
-              assetId: meta.assetId,
-              assetName: meta.assetName,
-              password: "",
-              logs: [],
-              status: "connecting" as const,
-              currentStep: "resolve" as const,
-            },
-          },
-        };
-      });
-
-      setupConnectionListener(
-        connectionId,
-        (newSessionId) => {
+        setupConnectionListener(connectionId, (newSessionId) => {
           set((s) => {
             const d = s.tabData[tabId];
             if (!d) return s;
@@ -488,11 +484,11 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
               connections: newConnections,
             };
           });
-        },
-      );
-    }).catch((err) => {
-      console.error("Reconnect failed:", err);
-    });
+        });
+      })
+      .catch((err) => {
+        console.error("Reconnect failed:", err);
+      });
   },
 
   retryConnect: (connectionId, password) => {
@@ -708,8 +704,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     }
 
     const remaining = getSessionIds(newTree);
-    const newActivePaneId =
-      data.activePaneId === sessionId ? remaining[0] : data.activePaneId;
+    const newActivePaneId = data.activePaneId === sessionId ? remaining[0] : data.activePaneId;
 
     const newPanes = { ...data.panes };
     delete newPanes[sessionId];

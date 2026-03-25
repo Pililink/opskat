@@ -12,6 +12,7 @@ interface PolicyGroupSelectorProps {
   policyType: PolicyType;
   selectedIds: number[];
   onChange: (ids: number[]) => void;
+  refreshKey?: number;
 }
 
 const policyTypeMap: Record<PolicyType, string> = {
@@ -20,7 +21,7 @@ const policyTypeMap: Record<PolicyType, string> = {
   redis: "redis",
 };
 
-export function PolicyGroupSelector({ policyType, selectedIds, onChange }: PolicyGroupSelectorProps) {
+export function PolicyGroupSelector({ policyType, selectedIds, onChange, refreshKey }: PolicyGroupSelectorProps) {
   const { t } = useTranslation();
   const [groups, setGroups] = useState<policy_group_entity.PolicyGroupItem[]>([]);
   const [open, setOpen] = useState(false);
@@ -36,7 +37,7 @@ export function PolicyGroupSelector({ policyType, selectedIds, onChange }: Polic
 
   useEffect(() => {
     fetchGroups();
-  }, [policyType]);
+  }, [policyType, refreshKey]);
 
   const selectedGroups = groups.filter((g) => selectedIds.includes(g.id));
   const availableGroups = groups.filter((g) => !selectedIds.includes(g.id));
@@ -81,16 +82,17 @@ export function PolicyGroupSelector({ policyType, selectedIds, onChange }: Polic
           </PopoverTrigger>
           <PopoverContent className="w-56 p-1" align="start">
             {availableGroups.length === 0 ? (
-              <div className="px-2 py-3 text-center text-xs text-muted-foreground">
-                {t("asset.policyGroup.noMore")}
-              </div>
+              <div className="px-2 py-3 text-center text-xs text-muted-foreground">{t("asset.policyGroup.noMore")}</div>
             ) : (
               <div className="max-h-48 overflow-y-auto">
                 {availableGroups.map((g) => (
                   <button
                     key={g.id}
                     className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent"
-                    onClick={() => { handleAdd(g.id); setOpen(false); }}
+                    onClick={() => {
+                      handleAdd(g.id);
+                      setOpen(false);
+                    }}
                   >
                     {g.builtin && <Lock className="h-3 w-3 text-muted-foreground shrink-0" />}
                     <div className="flex-1 text-left">

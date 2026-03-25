@@ -11,17 +11,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ListAuditLogs, ListAuditSessions, GetSSHPoolConnections } from "../../../wailsjs/go/main/App";
 import { audit_entity, audit_repo, sshpool } from "../../../wailsjs/go/models";
@@ -44,18 +35,14 @@ function decisionSourceBadge(source: string): { label: string; className: string
       return { label: "policy", className: "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300" };
     case "policy_deny":
       return { label: "policy", className: "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300" };
-    case "session_allow":
-      return { label: "session", className: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300" };
     case "user_allow":
       return { label: "user", className: "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300" };
     case "user_deny":
       return { label: "user", className: "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300" };
-    case "auto_allow":
-      return { label: "auto", className: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300" };
-    case "plan_allow":
-      return { label: "plan", className: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300" };
-    case "plan_deny":
-      return { label: "plan", className: "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300" };
+    case "grant_allow":
+      return { label: "grant", className: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300" };
+    case "grant_deny":
+      return { label: "grant", className: "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300" };
     default:
       return { label: source || "-", className: "bg-muted" };
   }
@@ -109,9 +96,7 @@ export function AuditLogPage() {
     }
     if (timeRange === "0") return 0; // 全部
     const preset = TIME_PRESETS.find((r) => r.value === timeRange);
-    return preset
-      ? Math.floor(Date.now() / 1000) - preset.seconds
-      : 0;
+    return preset ? Math.floor(Date.now() / 1000) - preset.seconds : 0;
   }, [timeRange, customStart]);
 
   const computeEndTime = useCallback(() => {
@@ -199,6 +184,14 @@ export function AuditLogPage() {
     return groups;
   }, [sessions]);
 
+  // 从当前日志中聚合 session 已允许的模式（grant_submit 记录）
+  const sessionApprovedPatterns = useMemo(() => {
+    if (!sessionFilter) return [];
+    return logs
+      .filter((l) => l.ToolName === "grant_submit" && l.Command)
+      .map((l) => ({ asset: l.AssetName || "-", patterns: l.Command }));
+  }, [logs, sessionFilter]);
+
   const groupOrder = ["today", "yesterday", "thisWeek", "earlier"] as const;
   const groupLabels: Record<string, string> = {
     today: t("audit.sessionGroupToday"),
@@ -213,7 +206,9 @@ export function AuditLogPage() {
       <div className="px-4 py-3 border-b flex items-center justify-between gap-4">
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="h-8">
-            <TabsTrigger value="logs" className="text-xs px-3">{t("audit.tabLogs")}</TabsTrigger>
+            <TabsTrigger value="logs" className="text-xs px-3">
+              {t("audit.tabLogs")}
+            </TabsTrigger>
             <TabsTrigger value="pool" className="text-xs px-3">
               <Unplug className="h-3.5 w-3.5 mr-1" />
               {t("audit.tabPool")}
@@ -269,7 +264,10 @@ export function AuditLogPage() {
               <PopoverContent className="w-auto p-3" align="end">
                 {/* 快捷预设 */}
                 <div className="flex flex-wrap gap-1.5 mb-3">
-                  {[{ value: "0", label: t("audit.timeAll") }, ...TIME_PRESETS.map((p) => ({ value: p.value, label: t(`audit.time${p.value}`) }))].map((p) => (
+                  {[
+                    { value: "0", label: t("audit.timeAll") },
+                    ...TIME_PRESETS.map((p) => ({ value: p.value, label: t(`audit.time${p.value}`) })),
+                  ].map((p) => (
                     <Button
                       key={p.value}
                       variant={timeRange === p.value ? "default" : "outline"}
@@ -318,9 +316,7 @@ export function AuditLogPage() {
                 </div>
               </PopoverContent>
             </Popover>
-            <span className="text-xs text-muted-foreground">
-              {t("audit.total", { total })}
-            </span>
+            <span className="text-xs text-muted-foreground">{t("audit.total", { total })}</span>
             <Button variant="ghost" size="icon" className="h-8 w-8" onClick={fetchLogs} disabled={loading}>
               <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
             </Button>
@@ -337,6 +333,23 @@ export function AuditLogPage() {
       {/* Logs tab content */}
       {activeTab === "logs" && (
         <>
+          {/* Session 已允许模式汇总 */}
+          {sessionApprovedPatterns.length > 0 && (
+            <div className="px-4 py-2 border-b bg-blue-50 dark:bg-blue-950/30 text-xs">
+              <span className="font-medium text-blue-700 dark:text-blue-300">{t("audit.sessionPatterns")}:</span>
+              <div className="flex flex-wrap gap-1.5 mt-1">
+                {sessionApprovedPatterns.map((p, i) => (
+                  <span
+                    key={i}
+                    className="inline-flex items-center gap-1 bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-200 px-2 py-0.5 rounded font-mono"
+                  >
+                    {p.asset !== "-" && <span className="text-blue-500">{p.asset}:</span>}
+                    {p.patterns}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="flex-1 overflow-auto">
             <table className="w-full text-sm">
               <thead className="sticky top-0 bg-background border-b">
@@ -361,10 +374,7 @@ export function AuditLogPage() {
                 {logs.map((log) => {
                   const badge = decisionSourceBadge(log.DecisionSource);
                   return (
-                    <tr
-                      key={log.ID}
-                      className="border-b hover:bg-muted/50 transition-colors"
-                    >
+                    <tr key={log.ID} className="border-b hover:bg-muted/50 transition-colors">
                       <td className="px-4 py-2 text-xs text-muted-foreground whitespace-nowrap">
                         {formatTime(log.Createtime)}
                       </td>
@@ -375,10 +385,17 @@ export function AuditLogPage() {
                       </td>
                       <td className="px-4 py-2">
                         {log.DecisionSource ? (
-                          <span className={`inline-block px-1.5 py-0.5 text-xs rounded font-mono ${badge.className}`}>
+                          <span
+                            className={`inline-block px-1.5 py-0.5 text-xs rounded font-mono ${badge.className}`}
+                            title={
+                              log.MatchedPattern ? `${t("audit.matchedPattern")}: ${log.MatchedPattern}` : undefined
+                            }
+                          >
                             {log.Decision === "allow" ? "\u2713" : "\u2717"} {badge.label}
                           </span>
-                        ) : "-"}
+                        ) : (
+                          "-"
+                        )}
                       </td>
                       <td className="px-4 py-2 text-center">
                         {log.Success === 1 ? (
@@ -388,12 +405,7 @@ export function AuditLogPage() {
                         )}
                       </td>
                       <td className="px-4 py-2">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          onClick={() => setDetailLog(log)}
-                        >
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setDetailLog(log)}>
                           <Info className="h-3.5 w-3.5" />
                         </Button>
                       </td>
@@ -452,21 +464,20 @@ export function AuditLogPage() {
                 </tr>
               )}
               {poolEntries.map((entry) => (
-                <tr
-                  key={entry.asset_id}
-                  className="border-b hover:bg-muted/50 transition-colors"
-                >
+                <tr key={entry.asset_id} className="border-b hover:bg-muted/50 transition-colors">
                   <td className="px-4 py-2 font-mono">{entry.asset_id}</td>
                   <td className="px-4 py-2">
-                    <span className={`inline-block px-1.5 py-0.5 text-xs rounded font-mono ${
-                      entry.ref_count > 0 ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300" : "bg-muted"
-                    }`}>
+                    <span
+                      className={`inline-block px-1.5 py-0.5 text-xs rounded font-mono ${
+                        entry.ref_count > 0
+                          ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300"
+                          : "bg-muted"
+                      }`}
+                    >
                       {entry.ref_count}
                     </span>
                   </td>
-                  <td className="px-4 py-2 text-xs text-muted-foreground">
-                    {formatTime(entry.last_used)}
-                  </td>
+                  <td className="px-4 py-2 text-xs text-muted-foreground">{formatTime(entry.last_used)}</td>
                 </tr>
               ))}
             </tbody>
@@ -488,8 +499,7 @@ export function AuditLogPage() {
                   <span className="font-mono">{detailLog.ToolName}</span>
                 </div>
                 <div>
-                  <span className="text-muted-foreground">{t("audit.assetName")}:</span>{" "}
-                  {detailLog.AssetName || "-"}
+                  <span className="text-muted-foreground">{t("audit.assetName")}:</span> {detailLog.AssetName || "-"}
                 </div>
                 <div>
                   <span className="text-muted-foreground">{t("audit.result")}:</span>{" "}
@@ -520,8 +530,7 @@ export function AuditLogPage() {
                   </div>
                 )}
                 <div className="col-span-2">
-                  <span className="text-muted-foreground">{t("audit.time")}:</span>{" "}
-                  {formatTime(detailLog.Createtime)}
+                  <span className="text-muted-foreground">{t("audit.time")}:</span> {formatTime(detailLog.Createtime)}
                 </div>
               </div>
 

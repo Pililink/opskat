@@ -96,9 +96,14 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
         setDenyList(policy.deny_list || []);
       }
     } catch {
-      setAllowList([]); setDenyList([]); setPolicyGroups([]);
-      setQueryAllowTypes([]); setQueryDenyTypes([]); setQueryDenyFlags([]);
-      setRedisAllowList([]); setRedisDenyList([]);
+      setAllowList([]);
+      setDenyList([]);
+      setPolicyGroups([]);
+      setQueryAllowTypes([]);
+      setQueryDenyTypes([]);
+      setQueryDenyFlags([]);
+      setRedisAllowList([]);
+      setRedisDenyList([]);
     }
     // input states are managed internally by PolicyTagEditor
   }, [asset.ID, asset.CmdPolicy, asset.Type]);
@@ -127,7 +132,12 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
     await savePolicy({ allow_list: newAllow, deny_list: newDeny }, groups);
   };
 
-  const handleSaveQueryPolicy = async (newAllowTypes: string[], newDenyTypes: string[], newDenyFlags: string[], groups?: number[]) => {
+  const handleSaveQueryPolicy = async (
+    newAllowTypes: string[],
+    newDenyTypes: string[],
+    newDenyFlags: string[],
+    groups?: number[]
+  ) => {
     await savePolicy({ allow_types: newAllowTypes, deny_types: newDenyTypes, deny_flags: newDenyFlags }, groups);
   };
 
@@ -156,7 +166,10 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
         setQueryAllowTypes(policy.allow_types || []);
         setQueryDenyTypes(policy.deny_types || []);
         setQueryDenyFlags(policy.deny_flags || []);
-        await savePolicy({ allow_types: policy.allow_types, deny_types: policy.deny_types, deny_flags: policy.deny_flags }, groups);
+        await savePolicy(
+          { allow_types: policy.allow_types, deny_types: policy.deny_types, deny_flags: policy.deny_flags },
+          groups
+        );
       } else if (asset.Type === "redis") {
         setRedisAllowList(policy.allow_list || []);
         setRedisDenyList(policy.deny_list || []);
@@ -180,7 +193,9 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
     if (asset.Type === "database") dbConfig = parsed;
     else if (asset.Type === "redis") redisConfig = parsed;
     else sshConfig = parsed;
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   const jumpHostName = sshConfig?.jump_host_id
     ? assets.find((a) => a.ID === sshConfig!.jump_host_id)?.Name || `ID:${sshConfig.jump_host_id}`
@@ -202,9 +217,7 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
           </div>
           <div>
             <h2 className="font-semibold leading-tight">{asset.Name}</h2>
-            <span className="text-xs text-muted-foreground uppercase">
-              {asset.Type}
-            </span>
+            <span className="text-xs text-muted-foreground uppercase">{asset.Type}</span>
           </div>
         </div>
         <div className="flex gap-1.5">
@@ -257,8 +270,13 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
                   sshConfig.auth_type === "password"
                     ? t("asset.authPassword") + (sshConfig.password ? " ●" : "")
                     : sshConfig.auth_type === "key"
-                    ? t("asset.authKey") + (sshConfig.credential_id ? ` (${t("asset.keySourceManaged")})` : sshConfig.private_keys?.length ? ` (${t("asset.keySourceFile")})` : "")
-                    : sshConfig.auth_type
+                      ? t("asset.authKey") +
+                        (sshConfig.credential_id
+                          ? ` (${t("asset.keySourceManaged")})`
+                          : sshConfig.private_keys?.length
+                            ? ` (${t("asset.keySourceFile")})`
+                            : "")
+                      : sshConfig.auth_type
                 }
               />
             </div>
@@ -273,7 +291,9 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
             </h3>
             <div className="space-y-1">
               {sshConfig.private_keys.map((key, i) => (
-                <p key={i} className="text-sm font-mono text-muted-foreground">{key}</p>
+                <p key={i} className="text-sm font-mono text-muted-foreground">
+                  {key}
+                </p>
               ))}
             </div>
           </div>
@@ -297,11 +317,7 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
             </h3>
             <div className="grid grid-cols-2 gap-4 text-sm">
               <InfoItem label={t("asset.proxyType")} value={sshConfig.proxy.type.toUpperCase()} />
-              <InfoItem
-                label={t("asset.proxyHost")}
-                value={`${sshConfig.proxy.host}:${sshConfig.proxy.port}`}
-                mono
-              />
+              <InfoItem label={t("asset.proxyHost")} value={`${sshConfig.proxy.host}:${sshConfig.proxy.port}`} mono />
               {sshConfig.proxy.username && (
                 <InfoItem label={t("asset.proxyUsername")} value={sshConfig.proxy.username} />
               )}
@@ -319,21 +335,13 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
               <InfoItem label={t("asset.driver")} value={dbConfig.driver === "postgresql" ? "PostgreSQL" : "MySQL"} />
               <InfoItem label={t("asset.host")} value={`${dbConfig.host}:${dbConfig.port}`} mono />
               <InfoItem label={t("asset.username")} value={dbConfig.username} mono />
-              {dbConfig.database && (
-                <InfoItem label={t("asset.database")} value={dbConfig.database} mono />
-              )}
-              {dbConfig.password && (
-                <InfoItem label={t("asset.password")} value="●●●●●●" />
-              )}
+              {dbConfig.database && <InfoItem label={t("asset.database")} value={dbConfig.database} mono />}
+              {dbConfig.password && <InfoItem label={t("asset.password")} value="●●●●●●" />}
               {dbConfig.ssl_mode && dbConfig.ssl_mode !== "disable" && (
                 <InfoItem label={t("asset.sslMode")} value={dbConfig.ssl_mode} />
               )}
-              {dbConfig.read_only && (
-                <InfoItem label={t("asset.readOnly")} value="✓" />
-              )}
-              {dbConfig.params && (
-                <InfoItem label={t("asset.params")} value={dbConfig.params} mono />
-              )}
+              {dbConfig.read_only && <InfoItem label={t("asset.readOnly")} value="✓" />}
+              {dbConfig.params && <InfoItem label={t("asset.params")} value={dbConfig.params} mono />}
             </div>
             {sshTunnelName(dbConfig.ssh_asset_id) && (
               <div className="mt-3 pt-3 border-t text-sm">
@@ -346,21 +354,13 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
         {/* Redis Connection Info */}
         {redisConfig && (
           <div className="rounded-xl border bg-card p-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-              Redis
-            </h3>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Redis</h3>
             <div className="grid grid-cols-2 gap-4 text-sm">
               <InfoItem label={t("asset.host")} value={`${redisConfig.host}:${redisConfig.port}`} mono />
-              {redisConfig.username && (
-                <InfoItem label={t("asset.username")} value={redisConfig.username} mono />
-              )}
-              {redisConfig.password && (
-                <InfoItem label={t("asset.password")} value="●●●●●●" />
-              )}
+              {redisConfig.username && <InfoItem label={t("asset.username")} value={redisConfig.username} mono />}
+              {redisConfig.password && <InfoItem label={t("asset.password")} value="●●●●●●" />}
               <InfoItem label={t("asset.redisDatabase")} value={String(redisConfig.database || 0)} mono />
-              {redisConfig.tls && (
-                <InfoItem label={t("asset.tls")} value="✓" />
-              )}
+              {redisConfig.tls && <InfoItem label={t("asset.tls")} value="✓" />}
             </div>
             {sshTunnelName(redisConfig.ssh_asset_id) && (
               <div className="mt-3 pt-3 border-t text-sm">
@@ -380,8 +380,16 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
                 key: "allow_list",
                 label: t("asset.cmdPolicyAllowList"),
                 items: allowList,
-                onAdd: (val) => { const next = [...allowList, val]; setAllowList(next); handleSaveSSHPolicy(next, denyList); },
-                onRemove: (i) => { const next = allowList.filter((_, idx) => idx !== i); setAllowList(next); handleSaveSSHPolicy(next, denyList); },
+                onAdd: (val) => {
+                  const next = [...allowList, val];
+                  setAllowList(next);
+                  handleSaveSSHPolicy(next, denyList);
+                },
+                onRemove: (i) => {
+                  const next = allowList.filter((_, idx) => idx !== i);
+                  setAllowList(next);
+                  handleSaveSSHPolicy(next, denyList);
+                },
                 placeholder: t("asset.cmdPolicyPlaceholder"),
                 variant: "allow",
               },
@@ -389,13 +397,27 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
                 key: "deny_list",
                 label: t("asset.cmdPolicyDenyList"),
                 items: denyList,
-                onAdd: (val) => { const next = [...denyList, val]; setDenyList(next); handleSaveSSHPolicy(allowList, next); },
-                onRemove: (i) => { const next = denyList.filter((_, idx) => idx !== i); setDenyList(next); handleSaveSSHPolicy(allowList, next); },
+                onAdd: (val) => {
+                  const next = [...denyList, val];
+                  setDenyList(next);
+                  handleSaveSSHPolicy(allowList, next);
+                },
+                onRemove: (i) => {
+                  const next = denyList.filter((_, idx) => idx !== i);
+                  setDenyList(next);
+                  handleSaveSSHPolicy(allowList, next);
+                },
                 placeholder: t("asset.cmdPolicyPlaceholder"),
                 variant: "deny",
               },
             ]}
-            buildPolicyJSON={() => JSON.stringify({ allow_list: allowList, deny_list: denyList, ...(policyGroups.length > 0 ? { groups: policyGroups } : {}) })}
+            buildPolicyJSON={() =>
+              JSON.stringify({
+                allow_list: allowList,
+                deny_list: denyList,
+                ...(policyGroups.length > 0 ? { groups: policyGroups } : {}),
+              })
+            }
             hint={t("asset.cmdPolicyHint")}
             saving={savingPolicy}
             assetID={asset.ID}
@@ -415,8 +437,16 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
                 key: "allow_types",
                 label: t("asset.queryPolicyAllowTypes"),
                 items: queryAllowTypes,
-                onAdd: (val) => { const next = [...queryAllowTypes, val]; setQueryAllowTypes(next); handleSaveQueryPolicy(next, queryDenyTypes, queryDenyFlags); },
-                onRemove: (i) => { const next = queryAllowTypes.filter((_, idx) => idx !== i); setQueryAllowTypes(next); handleSaveQueryPolicy(next, queryDenyTypes, queryDenyFlags); },
+                onAdd: (val) => {
+                  const next = [...queryAllowTypes, val];
+                  setQueryAllowTypes(next);
+                  handleSaveQueryPolicy(next, queryDenyTypes, queryDenyFlags);
+                },
+                onRemove: (i) => {
+                  const next = queryAllowTypes.filter((_, idx) => idx !== i);
+                  setQueryAllowTypes(next);
+                  handleSaveQueryPolicy(next, queryDenyTypes, queryDenyFlags);
+                },
                 placeholder: t("asset.queryPolicyPlaceholder"),
                 variant: "allow",
               },
@@ -424,8 +454,16 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
                 key: "deny_types",
                 label: t("asset.queryPolicyDenyTypes"),
                 items: queryDenyTypes,
-                onAdd: (val) => { const next = [...queryDenyTypes, val]; setQueryDenyTypes(next); handleSaveQueryPolicy(queryAllowTypes, next, queryDenyFlags); },
-                onRemove: (i) => { const next = queryDenyTypes.filter((_, idx) => idx !== i); setQueryDenyTypes(next); handleSaveQueryPolicy(queryAllowTypes, next, queryDenyFlags); },
+                onAdd: (val) => {
+                  const next = [...queryDenyTypes, val];
+                  setQueryDenyTypes(next);
+                  handleSaveQueryPolicy(queryAllowTypes, next, queryDenyFlags);
+                },
+                onRemove: (i) => {
+                  const next = queryDenyTypes.filter((_, idx) => idx !== i);
+                  setQueryDenyTypes(next);
+                  handleSaveQueryPolicy(queryAllowTypes, next, queryDenyFlags);
+                },
                 placeholder: t("asset.queryPolicyPlaceholder"),
                 variant: "deny",
               },
@@ -433,13 +471,28 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
                 key: "deny_flags",
                 label: t("asset.queryPolicyDenyFlags"),
                 items: queryDenyFlags,
-                onAdd: (val) => { const next = [...queryDenyFlags, val]; setQueryDenyFlags(next); handleSaveQueryPolicy(queryAllowTypes, queryDenyTypes, next); },
-                onRemove: (i) => { const next = queryDenyFlags.filter((_, idx) => idx !== i); setQueryDenyFlags(next); handleSaveQueryPolicy(queryAllowTypes, queryDenyTypes, next); },
+                onAdd: (val) => {
+                  const next = [...queryDenyFlags, val];
+                  setQueryDenyFlags(next);
+                  handleSaveQueryPolicy(queryAllowTypes, queryDenyTypes, next);
+                },
+                onRemove: (i) => {
+                  const next = queryDenyFlags.filter((_, idx) => idx !== i);
+                  setQueryDenyFlags(next);
+                  handleSaveQueryPolicy(queryAllowTypes, queryDenyTypes, next);
+                },
                 placeholder: t("asset.queryPolicyFlagPlaceholder"),
                 variant: "warn",
               },
             ]}
-            buildPolicyJSON={() => JSON.stringify({ allow_types: queryAllowTypes, deny_types: queryDenyTypes, deny_flags: queryDenyFlags, ...(policyGroups.length > 0 ? { groups: policyGroups } : {}) })}
+            buildPolicyJSON={() =>
+              JSON.stringify({
+                allow_types: queryAllowTypes,
+                deny_types: queryDenyTypes,
+                deny_flags: queryDenyFlags,
+                ...(policyGroups.length > 0 ? { groups: policyGroups } : {}),
+              })
+            }
             hint={t("asset.queryPolicyHint")}
             saving={savingPolicy}
             assetID={asset.ID}
@@ -459,8 +512,16 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
                 key: "allow_list",
                 label: t("asset.redisPolicyAllowList"),
                 items: redisAllowList,
-                onAdd: (val) => { const next = [...redisAllowList, val]; setRedisAllowList(next); handleSaveRedisPolicy(next, redisDenyList); },
-                onRemove: (i) => { const next = redisAllowList.filter((_, idx) => idx !== i); setRedisAllowList(next); handleSaveRedisPolicy(next, redisDenyList); },
+                onAdd: (val) => {
+                  const next = [...redisAllowList, val];
+                  setRedisAllowList(next);
+                  handleSaveRedisPolicy(next, redisDenyList);
+                },
+                onRemove: (i) => {
+                  const next = redisAllowList.filter((_, idx) => idx !== i);
+                  setRedisAllowList(next);
+                  handleSaveRedisPolicy(next, redisDenyList);
+                },
                 placeholder: t("asset.redisPolicyPlaceholder"),
                 variant: "allow",
               },
@@ -468,13 +529,27 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
                 key: "deny_list",
                 label: t("asset.redisPolicyDenyList"),
                 items: redisDenyList,
-                onAdd: (val) => { const next = [...redisDenyList, val]; setRedisDenyList(next); handleSaveRedisPolicy(redisAllowList, next); },
-                onRemove: (i) => { const next = redisDenyList.filter((_, idx) => idx !== i); setRedisDenyList(next); handleSaveRedisPolicy(redisAllowList, next); },
+                onAdd: (val) => {
+                  const next = [...redisDenyList, val];
+                  setRedisDenyList(next);
+                  handleSaveRedisPolicy(redisAllowList, next);
+                },
+                onRemove: (i) => {
+                  const next = redisDenyList.filter((_, idx) => idx !== i);
+                  setRedisDenyList(next);
+                  handleSaveRedisPolicy(redisAllowList, next);
+                },
                 placeholder: t("asset.redisPolicyPlaceholder"),
                 variant: "deny",
               },
             ]}
-            buildPolicyJSON={() => JSON.stringify({ allow_list: redisAllowList, deny_list: redisDenyList, ...(policyGroups.length > 0 ? { groups: policyGroups } : {}) })}
+            buildPolicyJSON={() =>
+              JSON.stringify({
+                allow_list: redisAllowList,
+                deny_list: redisDenyList,
+                ...(policyGroups.length > 0 ? { groups: policyGroups } : {}),
+              })
+            }
             hint={t("asset.redisPolicyHint")}
             saving={savingPolicy}
             assetID={asset.ID}
@@ -488,9 +563,7 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
           <>
             <Separator />
             <div className="text-sm">
-              <span className="text-muted-foreground">
-                {t("asset.description")}
-              </span>
+              <span className="text-muted-foreground">{t("asset.description")}</span>
               <p className="mt-1">{asset.Description}</p>
             </div>
           </>

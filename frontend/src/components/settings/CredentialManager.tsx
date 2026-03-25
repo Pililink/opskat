@@ -1,43 +1,14 @@
 import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
-import {
-  Plus,
-  Trash2,
-  Copy,
-  Key,
-  FileKey,
-  Download,
-  Pencil,
-  Lock,
-  KeyRound,
-  Eye,
-  EyeOff,
-  Shuffle,
-} from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
+import { Plus, Trash2, Copy, Key, FileKey, Download, Pencil, Lock, KeyRound, Eye, EyeOff, Shuffle } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   ListCredentials,
   GenerateSSHKey,
@@ -53,17 +24,14 @@ import {
 import { credential_entity } from "../../../wailsjs/go/models";
 
 function generatePassword(length = 20): string {
-  const charset =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
+  const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
   const values = crypto.getRandomValues(new Uint8Array(length));
   return Array.from(values, (v) => charset[v % charset.length]).join("");
 }
 
 export function CredentialManager() {
   const { t } = useTranslation();
-  const [credentials, setCredentials] = useState<
-    credential_entity.Credential[]
-  >([]);
+  const [credentials, setCredentials] = useState<credential_entity.Credential[]>([]);
   const [loading, setLoading] = useState(false);
   const [generateOpen, setGenerateOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -101,11 +69,7 @@ export function CredentialManager() {
     if (!deleteCred) return;
     try {
       await DeleteCredential(deleteCred.id);
-      toast.success(
-        deleteCred.type === "ssh_key"
-          ? t("sshKey.deleteSuccess")
-          : t("credential.deleteSuccess")
-      );
+      toast.success(deleteCred.type === "ssh_key" ? t("sshKey.deleteSuccess") : t("credential.deleteSuccess"));
       setDeleteCred(null);
       fetchCredentials();
     } catch (e) {
@@ -140,29 +104,15 @@ export function CredentialManager() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 gap-1.5"
-            onClick={() => setImportOpen(true)}
-          >
+          <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => setImportOpen(true)}>
             <Download className="h-3.5 w-3.5" />
             {t("sshKey.import")}
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 gap-1.5"
-            onClick={() => setGenerateOpen(true)}
-          >
+          <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => setGenerateOpen(true)}>
             <KeyRound className="h-3.5 w-3.5" />
             {t("sshKey.generate")}
           </Button>
-          <Button
-            size="sm"
-            className="h-8 gap-1.5"
-            onClick={() => setCreatePasswordOpen(true)}
-          >
+          <Button size="sm" className="h-8 gap-1.5" onClick={() => setCreatePasswordOpen(true)}>
             <Plus className="h-3.5 w-3.5" />
             {t("credential.createPassword")}
           </Button>
@@ -177,10 +127,7 @@ export function CredentialManager() {
       ) : (
         <div className="space-y-2">
           {credentials.map((cred) => (
-            <div
-              key={cred.id}
-              className="flex items-center justify-between p-3 rounded-lg border bg-card group"
-            >
+            <div key={cred.id} className="flex items-center justify-between p-3 rounded-lg border bg-card group">
               <div className="flex items-center gap-3 min-w-0">
                 {cred.type === "ssh_key" ? (
                   <FileKey className="h-4 w-4 text-muted-foreground shrink-0" />
@@ -191,32 +138,20 @@ export function CredentialManager() {
                   <div className="text-sm font-medium truncate">
                     {cred.name}
                     {cred.type === "ssh_key" && cred.comment && cred.comment !== cred.name && (
-                      <span className="ml-2 text-xs text-muted-foreground font-normal">
-                        ({cred.comment})
-                      </span>
+                      <span className="ml-2 text-xs text-muted-foreground font-normal">({cred.comment})</span>
                     )}
                   </div>
                   <div className="text-xs text-muted-foreground flex gap-2">
                     {cred.type === "ssh_key" ? (
                       <>
-                        <span>
-                          {keyTypeLabel(cred.keyType || "", cred.keySize || 0)}
-                        </span>
-                        <span className="font-mono truncate max-w-48">
-                          {cred.fingerprint}
-                        </span>
+                        <span>{keyTypeLabel(cred.keyType || "", cred.keySize || 0)}</span>
+                        <span className="font-mono truncate max-w-48">{cred.fingerprint}</span>
                       </>
                     ) : (
                       <>
                         {cred.username && <span>{cred.username}</span>}
-                        {cred.description && (
-                          <span className="truncate max-w-48">
-                            {cred.description}
-                          </span>
-                        )}
-                        {!cred.username && !cred.description && (
-                          <span>{t("credential.passwords")}</span>
-                        )}
+                        {cred.description && <span className="truncate max-w-48">{cred.description}</span>}
+                        {!cred.username && !cred.description && <span>{t("credential.passwords")}</span>}
                       </>
                     )}
                   </div>
@@ -255,12 +190,7 @@ export function CredentialManager() {
                 )}
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7"
-                      onClick={() => setEditingCred(cred)}
-                    >
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditingCred(cred)}>
                       <Pencil className="h-3.5 w-3.5" />
                     </Button>
                   </TooltipTrigger>
@@ -286,16 +216,8 @@ export function CredentialManager() {
       )}
 
       {/* Dialogs */}
-      <GenerateKeyDialog
-        open={generateOpen}
-        onOpenChange={setGenerateOpen}
-        onSuccess={fetchCredentials}
-      />
-      <ImportKeyDialog
-        open={importOpen}
-        onOpenChange={setImportOpen}
-        onSuccess={fetchCredentials}
-      />
+      <GenerateKeyDialog open={generateOpen} onOpenChange={setGenerateOpen} onSuccess={fetchCredentials} />
+      <ImportKeyDialog open={importOpen} onOpenChange={setImportOpen} onSuccess={fetchCredentials} />
       <CreatePasswordDialog
         open={createPasswordOpen}
         onOpenChange={setCreatePasswordOpen}
@@ -315,10 +237,7 @@ export function CredentialManager() {
       />
 
       {/* Delete confirmation */}
-      <Dialog
-        open={!!deleteCred}
-        onOpenChange={(open) => !open && setDeleteCred(null)}
-      >
+      <Dialog open={!!deleteCred} onOpenChange={(open) => !open && setDeleteCred(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>{t("credential.deleteConfirmTitle")}</DialogTitle>
@@ -411,11 +330,7 @@ function GenerateKeyDialog({
         <div className="grid gap-4 py-2">
           <div className="grid gap-2">
             <Label>{t("sshKey.name")}</Label>
-            <Input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={t("sshKey.namePlaceholder")}
-            />
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("sshKey.namePlaceholder")} />
           </div>
           <div className="grid gap-2">
             <Label>{t("sshKey.comment")}</Label>
@@ -441,10 +356,7 @@ function GenerateKeyDialog({
           {sizeOptions().length > 0 && (
             <div className="grid gap-2">
               <Label>{t("sshKey.size")}</Label>
-              <Select
-                value={String(keySize)}
-                onValueChange={(v) => setKeySize(Number(v))}
-              >
+              <Select value={String(keySize)} onValueChange={(v) => setKeySize(Number(v))}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -536,11 +448,7 @@ function ImportKeyDialog({
         <div className="grid gap-4 py-2">
           <div className="grid gap-2">
             <Label>{t("sshKey.name")}</Label>
-            <Input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={t("sshKey.namePlaceholder")}
-            />
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("sshKey.namePlaceholder")} />
           </div>
           <div className="grid gap-2">
             <Label>{t("sshKey.comment")}</Label>
@@ -551,18 +459,10 @@ function ImportKeyDialog({
             />
           </div>
           <div className="flex gap-2">
-            <Button
-              variant={mode === "file" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setMode("file")}
-            >
+            <Button variant={mode === "file" ? "default" : "outline"} size="sm" onClick={() => setMode("file")}>
               {t("sshKey.importFile")}
             </Button>
-            <Button
-              variant={mode === "pem" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setMode("pem")}
-            >
+            <Button variant={mode === "pem" ? "default" : "outline"} size="sm" onClick={() => setMode("pem")}>
               {t("sshKey.importPEM")}
             </Button>
           </div>
@@ -587,10 +487,7 @@ function ImportKeyDialog({
               {saving ? t("sshKey.importing") : t("sshKey.importFile")}
             </Button>
           ) : (
-            <Button
-              onClick={handleImportPEM}
-              disabled={saving || !name || !pemContent}
-            >
+            <Button onClick={handleImportPEM} disabled={saving || !name || !pemContent}>
               {saving ? t("sshKey.importing") : t("sshKey.import")}
             </Button>
           )}
@@ -682,11 +579,7 @@ function CreatePasswordDialog({
                   className="h-7 w-7"
                   onClick={() => setVisible(!visible)}
                 >
-                  {visible ? (
-                    <EyeOff className="h-3.5 w-3.5" />
-                  ) : (
-                    <Eye className="h-3.5 w-3.5" />
-                  )}
+                  {visible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                 </Button>
                 <Button
                   type="button"
@@ -717,10 +610,7 @@ function CreatePasswordDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             {t("action.cancel")}
           </Button>
-          <Button
-            onClick={handleCreate}
-            disabled={saving || !name || !password}
-          >
+          <Button onClick={handleCreate} disabled={saving || !name || !password}>
             {saving ? t("action.saving") : t("action.save")}
           </Button>
         </DialogFooter>
@@ -760,18 +650,8 @@ function EditCredentialDialog({
     if (!credential) return;
     setSaving(true);
     try {
-      await UpdateCredential(
-        credential.id,
-        name,
-        comment,
-        description,
-        username
-      );
-      toast.success(
-        credential.type === "ssh_key"
-          ? t("sshKey.updateSuccess")
-          : t("credential.updateSuccess")
-      );
+      await UpdateCredential(credential.id, name, comment, description, username);
+      toast.success(credential.type === "ssh_key" ? t("sshKey.updateSuccess") : t("credential.updateSuccess"));
       onOpenChange(false);
       onSuccess();
     } catch (e) {
@@ -787,25 +667,15 @@ function EditCredentialDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>
-            {isSSHKey
-              ? t("sshKey.editTitle")
-              : t("credential.editPasswordTitle")}
-          </DialogTitle>
+          <DialogTitle>{isSSHKey ? t("sshKey.editTitle") : t("credential.editPasswordTitle")}</DialogTitle>
         </DialogHeader>
         <div className="grid gap-4 py-2">
           <div className="grid gap-2">
-            <Label>
-              {isSSHKey ? t("sshKey.name") : t("credential.name")}
-            </Label>
+            <Label>{isSSHKey ? t("sshKey.name") : t("credential.name")}</Label>
             <Input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder={
-                isSSHKey
-                  ? t("sshKey.namePlaceholder")
-                  : t("credential.namePlaceholder")
-              }
+              placeholder={isSSHKey ? t("sshKey.namePlaceholder") : t("credential.namePlaceholder")}
             />
           </div>
           {isSSHKey ? (
@@ -914,11 +784,7 @@ function ChangePasswordDialog({
                   className="h-7 w-7"
                   onClick={() => setVisible(!visible)}
                 >
-                  {visible ? (
-                    <EyeOff className="h-3.5 w-3.5" />
-                  ) : (
-                    <Eye className="h-3.5 w-3.5" />
-                  )}
+                  {visible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                 </Button>
                 <Button
                   type="button"

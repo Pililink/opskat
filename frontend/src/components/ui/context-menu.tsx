@@ -1,60 +1,58 @@
-import * as React from "react"
-import { createPortal } from "react-dom"
+import * as React from "react";
+import { createPortal } from "react-dom";
 
-import { cn } from "@/lib/utils"
+import { cn } from "@/lib/utils";
 
 // --- Custom ContextMenu with smart positioning ---
 // Replaces Radix ContextMenu which hardcodes side/sideOffset/align
 // and causes menu items to appear under the cursor on flip.
 
 interface ContextMenuContextValue {
-  open: boolean
-  position: { x: number; y: number }
-  onOpenChange: (open: boolean) => void
-  setPosition: (pos: { x: number; y: number }) => void
+  open: boolean;
+  position: { x: number; y: number };
+  onOpenChange: (open: boolean) => void;
+  setPosition: (pos: { x: number; y: number }) => void;
 }
 
-const ContextMenuCtx = React.createContext<ContextMenuContextValue | null>(null)
+const ContextMenuCtx = React.createContext<ContextMenuContextValue | null>(null);
 
 function useCtx() {
-  const ctx = React.useContext(ContextMenuCtx)
-  if (!ctx) throw new Error("ContextMenu components must be used within ContextMenu")
-  return ctx
+  const ctx = React.useContext(ContextMenuCtx);
+  if (!ctx) throw new Error("ContextMenu components must be used within ContextMenu");
+  return ctx;
 }
 
 function ContextMenu({
   children,
   onOpenChange,
 }: {
-  children: React.ReactNode
-  onOpenChange?: (open: boolean) => void
+  children: React.ReactNode;
+  onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = React.useState(false)
-  const [position, setPosition] = React.useState({ x: 0, y: 0 })
+  const [open, setOpen] = React.useState(false);
+  const [position, setPosition] = React.useState({ x: 0, y: 0 });
 
   const handleOpenChange = React.useCallback(
     (value: boolean) => {
-      setOpen(value)
-      onOpenChange?.(value)
+      setOpen(value);
+      onOpenChange?.(value);
     },
     [onOpenChange]
-  )
+  );
 
   const ctx = React.useMemo(
     () => ({ open, position, onOpenChange: handleOpenChange, setPosition }),
     [open, position, handleOpenChange]
-  )
+  );
 
-  return (
-    <ContextMenuCtx.Provider value={ctx}>{children}</ContextMenuCtx.Provider>
-  )
+  return <ContextMenuCtx.Provider value={ctx}>{children}</ContextMenuCtx.Provider>;
 }
 
 function ContextMenuTrigger({
   children,
   ...props
 }: React.HTMLAttributes<HTMLSpanElement> & { children: React.ReactNode }) {
-  const ctx = useCtx()
+  const ctx = useCtx();
 
   return (
     <span
@@ -62,96 +60,91 @@ function ContextMenuTrigger({
       {...props}
       className={cn("select-none", props.className)}
       onContextMenu={(e) => {
-        e.preventDefault()
-        e.stopPropagation()
-        ctx.setPosition({ x: e.clientX, y: e.clientY })
-        ctx.onOpenChange(true)
+        e.preventDefault();
+        e.stopPropagation();
+        ctx.setPosition({ x: e.clientX, y: e.clientY });
+        ctx.onOpenChange(true);
       }}
     >
       {children}
     </span>
-  )
+  );
 }
 
-function ContextMenuContent({
-  className,
-  style: styleProp,
-  children,
-  ...props
-}: React.HTMLAttributes<HTMLDivElement>) {
-  const ctx = useCtx()
-  const ref = React.useRef<HTMLDivElement>(null)
-  const [pos, setPos] = React.useState({ top: 0, left: 0 })
-  const [visible, setVisible] = React.useState(false)
-  const [interactive, setInteractive] = React.useState(false)
+function ContextMenuContent({ className, style: styleProp, children, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  const ctx = useCtx();
+  const ref = React.useRef<HTMLDivElement>(null);
+  const [pos, setPos] = React.useState({ top: 0, left: 0 });
+  const [visible, setVisible] = React.useState(false);
+  const [interactive, setInteractive] = React.useState(false);
 
   // Calculate position: default bottom-right, flip if not enough space
   React.useLayoutEffect(() => {
-    if (!ctx.open || !ref.current) return
-    const rect = ref.current.getBoundingClientRect()
-    const vw = window.innerWidth
-    const vh = window.innerHeight
-    const GAP = 2
+    if (!ctx.open || !ref.current) return;
+    const rect = ref.current.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const GAP = 2;
 
-    let left = ctx.position.x + GAP
-    let top = ctx.position.y + GAP
+    let left = ctx.position.x + GAP;
+    let top = ctx.position.y + GAP;
 
     // Flip horizontal if menu overflows right edge
     if (left + rect.width > vw) {
-      left = ctx.position.x - rect.width - GAP
+      left = ctx.position.x - rect.width - GAP;
     }
     // Flip vertical if menu overflows bottom edge (往上弹)
     if (top + rect.height > vh) {
-      top = ctx.position.y - rect.height - GAP
+      top = ctx.position.y - rect.height - GAP;
     }
 
     // Clamp to viewport bounds
-    left = Math.max(4, Math.min(left, vw - rect.width - 4))
-    top = Math.max(4, Math.min(top, vh - rect.height - 4))
+    left = Math.max(4, Math.min(left, vw - rect.width - 4));
+    top = Math.max(4, Math.min(top, vh - rect.height - 4));
 
-    setPos({ top, left })
-    setVisible(true)
-  }, [ctx.open, ctx.position])
+    setPos({ top, left });
+    setVisible(true);
+  }, [ctx.open, ctx.position]);
 
   // Enable pointer events after delay to prevent right-click release from
   // accidentally triggering menu items
   React.useEffect(() => {
     if (!ctx.open) {
-      setVisible(false)
-      setInteractive(false)
-      return
+      setVisible(false);
+      setInteractive(false);
+      return;
     }
-    const timer = setTimeout(() => setInteractive(true), 150)
-    return () => clearTimeout(timer)
-  }, [ctx.open])
+    const timer = setTimeout(() => setInteractive(true), 150);
+    return () => clearTimeout(timer);
+  }, [ctx.open]);
 
   // Close on outside pointer, escape key
   React.useEffect(() => {
-    if (!ctx.open) return
+    if (!ctx.open) return;
 
-    const close = () => ctx.onOpenChange(false)
+    const close = () => ctx.onOpenChange(false);
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close()
-    }
+      if (e.key === "Escape") close();
+    };
     const onPointerDown = (e: PointerEvent) => {
-      if (ref.current?.contains(e.target as Node)) return
-      close()
-    }
+      if (ref.current?.contains(e.target as Node)) return;
+      close();
+    };
 
     // Delay pointer listener to avoid right-click release closing immediately
     const timer = setTimeout(() => {
-      document.addEventListener("pointerdown", onPointerDown, true)
-    }, 50)
-    document.addEventListener("keydown", onKey)
+      document.addEventListener("pointerdown", onPointerDown, true);
+    }, 50);
+    document.addEventListener("keydown", onKey);
 
     return () => {
-      clearTimeout(timer)
-      document.removeEventListener("pointerdown", onPointerDown, true)
-      document.removeEventListener("keydown", onKey)
-    }
-  }, [ctx.open, ctx.onOpenChange])
+      clearTimeout(timer);
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [ctx.open, ctx.onOpenChange]);
 
-  if (!ctx.open) return null
+  if (!ctx.open) return null;
 
   return createPortal(
     <div
@@ -176,7 +169,7 @@ function ContextMenuContent({
       {children}
     </div>,
     document.body
-  )
+  );
 }
 
 function ContextMenuItem({
@@ -188,11 +181,11 @@ function ContextMenuItem({
   children,
   ...props
 }: React.HTMLAttributes<HTMLDivElement> & {
-  inset?: boolean
-  variant?: "default" | "destructive"
-  disabled?: boolean
+  inset?: boolean;
+  variant?: "default" | "destructive";
+  disabled?: boolean;
 }) {
-  const ctx = useCtx()
+  const ctx = useCtx();
 
   return (
     <div
@@ -206,21 +199,18 @@ function ContextMenuItem({
         className
       )}
       onClick={(e) => {
-        if (disabled) return
-        onClick?.(e)
-        ctx.onOpenChange(false)
+        if (disabled) return;
+        onClick?.(e);
+        ctx.onOpenChange(false);
       }}
       {...props}
     >
       {children}
     </div>
-  )
+  );
 }
 
-function ContextMenuSeparator({
-  className,
-  ...props
-}: React.HTMLAttributes<HTMLDivElement>) {
+function ContextMenuSeparator({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
       data-slot="context-menu-separator"
@@ -228,52 +218,46 @@ function ContextMenuSeparator({
       className={cn("-mx-1 my-1 h-px bg-border", className)}
       {...props}
     />
-  )
+  );
 }
 
-function ContextMenuShortcut({
-  className,
-  ...props
-}: React.ComponentProps<"span">) {
+function ContextMenuShortcut({ className, ...props }: React.ComponentProps<"span">) {
   return (
     <span
       data-slot="context-menu-shortcut"
-      className={cn(
-        "ml-auto text-xs tracking-widest text-muted-foreground",
-        className
-      )}
+      className={cn("ml-auto text-xs tracking-widest text-muted-foreground", className)}
       {...props}
     />
-  )
+  );
 }
 
 // Stub exports for unused components (preserve API compatibility)
 function ContextMenuGroup(props: React.HTMLAttributes<HTMLDivElement>) {
-  return <div data-slot="context-menu-group" role="group" {...props} />
+  return <div data-slot="context-menu-group" role="group" {...props} />;
 }
 function ContextMenuPortal({ children }: { children: React.ReactNode }) {
-  return <>{children}</>
+  return <>{children}</>;
 }
 function ContextMenuSub({ children }: { children: React.ReactNode }) {
-  return <>{children}</>
+  return <>{children}</>;
 }
 function ContextMenuRadioGroup(props: React.HTMLAttributes<HTMLDivElement>) {
-  return <div data-slot="context-menu-radio-group" role="radiogroup" {...props} />
+  return <div data-slot="context-menu-radio-group" role="radiogroup" {...props} />;
 }
 function ContextMenuSubTrigger(_props: Record<string, unknown>) {
-  return null
+  return null;
 }
 function ContextMenuSubContent(_props: Record<string, unknown>) {
-  return null
+  return null;
 }
 function ContextMenuCheckboxItem(_props: Record<string, unknown>) {
-  return null
+  return null;
 }
 function ContextMenuRadioItem(_props: Record<string, unknown>) {
-  return null
+  return null;
 }
 function ContextMenuLabel(_props: Record<string, unknown>) {
-  return null
+  return null;
 }
 
 export {
@@ -292,4 +276,4 @@ export {
   ContextMenuSubContent,
   ContextMenuSubTrigger,
   ContextMenuRadioGroup,
-}
+};

@@ -50,25 +50,23 @@ export function CommandPolicyCard({
   const { t } = useTranslation();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [managerOpen, setManagerOpen] = useState(false);
+  const [selectorRefreshKey, setSelectorRefreshKey] = useState(0);
 
   const allowLists = lists.filter((l) => l.variant === "allow");
   const denyLists = lists.filter((l) => l.variant !== "allow");
   const isGroup = !!groupID;
 
-  const managerTab = policyType === "ssh" ? "command" as const : policyType === "database" ? "query" as const : "redis" as const;
+  const managerTab =
+    policyType === "ssh" ? ("command" as const) : policyType === "database" ? ("query" as const) : ("redis" as const);
 
   return (
     <div className="rounded-xl border bg-card p-4">
       {/* Header */}
       <div className="flex items-center gap-2 mb-3">
         <Shield className="h-4 w-4 text-muted-foreground" />
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          {title}
-        </h3>
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{title}</h3>
         <div className="ml-auto flex items-center gap-2">
-          {saving && (
-            <span className="text-[10px] text-muted-foreground">{t("settings.saved")}...</span>
-          )}
+          {saving && <span className="text-[10px] text-muted-foreground">{t("settings.saved")}...</span>}
           <Button
             variant="ghost"
             size="sm"
@@ -96,7 +94,10 @@ export function CommandPolicyCard({
                 description={isGroup ? t("asset.policyReset.confirmClear") : t("asset.policyReset.confirmDefault")}
                 cancelText={t("action.cancel")}
                 confirmText={t("action.confirm")}
-                onConfirm={() => { setConfirmOpen(false); onReset(); }}
+                onConfirm={() => {
+                  setConfirmOpen(false);
+                  onReset();
+                }}
               />
             </>
           )}
@@ -110,6 +111,7 @@ export function CommandPolicyCard({
             policyType={policyType}
             selectedIds={referencedGroups || []}
             onChange={onGroupsChange}
+            refreshKey={selectorRefreshKey}
           />
         </div>
       )}
@@ -156,7 +158,12 @@ export function CommandPolicyCard({
       <PolicyTestPanel policyType={policyType} buildPolicyJSON={buildPolicyJSON} assetID={assetID} groupID={groupID} />
 
       {/* Policy Group Manager Dialog */}
-      <PolicyGroupManager open={managerOpen} onOpenChange={setManagerOpen} initialTab={managerTab} />
+      <PolicyGroupManager
+        open={managerOpen}
+        onOpenChange={setManagerOpen}
+        onGroupsChanged={() => setSelectorRefreshKey((k) => k + 1)}
+        initialTab={managerTab}
+      />
     </div>
   );
 }

@@ -68,12 +68,12 @@ func DefaultRedisPolicy() *RedisPolicy {
 // --- 内置权限组 ID 常量 ---
 
 const (
-	BuiltinLinuxReadOnly    int64 = -1
-	BuiltinK8sReadOnly      int64 = -2
-	BuiltinDockerReadOnly   int64 = -3
-	BuiltinDangerousDeny    int64 = -4
-	BuiltinSQLReadOnly      int64 = -5
-	BuiltinSQLDangerousDeny int64 = -6
-	BuiltinRedisReadOnly    int64 = -7
+	BuiltinLinuxReadOnly      int64 = -1
+	BuiltinK8sReadOnly        int64 = -2
+	BuiltinDockerReadOnly     int64 = -3
+	BuiltinDangerousDeny      int64 = -4
+	BuiltinSQLReadOnly        int64 = -5
+	BuiltinSQLDangerousDeny   int64 = -6
+	BuiltinRedisReadOnly      int64 = -7
 	BuiltinRedisDangerousDeny int64 = -8
 )

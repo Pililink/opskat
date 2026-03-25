@@ -3,13 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { TerminalTheme } from "@/data/terminalThemes";
 import { toast } from "sonner";
 
@@ -68,12 +62,7 @@ const colorFields: { key: keyof Omit<TerminalTheme, "id" | "name">; labelKey: st
   { key: "brightWhite", labelKey: "terminal.color.brightWhite" },
 ];
 
-export function TerminalThemeEditor({
-  open,
-  onOpenChange,
-  theme,
-  onSave,
-}: TerminalThemeEditorProps) {
+export function TerminalThemeEditor({ open, onOpenChange, theme, onSave }: TerminalThemeEditorProps) {
   const { t } = useTranslation();
   const [name, setName] = useState("");
   const [colors, setColors] = useState<Record<string, string>>({});
@@ -161,9 +150,7 @@ export function TerminalThemeEditor({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg max-h-[80vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>
-            {theme ? t("terminal.editTheme") : t("terminal.newTheme")}
-          </DialogTitle>
+          <DialogTitle>{theme ? t("terminal.editTheme") : t("terminal.newTheme")}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
@@ -186,13 +173,11 @@ export function TerminalThemeEditor({
           >
             <div>$ ls -la</div>
             <div className="flex gap-2 flex-wrap">
-              {["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"].map(
-                (c) => (
-                  <span key={c} style={{ color: colors[c] }}>
-                    {c}
-                  </span>
-                )
-              )}
+              {["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"].map((c) => (
+                <span key={c} style={{ color: colors[c] }}>
+                  {c}
+                </span>
+              ))}
             </div>
             <div className="flex gap-2 flex-wrap">
               {[

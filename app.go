@@ -24,13 +24,13 @@ import (
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
 	"github.com/opskat/opskat/internal/model/entity/audit_entity"
 	"github.com/opskat/opskat/internal/model/entity/conversation_entity"
-	"github.com/opskat/opskat/internal/model/entity/group_entity"
-	"github.com/opskat/opskat/internal/model/entity/plan_entity"
-	"github.com/opskat/opskat/internal/model/entity/policy_group_entity"
 	"github.com/opskat/opskat/internal/model/entity/credential_entity"
+	"github.com/opskat/opskat/internal/model/entity/grant_entity"
+	"github.com/opskat/opskat/internal/model/entity/group_entity"
+	"github.com/opskat/opskat/internal/model/entity/policy_group_entity"
 	"github.com/opskat/opskat/internal/repository/asset_repo"
 	"github.com/opskat/opskat/internal/repository/audit_repo"
-	"github.com/opskat/opskat/internal/repository/plan_repo"
+	"github.com/opskat/opskat/internal/repository/grant_repo"
 	"github.com/opskat/opskat/internal/service/asset_svc"
 	"github.com/opskat/opskat/internal/service/backup_svc"
 	"github.com/opskat/opskat/internal/service/conversation_svc"
@@ -94,9 +94,10 @@ type App struct {
 	pendingConfirms       sync.Map                   // map[string]chan ConfirmResponse（run_command 确认用）
 	pendingApprovals      sync.Map                   // map[string]chan bool（opsctl 审批用）
 	approvalServer        *approval.Server           // opsctl 审批 Unix socket 服务
-	approvedSessions      sync.Map                   // map[string]*sessionRules（已批准的 session 规则）
+	approvedGrants        sync.Map                   // map[string]*grantRules（已批准的 grant 规则）
 	sshPool               *sshpool.Pool              // opsctl SSH 连接池
 	sshProxyServer        *sshpool.Server            // SSH 连接池 Unix socket 服务
+	shutdownCh            chan struct{}              // 关闭信号，cleanup 时 close 以解除所有阻塞等待
 	pendingAuthResponses  sync.Map                   // map[string]chan []string（keyboard-interactive 认证响应用）
 	pendingConnections    sync.Map                   // map[string]context.CancelFunc（异步连接取消用）
 	mu                    sync.Mutex                 // 保护 connCounter
@@ -106,14 +107,14 @@ type App struct {
 	aiModel               string                     // 当前模型
 }
 
-// sessionRules 会话级已批准的命令模式规则
-type sessionRules struct {
+// grantRules 已批准的命令模式规则
+type grantRules struct {
 	mu    sync.Mutex
 	rules []ai.ApprovedPattern
 }
 
 // Add 添加规则
-func (s *sessionRules) Add(assetID int64, pattern string) {
+func (s *grantRules) Add(assetID int64, pattern string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.rules = append(s.rules, ai.ApprovedPattern{
@@ -122,16 +123,16 @@ func (s *sessionRules) Add(assetID int64, pattern string) {
 	})
 }
 
-// Match 检查命令是否匹配任一规则
-func (s *sessionRules) Match(assetID int64, command string) bool {
+// Match 检查命令是否匹配任一规则，返回是否匹配及命中的模式
+func (s *grantRules) Match(assetID int64, command string) (bool, string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i := range s.rules {
 		if s.rules[i].Match(assetID, command) {
-			return true
+			return true, s.rules[i].Pattern
 		}
 	}
-	return false
+	return false, ""
 }
 
 // NewApp 创建App实例
@@ -142,6 +143,7 @@ func NewApp() *App {
 		sshManager:     mgr,
 		sftpService:    sftp_svc.NewService(mgr),
 		permissionChan: make(chan ai.PermissionResponse, 1),
+		shutdownCh:     make(chan struct{}),
 	}
 	a.forwardManager = NewForwardManager(&appPoolDialer{sshManager: mgr})
 	return a
@@ -271,7 +273,7 @@ func (a *App) SetAIProvider(providerType, apiBase, apiKey, model string) error {
 
 	// 创建共用的命令权限检查器
 	checker := ai.NewCommandPolicyChecker(a.makeCommandConfirmFunc())
-	checker.SetPlanRequestFunc(a.makePlanRequestFunc())
+	checker.SetGrantRequestFunc(a.makeGrantRequestFunc())
 	var provider ai.Provider
 	switch providerType {
 	case "openai":
@@ -282,11 +284,16 @@ func (a *App) SetAIProvider(providerType, apiBase, apiKey, model string) error {
 		// 注入权限确认回调：转发到前端，等待用户响应
 		cliProvider.OnPermissionRequest = func(req ai.PermissionRequest) ai.PermissionResponse {
 			wailsRuntime.EventsEmit(a.ctx, "ai:permission", req)
-			return <-a.permissionChan
+			select {
+			case resp := <-a.permissionChan:
+				return resp
+			case <-a.shutdownCh:
+				return ai.PermissionResponse{Behavior: "deny"}
+			}
 		}
-		// 注入 session 重置回调：清理 approvedSessions
+		// 注入 session 重置回调：清理已批准的 grant 规则
 		cliProvider.OnSessionReset = func(sessionID string) {
-			a.approvedSessions.Delete(sessionID)
+			a.approvedGrants.Delete(sessionID)
 		}
 		// 设置工作目录
 		if a.currentConversationID > 0 {
@@ -331,23 +338,26 @@ func (a *App) startApprovalServer(authToken string) {
 			return approval.ApprovalResponse{Approved: true}
 		}
 
-		// 计划审批
-		if req.Type == "plan" {
-			return a.handlePlanApproval(req)
+		// 授权审批
+		if req.Type == "grant" {
+			return a.handleGrantApproval(req)
 		}
 
-		// session 规则匹配：按 assetID + command pattern 自动放行
+		// grant 规则匹配：按 assetID + command pattern 自动放行
 		if req.SessionID != "" && req.Command != "" {
-			if v, ok := a.approvedSessions.Load(req.SessionID); ok {
-				rules := v.(*sessionRules)
-				if rules.Match(req.AssetID, req.Command) {
-					return approval.ApprovalResponse{Approved: true, Reason: "session_match"}
+			if v, ok := a.approvedGrants.Load(req.SessionID); ok {
+				rules := v.(*grantRules)
+				if matched, pattern := rules.Match(req.AssetID, req.Command); matched {
+					return approval.ApprovalResponse{Approved: true, Reason: "grant_match", MatchedPattern: pattern}
 				}
 			}
 		}
 
 		// 单条审批
 		confirmID := fmt.Sprintf("opsctl_%d", time.Now().UnixNano())
+
+		// 激活应用窗口
+		a.activateWindow()
 
 		wailsRuntime.EventsEmit(a.ctx, "opsctl:approval", map[string]any{
 			"confirm_id": confirmID,
@@ -370,6 +380,8 @@ func (a *App) startApprovalServer(authToken string) {
 			}
 			return approval.ApprovalResponse{Approved: false, Reason: "user denied"}
 		case <-a.ctx.Done():
+			return approval.ApprovalResponse{Approved: false, Reason: "app shutting down"}
+		case <-a.shutdownCh:
 			return approval.ApprovalResponse{Approved: false, Reason: "app shutting down"}
 		}
 	}
@@ -436,7 +448,6 @@ func (a *App) decryptProxyPassword(proxy *asset_entity.ProxyConfig) *asset_entit
 	return credential_resolver.Default().DecryptProxyPassword(proxy)
 }
 
-
 // GetSSHPoolConnections 返回连接池中的活跃连接信息（供前端展示）
 func (a *App) GetSSHPoolConnections() []sshpool.PoolEntryInfo {
 	if a.sshPool == nil {
@@ -445,43 +456,43 @@ func (a *App) GetSSHPoolConnections() []sshpool.PoolEntryInfo {
 	return a.sshPool.List()
 }
 
-// handlePlanApproval 处理批量计划审批
-func (a *App) handlePlanApproval(req approval.ApprovalRequest) approval.ApprovalResponse {
+// handleGrantApproval 处理批量计划审批
+func (a *App) handleGrantApproval(req approval.ApprovalRequest) approval.ApprovalResponse {
 	ctx := a.langCtx()
 	sessionID := req.SessionID
 
 	// 写入 DB
-	session := &plan_entity.PlanSession{
+	session := &grant_entity.GrantSession{
 		ID:          sessionID,
 		Description: req.Description,
-		Status:      plan_entity.PlanStatusPending,
+		Status:      grant_entity.GrantStatusPending,
 		Createtime:  time.Now().Unix(),
 	}
-	if err := plan_repo.Plan().CreateSession(ctx, session); err != nil {
-		return approval.ApprovalResponse{Approved: false, Reason: "failed to create plan session"}
+	if err := grant_repo.Grant().CreateSession(ctx, session); err != nil {
+		return approval.ApprovalResponse{Approved: false, Reason: "failed to create grant session"}
 	}
 
-	var items []*plan_entity.PlanItem
-	for i, pi := range req.PlanItems {
-		items = append(items, &plan_entity.PlanItem{
-			PlanSessionID: sessionID,
-			ItemIndex:     i,
-			ToolName:      pi.Type,
-			AssetID:       pi.AssetID,
-			AssetName:     pi.AssetName,
-			GroupID:       pi.GroupID,
-			GroupName:     pi.GroupName,
-			Command:       pi.Command,
-			Detail:        pi.Detail,
+	var items []*grant_entity.GrantItem
+	for i, pi := range req.GrantItems {
+		items = append(items, &grant_entity.GrantItem{
+			GrantSessionID: sessionID,
+			ItemIndex:      i,
+			ToolName:       pi.Type,
+			AssetID:        pi.AssetID,
+			AssetName:      pi.AssetName,
+			GroupID:        pi.GroupID,
+			GroupName:      pi.GroupName,
+			Command:        pi.Command,
+			Detail:         pi.Detail,
 		})
 	}
-	if err := plan_repo.Plan().CreateItems(ctx, items); err != nil {
-		return approval.ApprovalResponse{Approved: false, Reason: "failed to create plan items"}
+	if err := grant_repo.Grant().CreateItems(ctx, items); err != nil {
+		return approval.ApprovalResponse{Approved: false, Reason: "failed to create grant items"}
 	}
 
 	// 构建前端事件数据
-	eventItems := make([]map[string]any, 0, len(req.PlanItems))
-	for _, pi := range req.PlanItems {
+	eventItems := make([]map[string]any, 0, len(req.GrantItems))
+	for _, pi := range req.GrantItems {
 		eventItems = append(eventItems, map[string]any{
 			"type":       pi.Type,
 			"asset_id":   pi.AssetID,
@@ -493,7 +504,10 @@ func (a *App) handlePlanApproval(req approval.ApprovalRequest) approval.Approval
 		})
 	}
 
-	wailsRuntime.EventsEmit(a.ctx, "opsctl:plan-approval", map[string]any{
+	// 激活应用窗口
+	a.activateWindow()
+
+	wailsRuntime.EventsEmit(a.ctx, "opsctl:grant-approval", map[string]any{
 		"session_id":  sessionID,
 		"description": req.Description,
 		"items":       eventItems,
@@ -507,18 +521,38 @@ func (a *App) handlePlanApproval(req approval.ApprovalRequest) approval.Approval
 	select {
 	case approved := <-ch:
 		if approved {
-			if err := plan_repo.Plan().UpdateSessionStatus(ctx, sessionID, plan_entity.PlanStatusApproved); err != nil {
-				logger.Default().Error("update plan session status to approved", zap.Error(err))
+			if err := grant_repo.Grant().UpdateSessionStatus(ctx, sessionID, grant_entity.GrantStatusApproved); err != nil {
+				logger.Default().Error("update grant session status to approved", zap.Error(err))
 			}
-			return approval.ApprovalResponse{Approved: true, SessionID: sessionID}
+			resp := approval.ApprovalResponse{Approved: true, SessionID: sessionID}
+			// 读取最终的 items（可能已被用户编辑）
+			if finalItems, err := grant_repo.Grant().ListItems(ctx, sessionID); err == nil {
+				for _, item := range finalItems {
+					resp.EditedItems = append(resp.EditedItems, approval.GrantItem{
+						Type:      item.ToolName,
+						AssetID:   item.AssetID,
+						AssetName: item.AssetName,
+						GroupID:   item.GroupID,
+						GroupName: item.GroupName,
+						Command:   item.Command,
+						Detail:    item.Detail,
+					})
+				}
+			}
+			return resp
 		}
-		if err := plan_repo.Plan().UpdateSessionStatus(ctx, sessionID, plan_entity.PlanStatusRejected); err != nil {
-			logger.Default().Error("update plan session status to rejected", zap.Error(err))
+		if err := grant_repo.Grant().UpdateSessionStatus(ctx, sessionID, grant_entity.GrantStatusRejected); err != nil {
+			logger.Default().Error("update grant session status to rejected", zap.Error(err))
 		}
 		return approval.ApprovalResponse{Approved: false, Reason: "user denied", SessionID: sessionID}
 	case <-a.ctx.Done():
-		if err := plan_repo.Plan().UpdateSessionStatus(ctx, sessionID, plan_entity.PlanStatusRejected); err != nil {
-			logger.Default().Error("update plan session status to rejected on shutdown", zap.Error(err))
+		if err := grant_repo.Grant().UpdateSessionStatus(ctx, sessionID, grant_entity.GrantStatusRejected); err != nil {
+			logger.Default().Error("update grant session status to rejected on shutdown", zap.Error(err))
+		}
+		return approval.ApprovalResponse{Approved: false, Reason: "app shutting down"}
+	case <-a.shutdownCh:
+		if err := grant_repo.Grant().UpdateSessionStatus(ctx, sessionID, grant_entity.GrantStatusRejected); err != nil {
+			logger.Default().Error("update grant session status to rejected on shutdown", zap.Error(err))
 		}
 		return approval.ApprovalResponse{Approved: false, Reason: "app shutting down"}
 	}
@@ -535,8 +569,8 @@ func (a *App) RespondOpsctlApproval(confirmID string, approved bool) {
 	}
 }
 
-// PlanItemEdit 前端编辑后的 plan item
-type PlanItemEdit struct {
+// GrantItemEdit 前端编辑后的 grant item
+type GrantItemEdit struct {
 	AssetID   int64  `json:"asset_id"`
 	AssetName string `json:"asset_name"`
 	GroupID   int64  `json:"group_id"`
@@ -544,16 +578,16 @@ type PlanItemEdit struct {
 	Command   string `json:"command"`
 }
 
-// RespondPlanApproval 前端响应计划审批请求
-func (a *App) RespondPlanApproval(sessionID string, approved bool) {
+// RespondGrantApproval 前端响应计划审批请求
+func (a *App) RespondGrantApproval(sessionID string, approved bool) {
 	a.RespondOpsctlApproval(sessionID, approved)
 }
 
-// RespondPlanApprovalWithEdits 前端响应计划审批请求并更新编辑后的 items
-func (a *App) RespondPlanApprovalWithEdits(sessionID string, approved bool, editedItems []PlanItemEdit) {
+// RespondGrantApprovalWithEdits 前端响应计划审批请求并更新编辑后的 items
+func (a *App) RespondGrantApprovalWithEdits(sessionID string, approved bool, editedItems []GrantItemEdit) {
 	if approved && len(editedItems) > 0 {
-		// 更新 plan items
-		var items []*plan_entity.PlanItem
+		// 更新 grant items
+		var items []*grant_entity.GrantItem
 		for i, edit := range editedItems {
 			// 支持一行多个命令（换行分隔）
 			lines := strings.Split(edit.Command, "\n")
@@ -562,39 +596,52 @@ func (a *App) RespondPlanApprovalWithEdits(sessionID string, approved bool, edit
 				if line == "" {
 					continue
 				}
-				items = append(items, &plan_entity.PlanItem{
-					PlanSessionID: sessionID,
-					ItemIndex:     i,
-					ToolName:      "exec",
-					AssetID:       edit.AssetID,
-					AssetName:     edit.AssetName,
-					GroupID:       edit.GroupID,
-					GroupName:     edit.GroupName,
-					Command:       line,
+				items = append(items, &grant_entity.GrantItem{
+					GrantSessionID: sessionID,
+					ItemIndex:      i,
+					ToolName:       "exec",
+					AssetID:        edit.AssetID,
+					AssetName:      edit.AssetName,
+					GroupID:        edit.GroupID,
+					GroupName:      edit.GroupName,
+					Command:        line,
 				})
 			}
 		}
 		if len(items) > 0 {
-			if err := plan_repo.Plan().UpdateItems(a.langCtx(), sessionID, items); err != nil {
-				logger.Default().Error("update plan items", zap.Error(err))
+			if err := grant_repo.Grant().UpdateItems(a.langCtx(), sessionID, items); err != nil {
+				logger.Default().Error("update grant items", zap.Error(err))
 			}
 		}
 	}
 	a.RespondOpsctlApproval(sessionID, approved)
 }
 
-// RespondOpsctlApprovalSession 前端响应审批并记住命令模式
-func (a *App) RespondOpsctlApprovalSession(confirmID string, approved bool, sessionID string, assetID int64, commandPattern string) {
+// RespondOpsctlApprovalGrant 前端响应审批并记住 grant 命令模式
+func (a *App) RespondOpsctlApprovalGrant(confirmID string, approved bool, sessionID string, assetID int64, assetName string, commandPattern string) {
 	if approved && sessionID != "" && commandPattern != "" {
-		v, _ := a.approvedSessions.LoadOrStore(sessionID, &sessionRules{})
-		rules := v.(*sessionRules)
+		v, _ := a.approvedGrants.LoadOrStore(sessionID, &grantRules{})
+		rules := v.(*grantRules)
 		rules.Add(assetID, commandPattern)
+		// 记录会话模式变更审计日志
+		ai.WriteGrantSubmitAudit(context.Background(), assetID, assetName, []string{commandPattern}, sessionID)
 	}
 	a.RespondOpsctlApproval(confirmID, approved)
 }
 
+// activateWindow 激活应用窗口到前台（审批弹窗时调用）
+func (a *App) activateWindow() {
+	wailsRuntime.WindowUnminimise(a.ctx)
+	wailsRuntime.WindowShow(a.ctx)
+	wailsRuntime.WindowSetAlwaysOnTop(a.ctx, true)
+	wailsRuntime.WindowSetAlwaysOnTop(a.ctx, false)
+}
+
 // cleanup 关闭审批服务等资源
 func (a *App) cleanup() {
+	// 先发送关闭信号，解除所有阻塞等待（审批、权限确认等），避免 wg.Wait 死锁
+	close(a.shutdownCh)
+
 	if a.sshProxyServer != nil {
 		a.sshProxyServer.Stop()
 	}
@@ -628,8 +675,8 @@ type PolicyTestRequest struct {
 	PolicyType string `json:"policyType"` // "ssh" | "database" | "redis"
 	PolicyJSON string `json:"policyJSON"` // JSON 编码的策略结构体（当前编辑状态）
 	Command    string `json:"command"`    // 待测试的命令/SQL/Redis命令
-	AssetID    int64  `json:"assetID"`   // 资产ID（用于解析资产组链）
-	GroupID    int64  `json:"groupID"`   // 资产组ID（用于解析父组链）
+	AssetID    int64  `json:"assetID"`    // 资产ID（用于解析资产组链）
+	GroupID    int64  `json:"groupID"`    // 资产组ID（用于解析父组链）
 }
 
 // PolicyTestResult 策略测试结果
@@ -1136,10 +1183,16 @@ func (a *App) TestDatabaseConnection(configJSON string, plainPassword string) er
 	if err != nil {
 		return err
 	}
-	defer db.Close()
-	if tunnel != nil {
-		defer tunnel.Close()
-	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			logger.Default().Warn("close db failed", zap.Error(err))
+		}
+		if tunnel != nil {
+			if err := tunnel.Close(); err != nil {
+				logger.Default().Warn("close tunnel failed", zap.Error(err))
+			}
+		}
+	}()
 	return nil
 }
 
@@ -1166,10 +1219,16 @@ func (a *App) TestRedisConnection(configJSON string, plainPassword string) error
 	if err != nil {
 		return err
 	}
-	defer client.Close()
-	if tunnel != nil {
-		defer tunnel.Close()
-	}
+	defer func() {
+		if err := client.Close(); err != nil {
+			logger.Default().Warn("close redis client failed", zap.Error(err))
+		}
+		if tunnel != nil {
+			if err := tunnel.Close(); err != nil {
+				logger.Default().Warn("close tunnel failed", zap.Error(err))
+			}
+		}
+	}()
 	return nil
 }
 
@@ -1201,10 +1260,16 @@ func (a *App) ExecuteSQL(assetID int64, sqlText string, database string) (string
 	if err != nil {
 		return "", fmt.Errorf("连接数据库失败: %w", err)
 	}
-	defer db.Close()
-	if tunnel != nil {
-		defer tunnel.Close()
-	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			logger.Default().Warn("close db failed", zap.Error(err))
+		}
+		if tunnel != nil {
+			if err := tunnel.Close(); err != nil {
+				logger.Default().Warn("close tunnel failed", zap.Error(err))
+			}
+		}
+	}()
 
 	return ai.ExecuteSQL(ctx, db, sqlText)
 }
@@ -1235,10 +1300,16 @@ func (a *App) ExecuteRedis(assetID int64, command string, db int) (string, error
 	if err != nil {
 		return "", fmt.Errorf("连接 Redis 失败: %w", err)
 	}
-	defer client.Close()
-	if tunnel != nil {
-		defer tunnel.Close()
-	}
+	defer func() {
+		if err := client.Close(); err != nil {
+			logger.Default().Warn("close redis client failed", zap.Error(err))
+		}
+		if tunnel != nil {
+			if err := tunnel.Close(); err != nil {
+				logger.Default().Warn("close tunnel failed", zap.Error(err))
+			}
+		}
+	}()
 
 	return ai.ExecuteRedis(ctx, client, command)
 }
@@ -1269,10 +1340,16 @@ func (a *App) ExecuteRedisArgs(assetID int64, args []string, db int) (string, er
 	if err != nil {
 		return "", fmt.Errorf("连接 Redis 失败: %w", err)
 	}
-	defer client.Close()
-	if tunnel != nil {
-		defer tunnel.Close()
-	}
+	defer func() {
+		if err := client.Close(); err != nil {
+			logger.Default().Warn("close redis client failed", zap.Error(err))
+		}
+		if tunnel != nil {
+			if err := tunnel.Close(); err != nil {
+				logger.Default().Warn("close tunnel failed", zap.Error(err))
+			}
+		}
+	}()
 
 	return ai.ExecuteRedisRaw(ctx, client, args)
 }
@@ -1938,17 +2015,19 @@ func (a *App) makeCommandConfirmFunc() ai.CommandConfirmFunc {
 			return resp.Behavior != "deny", resp.Behavior == "allowAll"
 		case <-a.ctx.Done():
 			return false, false
+		case <-a.shutdownCh:
+			return false, false
 		}
 	}
 }
 
-// makePlanRequestFunc 创建 Plan 审批回调，复用 plan 审批弹窗
-func (a *App) makePlanRequestFunc() ai.PlanRequestFunc {
+// makeGrantRequestFunc 创建 Grant 审批回调，复用 grant 审批弹窗
+func (a *App) makeGrantRequestFunc() ai.GrantRequestFunc {
 	return func(assetID int64, assetName string, patterns []string, reason string) (bool, []string) {
-		// 构建 ApprovalRequest 并走 plan 审批流程
-		var planItems []approval.PlanItem
+		// 构建 ApprovalRequest 并走 grant 审批流程
+		grantItems := make([]approval.GrantItem, 0, len(patterns))
 		for _, p := range patterns {
-			planItems = append(planItems, approval.PlanItem{
+			grantItems = append(grantItems, approval.GrantItem{
 				Type:      "exec",
 				AssetID:   assetID,
 				AssetName: assetName,
@@ -1957,10 +2036,10 @@ func (a *App) makePlanRequestFunc() ai.PlanRequestFunc {
 			})
 		}
 
-		resp := a.handlePlanApproval(approval.ApprovalRequest{
-			Type:        "plan",
-			SessionID:   fmt.Sprintf("plan_%d_%d", a.currentConversationID, time.Now().UnixNano()),
-			PlanItems:   planItems,
+		resp := a.handleGrantApproval(approval.ApprovalRequest{
+			Type:        "grant",
+			SessionID:   fmt.Sprintf("grant_%d_%d", a.currentConversationID, time.Now().UnixNano()),
+			GrantItems:  grantItems,
 			Description: reason,
 		})
 
@@ -1969,7 +2048,7 @@ func (a *App) makePlanRequestFunc() ai.PlanRequestFunc {
 		}
 
 		// 读回可能被用户编辑过的 items
-		items, err := plan_repo.Plan().ListItems(a.langCtx(), resp.SessionID)
+		items, err := grant_repo.Grant().ListItems(a.langCtx(), resp.SessionID)
 		if err != nil || len(items) == 0 {
 			return true, patterns
 		}
@@ -2157,9 +2236,10 @@ func detectTabbyConfigPath() string {
 	return ""
 }
 
-// ExportData 导出所有资产和分组为 JSON
+// ExportData 导出所有资产和分组为 JSON（剪贴板用，不含凭据）
 func (a *App) ExportData() (string, error) {
-	data, err := backup_svc.Export(a.langCtx())
+	opts := &backup_svc.ExportOptions{}
+	data, err := backup_svc.Export(a.langCtx(), opts, nil)
 	if err != nil {
 		return "", err
 	}
@@ -2172,9 +2252,18 @@ func (a *App) ExportData() (string, error) {
 
 // --- 备份操作 ---
 
-// ExportToFile 导出备份到文件，password 为空则不加密
-func (a *App) ExportToFile(password string) error {
-	data, err := backup_svc.Export(a.langCtx())
+// ExportToFile 导出备份到文件
+func (a *App) ExportToFile(password string, opts backup_svc.ExportOptions) error {
+	if opts.IncludeCredentials && password == "" {
+		return fmt.Errorf("包含凭据时必须设置备份密码")
+	}
+
+	var crypto backup_svc.CredentialCrypto
+	if opts.IncludeCredentials {
+		crypto = credential_svc.Default()
+	}
+
+	data, err := backup_svc.Export(a.langCtx(), &opts, crypto)
 	if err != nil {
 		return err
 	}
@@ -2214,11 +2303,12 @@ func (a *App) ExportToFile(password string) error {
 
 // ImportFileInfo 导入文件信息
 type ImportFileInfo struct {
-	FilePath  string `json:"filePath"`
-	Encrypted bool   `json:"encrypted"`
+	FilePath  string                    `json:"filePath"`
+	Encrypted bool                      `json:"encrypted"`
+	Summary   *backup_svc.BackupSummary `json:"summary,omitempty"`
 }
 
-// SelectImportFile 选择备份文件并检测是否加密
+// SelectImportFile 选择备份文件并检测是否加密，返回概览信息
 func (a *App) SelectImportFile() (*ImportFileInfo, error) {
 	filePath, err := wailsRuntime.OpenFileDialog(a.ctx, wailsRuntime.OpenDialogOptions{
 		Title: "导入备份",
@@ -2238,24 +2328,32 @@ func (a *App) SelectImportFile() (*ImportFileInfo, error) {
 		return nil, fmt.Errorf("读取文件失败: %w", err)
 	}
 
-	return &ImportFileInfo{
+	info := &ImportFileInfo{
 		FilePath:  filePath,
 		Encrypted: backup_svc.IsEncryptedBackup(fileData),
-	}, nil
+	}
+	// 非加密备份可直接解析概览
+	if !info.Encrypted {
+		var data backup_svc.BackupData
+		if err := json.Unmarshal(fileData, &data); err == nil {
+			info.Summary = data.Summary()
+		}
+	}
+	return info, nil
 }
 
-// ExecuteImportFile 执行文件导入
-func (a *App) ExecuteImportFile(filePath, password string) error {
-	fileData, err := os.ReadFile(filePath) //nolint:gosec // filePath is from previous file dialog selection
+// PreviewImportFile 解密并预览备份文件概览
+func (a *App) PreviewImportFile(filePath, password string) (*backup_svc.BackupSummary, error) {
+	fileData, err := os.ReadFile(filePath) //nolint:gosec // filePath is from previous file dialog
 	if err != nil {
-		return fmt.Errorf("读取文件失败: %w", err)
+		return nil, fmt.Errorf("读取文件失败: %w", err)
 	}
 
 	var jsonData []byte
 	if backup_svc.IsEncryptedBackup(fileData) {
 		jsonData, err = backup_svc.DecryptBackup(fileData, password)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	} else {
 		jsonData = fileData
@@ -2263,10 +2361,36 @@ func (a *App) ExecuteImportFile(filePath, password string) error {
 
 	var data backup_svc.BackupData
 	if err := json.Unmarshal(jsonData, &data); err != nil {
-		return fmt.Errorf("解析备份数据失败: %w", err)
+		return nil, fmt.Errorf("解析备份数据失败: %w", err)
+	}
+	summary := data.Summary()
+	summary.Encrypted = backup_svc.IsEncryptedBackup(fileData)
+	return summary, nil
+}
+
+// ExecuteImportFile 执行文件导入
+func (a *App) ExecuteImportFile(filePath, password string, opts backup_svc.ImportOptions) (*backup_svc.ImportResult, error) {
+	fileData, err := os.ReadFile(filePath) //nolint:gosec // filePath is from previous file dialog selection
+	if err != nil {
+		return nil, fmt.Errorf("读取文件失败: %w", err)
 	}
 
-	return backup_svc.Import(a.langCtx(), &data)
+	var jsonData []byte
+	if backup_svc.IsEncryptedBackup(fileData) {
+		jsonData, err = backup_svc.DecryptBackup(fileData, password)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		jsonData = fileData
+	}
+
+	var data backup_svc.BackupData
+	if err := json.Unmarshal(jsonData, &data); err != nil {
+		return nil, fmt.Errorf("解析备份数据失败: %w", err)
+	}
+
+	return backup_svc.Import(a.langCtx(), &data, &opts, credential_svc.Default())
 }
 
 // --- GitHub 认证 ---
@@ -2302,8 +2426,13 @@ func (a *App) GetGitHubUser(token string) (*backup_svc.GitHubUser, error) {
 // --- Gist 备份 ---
 
 // ExportToGist 加密并上传备份到 Gist
-func (a *App) ExportToGist(password, token, gistID string) (*backup_svc.GistInfo, error) {
-	data, err := backup_svc.Export(a.langCtx())
+func (a *App) ExportToGist(password, token, gistID string, opts backup_svc.ExportOptions) (*backup_svc.GistInfo, error) {
+	var crypto backup_svc.CredentialCrypto
+	if opts.IncludeCredentials {
+		crypto = credential_svc.Default()
+	}
+
+	data, err := backup_svc.Export(a.langCtx(), &opts, crypto)
 	if err != nil {
 		return nil, err
 	}
@@ -2419,24 +2548,45 @@ func (a *App) GetCredentialPublicKey(id int64) (string, error) {
 	return cred.PublicKey, nil
 }
 
-// ImportFromGist 从 Gist 导入备份
-func (a *App) ImportFromGist(gistID, password, token string) error {
+// PreviewGistBackup 预览 Gist 备份概览
+func (a *App) PreviewGistBackup(gistID, password, token string) (*backup_svc.BackupSummary, error) {
 	content, err := backup_svc.GetGistContent(token, gistID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	jsonData, err := backup_svc.DecryptBackup(content, password)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	var data backup_svc.BackupData
 	if err := json.Unmarshal(jsonData, &data); err != nil {
-		return fmt.Errorf("解析备份数据失败: %w", err)
+		return nil, fmt.Errorf("解析备份数据失败: %w", err)
+	}
+	summary := data.Summary()
+	summary.Encrypted = true
+	return summary, nil
+}
+
+// ImportFromGist 从 Gist 导入备份
+func (a *App) ImportFromGist(gistID, password, token string, opts backup_svc.ImportOptions) (*backup_svc.ImportResult, error) {
+	content, err := backup_svc.GetGistContent(token, gistID)
+	if err != nil {
+		return nil, err
 	}
 
-	return backup_svc.Import(a.langCtx(), &data)
+	jsonData, err := backup_svc.DecryptBackup(content, password)
+	if err != nil {
+		return nil, err
+	}
+
+	var data backup_svc.BackupData
+	if err := json.Unmarshal(jsonData, &data); err != nil {
+		return nil, fmt.Errorf("解析备份数据失败: %w", err)
+	}
+
+	return backup_svc.Import(a.langCtx(), &data, &opts, credential_svc.Default())
 }
 
 // GetDataDir 返回应用数据目录

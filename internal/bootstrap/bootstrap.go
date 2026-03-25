@@ -13,9 +13,9 @@ import (
 	"github.com/opskat/opskat/internal/repository/conversation_repo"
 	"github.com/opskat/opskat/internal/repository/credential_repo"
 	"github.com/opskat/opskat/internal/repository/forward_repo"
+	"github.com/opskat/opskat/internal/repository/grant_repo"
 	"github.com/opskat/opskat/internal/repository/group_repo"
 	"github.com/opskat/opskat/internal/repository/host_key_repo"
-	"github.com/opskat/opskat/internal/repository/plan_repo"
 	"github.com/opskat/opskat/internal/repository/policy_group_repo"
 	"github.com/opskat/opskat/internal/service/credential_svc"
 	"github.com/opskat/opskat/migrations"
@@ -103,7 +103,7 @@ func registerRepositories() {
 	audit_repo.RegisterAudit(audit_repo.NewAudit())
 	conversation_repo.RegisterConversation(conversation_repo.NewConversation())
 	group_repo.RegisterGroup(group_repo.NewGroup())
-	plan_repo.RegisterPlan(plan_repo.NewPlan())
+	grant_repo.RegisterGrant(grant_repo.NewGrant())
 	credential_repo.RegisterCredential(credential_repo.NewCredential())
 	host_key_repo.RegisterHostKey(host_key_repo.NewHostKey())
 	forward_repo.RegisterForward(forward_repo.NewForward())

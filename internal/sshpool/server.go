@@ -239,14 +239,21 @@ func (s *Server) handleExec(conn net.Conn, reader *bufio.Reader, req ProxyReques
 	writeJSONResponse(conn, true, "")
 
 	done := make(chan struct{})
+	var outWg sync.WaitGroup
+	var writeMu sync.Mutex // 保护 conn 并发写入，防止帧交错
 
 	// stdout → FrameStdout
+	outWg.Add(1)
 	go func() {
+		defer outWg.Done()
 		buf := make([]byte, 32*1024)
 		for {
 			n, err := stdout.Read(buf)
 			if n > 0 {
-				if writeErr := WriteFrame(conn, FrameStdout, buf[:n]); writeErr != nil {
+				writeMu.Lock()
+				writeErr := WriteFrame(conn, FrameStdout, buf[:n])
+				writeMu.Unlock()
+				if writeErr != nil {
 					logger.Default().Warn("write stdout frame", zap.Int64("assetID", req.AssetID), zap.Error(writeErr))
 					break
 				}
@@ -258,12 +265,17 @@ func (s *Server) handleExec(conn net.Conn, reader *bufio.Reader, req ProxyReques
 	}()
 
 	// stderr → FrameStderr（PTY 模式下 stderr 和 stdout 合并，这个 goroutine 会立即结束）
+	outWg.Add(1)
 	go func() {
+		defer outWg.Done()
 		buf := make([]byte, 32*1024)
 		for {
 			n, err := stderr.Read(buf)
 			if n > 0 {
-				if writeErr := WriteFrame(conn, FrameStderr, buf[:n]); writeErr != nil {
+				writeMu.Lock()
+				writeErr := WriteFrame(conn, FrameStderr, buf[:n])
+				writeMu.Unlock()
+				if writeErr != nil {
 					logger.Default().Warn("write stderr frame", zap.Int64("assetID", req.AssetID), zap.Error(writeErr))
 					break
 				}
@@ -306,16 +318,25 @@ func (s *Server) handleExec(conn net.Conn, reader *bufio.Reader, req ProxyReques
 		if exitErr, ok := err.(*ssh.ExitError); ok {
 			exitCode = exitErr.ExitStatus()
 		} else {
+			// 等待输出 goroutine 结束后再写错误帧，避免帧交错
+			outWg.Wait()
+			writeMu.Lock()
 			if writeErr := WriteError(conn, err.Error()); writeErr != nil {
 				logger.Default().Warn("write error frame", zap.Int64("assetID", req.AssetID), zap.Error(writeErr))
 			}
+			writeMu.Unlock()
 			return
 		}
 	}
 
+	// 等待 stdout/stderr goroutine 读完所有缓冲数据后再发送退出码
+	outWg.Wait()
+
+	writeMu.Lock()
 	if err := WriteExitCode(conn, exitCode); err != nil {
 		logger.Default().Warn("write exit code frame", zap.Int64("assetID", req.AssetID), zap.Error(err))
 	}
+	writeMu.Unlock()
 	// 等待客户端读循环结束（连接关闭时自然退出）
 	<-done
 }

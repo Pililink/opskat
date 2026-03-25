@@ -52,7 +52,7 @@ func (a *Agent) Chat(ctx context.Context, messages []Message, onEvent func(Strea
 		ctx = WithPolicyChecker(ctx, a.policyChecker)
 	}
 
-	const maxRounds = 10    // 防止无限循环
+	const maxRounds = 10           // 防止无限循环
 	const maxResultLen = 32 * 1024 // 工具执行结果最大长度 32KB
 
 	for round := 0; round < maxRounds; round++ {

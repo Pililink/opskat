@@ -6,7 +6,7 @@ import Markdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useAIStore, type ChatMessage } from "@/stores/aiStore";
+import { useAIStore, useAISendOnEnter, type ChatMessage } from "@/stores/aiStore";
 import { ToolBlock } from "@/components/ai/ToolBlock";
 import { AISetupWizard } from "@/components/ai/AISetupWizard";
 
@@ -44,13 +44,23 @@ export function AIChatContent({ tabId }: AIChatContentProps) {
     sendToTab(tabId, text);
   };
 
+  const sendOnEnter = useAISendOnEnter();
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (isComposing()) return;
-    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-      e.preventDefault();
-      handleSend();
+    if (sendOnEnter) {
+      // Enter 发送, Cmd/Ctrl+Enter 或 Shift+Enter 换行
+      if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+        e.preventDefault();
+        handleSend();
+      }
+    } else {
+      // Cmd/Ctrl+Enter 发送, Enter 换行
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        handleSend();
+      }
     }
-    // Plain Enter / Shift+Enter: newline (default behavior)
   };
 
   // 未配置：显示引导设置
@@ -64,15 +74,10 @@ export function AIChatContent({ tabId }: AIChatContentProps) {
       <ScrollArea className="flex-1 min-h-0 overflow-hidden">
         <div className="max-w-3xl mx-auto p-4 space-y-4">
           {messages.length === 0 && (
-            <p className="text-sm text-muted-foreground text-center mt-16">
-              {t("ai.placeholder")}
-            </p>
+            <p className="text-sm text-muted-foreground text-center mt-16">{t("ai.placeholder")}</p>
           )}
           {messages.map((msg, i) => (
-            <div
-              key={i}
-              className={`text-sm ${msg.role === "user" ? "text-right" : ""}`}
-            >
+            <div key={i} className={`text-sm ${msg.role === "user" ? "text-right" : ""}`}>
               {msg.role === "user" ? (
                 <div className="inline-block rounded-xl rounded-br-sm bg-primary px-3 py-2 text-primary-foreground max-w-[85%] text-left shadow-sm break-words">
                   {msg.content}
@@ -104,10 +109,9 @@ export function AIChatContent({ tabId }: AIChatContentProps) {
             />
             <div className="flex items-center justify-between px-3 pb-2">
               <span className="text-xs text-muted-foreground/50 select-none">
-                {/mac/i.test(navigator.userAgent)
-                  ? "⌘+Enter"
-                  : "Ctrl+Enter"}{" "}
-                {t("ai.sendShortcutHint")}
+                {sendOnEnter
+                  ? `Enter ${t("ai.sendShortcutHint")}`
+                  : `${/mac/i.test(navigator.userAgent) ? "⌘+Enter" : "Ctrl+Enter"} ${t("ai.sendShortcutHint")}`}
               </span>
               <Button
                 size="icon"
@@ -170,9 +174,7 @@ function AssistantMessage({ msg }: { msg: ChatMessage }) {
             <ToolBlock key={idx} block={block} />
           )
         )}
-        {msg.streaming && (
-          <Loader2 className="h-3 w-3 animate-spin inline-block ml-1 mb-1" />
-        )}
+        {msg.streaming && <Loader2 className="h-3 w-3 animate-spin inline-block ml-1 mb-1" />}
       </div>
     );
   }
@@ -180,9 +182,7 @@ function AssistantMessage({ msg }: { msg: ChatMessage }) {
   return (
     <div className="rounded-xl rounded-bl-sm bg-muted/60 border border-border/50 px-3 py-2 max-w-[95%] min-w-0 overflow-hidden break-words prose prose-sm dark:prose-invert prose-p:my-1 prose-pre:my-1 prose-pre:overflow-x-auto shadow-sm">
       <Markdown rehypePlugins={[rehypeSanitize]}>{msg.content}</Markdown>
-      {msg.streaming && (
-        <Loader2 className="h-3 w-3 animate-spin inline-block ml-1" />
-      )}
+      {msg.streaming && <Loader2 className="h-3 w-3 animate-spin inline-block ml-1" />}
     </div>
   );
 }

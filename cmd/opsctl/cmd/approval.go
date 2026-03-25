@@ -8,7 +8,7 @@ import (
 	"github.com/opskat/opskat/internal/ai"
 	"github.com/opskat/opskat/internal/approval"
 	"github.com/opskat/opskat/internal/bootstrap"
-	"github.com/opskat/opskat/internal/repository/plan_repo"
+	"github.com/opskat/opskat/internal/repository/grant_repo"
 
 	"github.com/cago-frame/cago/pkg/logger"
 	"github.com/google/uuid"
@@ -32,8 +32,8 @@ func (ar ApprovalResult) ToCheckResult() *ai.CheckResult {
 	}
 }
 
-// requireApproval 检查命令策略 → Plan 匹配 → 桌面端审批。
-// exec/sql/redis 类型支持离线模式：策略/Plan 匹配通过则放行，否则拒绝并提示允许的命令。
+// requireApproval 检查命令策略 → Grant 匹配 → 桌面端审批。
+// exec/sql/redis 类型支持离线模式：策略/Grant 匹配通过则放行，否则拒绝并提示允许的命令。
 // 其他类型（cp/create/update）离线时直接报错。
 func requireApproval(ctx context.Context, req approval.ApprovalRequest) (ApprovalResult, error) {
 	var policyHints []string // 保留 NeedConfirm 的提示信息，供离线拒绝使用
@@ -79,18 +79,18 @@ func requireApproval(ctx context.Context, req approval.ApprovalRequest) (Approva
 		req.SessionID = id
 	}
 
-	// Stage 3: Check plan items with pattern matching
+	// Stage 3: Check grant items with pattern matching
 	if req.SessionID != "" && req.Command != "" {
-		items, err := plan_repo.Plan().ListApprovedItems(ctx, req.SessionID)
+		items, err := grant_repo.Grant().ListApprovedItems(ctx, req.SessionID)
 		if err == nil && len(items) > 0 {
 			for _, item := range items {
 				if item.AssetID != 0 && item.AssetID != req.AssetID {
 					continue
 				}
-				if matchPlanItem(req.Type, item.Command, req.Command) {
+				if matchGrantItem(req.Type, item.Command, req.Command) {
 					return ApprovalResult{
 						Decision:       ai.Allow,
-						DecisionSource: ai.SourcePlanAllow,
+						DecisionSource: ai.SourceGrantAllow,
 						MatchedPattern: item.Command,
 						SessionID:      req.SessionID,
 					}, nil
@@ -138,26 +138,29 @@ func requireApproval(ctx context.Context, req approval.ApprovalRequest) (Approva
 	}
 
 	// If the desktop app approved the entire session, persist it locally
-	if resp.ApproveSession && req.SessionID != "" {
+	if resp.ApproveGrant && req.SessionID != "" {
 		if err := writeActiveSession(req.SessionID); err != nil {
 			logger.Default().Warn("write active session", zap.String("sessionID", req.SessionID), zap.Error(err))
 		}
 	}
 
-	// 区分是 session 规则自动放行还是用户手动允许
+	// 区分是 grant 规则自动放行还是用户手动允许
 	source := ai.SourceUserAllow
-	if resp.Reason == "session_match" {
-		source = ai.SourceSessionAllow
+	matchedPattern := ""
+	if resp.Reason == "grant_match" {
+		source = ai.SourceGrantAllow
+		matchedPattern = resp.MatchedPattern
 	}
 	return ApprovalResult{
 		Decision:       ai.Allow,
 		DecisionSource: source,
+		MatchedPattern: matchedPattern,
 		SessionID:      req.SessionID,
 	}, nil
 }
 
-// matchPlanItem 按请求类型选择合适的匹配函数匹配 plan item
-func matchPlanItem(reqType, pattern, command string) bool {
+// matchGrantItem 按请求类型选择合适的匹配函数匹配 grant item
+func matchGrantItem(reqType, pattern, command string) bool {
 	switch reqType {
 	case "redis":
 		return ai.MatchRedisRule(pattern, command)
@@ -170,31 +173,31 @@ func matchPlanItem(reqType, pattern, command string) bool {
 // formatOfflineDenyMessage 构造离线拒绝的错误信息，包含允许的命令提示
 func formatOfflineDenyMessage(reqType, command string, hints []string) string {
 	var sb strings.Builder
-	sb.WriteString("桌面端不在线，")
+	sb.WriteString("desktop app is not running, ")
 
 	switch reqType {
 	case "exec":
-		sb.WriteString("命令未匹配任何允许策略")
+		sb.WriteString("command did not match any allowed policy")
 	case "sql":
-		sb.WriteString("SQL 语句未匹配允许策略")
+		sb.WriteString("SQL statement did not match any allowed policy")
 	case "redis":
-		sb.WriteString("Redis 命令未匹配允许策略")
+		sb.WriteString("Redis command did not match any allowed policy")
 	}
 
 	if len(hints) > 0 {
 		switch reqType {
 		case "exec":
-			sb.WriteString("\n该资产允许的命令：\n")
+			sb.WriteString("\nAllowed commands for this asset:\n")
 		case "sql":
-			sb.WriteString("\n该资产允许的 SQL 类型：\n")
+			sb.WriteString("\nAllowed SQL types for this asset:\n")
 		case "redis":
-			sb.WriteString("\n该资产允许的 Redis 命令：\n")
+			sb.WriteString("\nAllowed Redis commands for this asset:\n")
 		}
 		for _, h := range hints {
 			fmt.Fprintf(&sb, "  - %s\n", h)
 		}
 	}
 
-	sb.WriteString("请调整命令或启动桌面端进行审批。")
+	sb.WriteString("\nPlease adjust the command or start the desktop app for approval.")
 	return sb.String()
 }

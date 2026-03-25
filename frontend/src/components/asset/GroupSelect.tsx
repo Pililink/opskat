@@ -20,13 +20,7 @@ const folderIcon = <Folder className="h-3.5 w-3.5 text-muted-foreground" />;
  * Reusable group selector with tree structure.
  * Supports search and circular reference prevention.
  */
-export function GroupSelect({
-  value,
-  onValueChange,
-  excludeGroupId,
-  placeholder,
-  className,
-}: GroupSelectProps) {
+export function GroupSelect({ value, onValueChange, excludeGroupId, placeholder, className }: GroupSelectProps) {
   const { t } = useTranslation();
   const { groups } = useAssetStore();
 

@@ -6,9 +6,10 @@ import (
 	"github.com/opskat/opskat/internal/model/entity/conversation_entity"
 	"github.com/opskat/opskat/internal/model/entity/credential_entity"
 	"github.com/opskat/opskat/internal/model/entity/forward_entity"
+	"github.com/opskat/opskat/internal/model/entity/grant_entity"
 	"github.com/opskat/opskat/internal/model/entity/group_entity"
 	"github.com/opskat/opskat/internal/model/entity/host_key_entity"
-	"github.com/opskat/opskat/internal/model/entity/plan_entity"
+	"github.com/opskat/opskat/internal/model/entity/policy_group_entity"
 
 	"github.com/go-gormigrate/gormigrate/v2"
 	"gorm.io/gorm"
@@ -25,12 +26,13 @@ func migration202603220001() *gormigrate.Migration {
 				&conversation_entity.Conversation{},
 				&conversation_entity.Message{},
 				&audit_entity.AuditLog{},
-				&plan_entity.PlanSession{},
-				&plan_entity.PlanItem{},
+				&grant_entity.GrantSession{},
+				&grant_entity.GrantItem{},
 				&forward_entity.ForwardConfig{},
 				&forward_entity.ForwardRule{},
 				&credential_entity.Credential{},
 				&host_key_entity.HostKey{},
+				&policy_group_entity.PolicyGroup{},
 			)
 		},
 		Rollback: func(tx *gorm.DB) error {
@@ -39,8 +41,8 @@ func migration202603220001() *gormigrate.Migration {
 				"credentials",
 				"forward_rules",
 				"forward_configs",
-				"plan_items",
-				"plan_sessions",
+				"grant_items",
+				"grant_sessions",
 				"audit_logs",
 				"conversation_messages",
 				"conversations",

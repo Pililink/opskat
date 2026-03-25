@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 
 interface UseResizeHandleOptions {
   defaultWidth: number;
@@ -30,7 +30,9 @@ export function useResizeHandle({
   });
   const [isResizing, setIsResizing] = useState(false);
   const widthRef = useRef(width);
-  widthRef.current = width;
+  useEffect(() => {
+    widthRef.current = width;
+  }, [width]);
 
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {

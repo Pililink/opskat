@@ -45,9 +45,9 @@ const VARIANT_CONFIG: Record<
 interface PolicyTagEditorProps {
   label: string;
   items: string[];
-  onAdd: (val: string) => void;
-  onRemove: (idx: number) => void;
-  placeholder: string;
+  onAdd?: (val: string) => void;
+  onRemove?: (idx: number) => void;
+  placeholder?: string;
   variant: PolicyVariant;
   emptyText?: string;
 }
@@ -66,9 +66,11 @@ export function PolicyTagEditor({
   const cfg = VARIANT_CONFIG[variant];
   const Icon = cfg.icon;
 
+  const readonly = !onAdd || !onRemove;
+
   const handleAdd = () => {
     const val = input.trim();
-    if (!val) return;
+    if (!val || !onAdd) return;
     onAdd(val);
     setInput("");
   };
@@ -79,9 +81,7 @@ export function PolicyTagEditor({
         <Icon className={cn("h-3.5 w-3.5", cfg.tagText)} />
         <span className={cn("text-xs font-medium", cfg.tagText)}>{label}</span>
         {items.length > 0 && (
-          <span className="text-[10px] text-muted-foreground ml-auto tabular-nums">
-            {items.length}
-          </span>
+          <span className="text-[10px] text-muted-foreground ml-auto tabular-nums">{items.length}</span>
         )}
       </div>
 
@@ -98,16 +98,18 @@ export function PolicyTagEditor({
               )}
             >
               {item}
-              <button
-                type="button"
-                className={cn(
-                  "inline-flex items-center justify-center h-4 w-4 rounded-full transition-colors",
-                  cfg.removeBtnHover
-                )}
-                onClick={() => onRemove(i)}
-              >
-                <X className="h-2.5 w-2.5" />
-              </button>
+              {!readonly && (
+                <button
+                  type="button"
+                  className={cn(
+                    "inline-flex items-center justify-center h-4 w-4 rounded-full transition-colors",
+                    cfg.removeBtnHover
+                  )}
+                  onClick={() => onRemove!(i)}
+                >
+                  <X className="h-2.5 w-2.5" />
+                </button>
+              )}
             </span>
           ))}
         </div>
@@ -115,34 +117,33 @@ export function PolicyTagEditor({
         <p className="text-[11px] text-muted-foreground/60 mb-2 italic">{emptyText}</p>
       ) : null}
 
-      <div className="relative">
-        <Input
-          className={cn(
-            "h-7 text-xs font-mono pr-7 transition-colors",
-            isFocused && "ring-1 ring-ring"
+      {!readonly && (
+        <div className="relative">
+          <Input
+            className={cn("h-7 text-xs font-mono pr-7 transition-colors", isFocused && "ring-1 ring-ring")}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                handleAdd();
+              }
+            }}
+            onFocus={() => setIsFocused(true)}
+            onBlur={() => setIsFocused(false)}
+            placeholder={placeholder}
+          />
+          {input.trim() && (
+            <button
+              type="button"
+              className="absolute right-1 top-1/2 -translate-y-1/2 h-5 w-5 flex items-center justify-center rounded text-muted-foreground hover:text-foreground transition-colors"
+              onClick={handleAdd}
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </button>
           )}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              handleAdd();
-            }
-          }}
-          onFocus={() => setIsFocused(true)}
-          onBlur={() => setIsFocused(false)}
-          placeholder={placeholder}
-        />
-        {input.trim() && (
-          <button
-            type="button"
-            className="absolute right-1 top-1/2 -translate-y-1/2 h-5 w-5 flex items-center justify-center rounded text-muted-foreground hover:text-foreground transition-colors"
-            onClick={handleAdd}
-          >
-            <Plus className="h-3.5 w-3.5" />
-          </button>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

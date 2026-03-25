@@ -16,18 +16,12 @@ export function RedisPanel({ tabId }: RedisPanelProps) {
   return (
     <div className="flex h-full">
       {/* Left: Key browser */}
-      <div
-        className="shrink-0 border-r"
-        style={{ width: sidebarWidth }}
-      >
+      <div className="shrink-0 border-r" style={{ width: sidebarWidth }}>
         <RedisKeyBrowser tabId={tabId} />
       </div>
 
       {/* Resize handle */}
-      <div
-        className="w-1 shrink-0 cursor-col-resize hover:bg-accent active:bg-accent"
-        onMouseDown={handleMouseDown}
-      />
+      <div className="w-1 shrink-0 cursor-col-resize hover:bg-accent active:bg-accent" onMouseDown={handleMouseDown} />
 
       {/* Right: Key detail */}
       <div className="min-w-0 flex-1">

@@ -6,13 +6,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useQueryStore } from "@/stores/queryStore";
 import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
@@ -26,8 +20,7 @@ const KEY_ROW_HEIGHT = 28;
 
 export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
   const { t } = useTranslation();
-  const { redisStates, scanKeys, selectRedisDb, selectKey, setKeyFilter, loadDbKeyCounts, removeKey } =
-    useQueryStore();
+  const { redisStates, scanKeys, selectRedisDb, selectKey, setKeyFilter, loadDbKeyCounts, removeKey } = useQueryStore();
   const state = redisStates[tabId];
   const tab = useTabStore((s) => s.tabs.find((tb) => tb.id === tabId));
   const tabMeta = tab?.meta as QueryTabMeta | undefined;
@@ -55,7 +48,9 @@ export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
   useEffect(() => {
     if (!ctxMenu) return;
     const close = () => setCtxMenu(null);
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
     const onPointer = (e: PointerEvent) => {
       if (ctxMenuRef.current?.contains(e.target as Node)) return;
       close();
@@ -128,7 +123,9 @@ export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
       await ExecuteRedisArgs(tabMeta.assetId, ["DEL", deleteTarget], state.currentDb);
       removeKey(tabId, deleteTarget);
       loadDbKeyCounts(tabId);
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     setDeleteTarget(null);
   }, [deleteTarget, tabMeta, state, tabId, removeKey, loadDbKeyCounts]);
 
@@ -141,10 +138,7 @@ export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
       {/* DB selector + refresh */}
       <div className="flex items-center gap-1 border-b px-2 py-1.5">
         <Database className="size-3.5 shrink-0 text-muted-foreground" />
-        <Select
-          value={String(state.currentDb)}
-          onValueChange={handleDbChange}
-        >
+        <Select value={String(state.currentDb)} onValueChange={handleDbChange}>
           <SelectTrigger size="sm" className="h-7 flex-1 text-xs">
             <SelectValue placeholder={t("query.selectDb")} />
           </SelectTrigger>
@@ -155,24 +149,15 @@ export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
                 <SelectItem key={db} value={String(db)}>
                   <span className="flex items-center gap-1.5">
                     <span>db{db}</span>
-                    {count !== undefined && count > 0 && (
-                      <span className="text-muted-foreground">({count})</span>
-                    )}
+                    {count !== undefined && count > 0 && <span className="text-muted-foreground">({count})</span>}
                   </span>
                 </SelectItem>
               );
             })}
           </SelectContent>
         </Select>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          onClick={handleRefresh}
-          disabled={state.loadingKeys}
-        >
-          <RefreshCw
-            className={`size-3.5 ${state.loadingKeys ? "animate-spin" : ""}`}
-          />
+        <Button variant="ghost" size="icon-xs" onClick={handleRefresh} disabled={state.loadingKeys}>
+          <RefreshCw className={`size-3.5 ${state.loadingKeys ? "animate-spin" : ""}`} />
         </Button>
       </div>
 
@@ -204,18 +189,14 @@ export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
 
       {/* Virtualized key list */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
-        <div
-          style={{ height: virtualizer.getTotalSize(), position: "relative" }}
-        >
+        <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
           {virtualizer.getVirtualItems().map((virtualRow) => {
             const key = state.keys[virtualRow.index];
             return (
               <button
                 key={key}
                 className={`absolute left-0 flex w-full items-center gap-1.5 px-2 text-left text-xs font-mono hover:bg-accent ${
-                  state.selectedKey === key
-                    ? "bg-accent text-accent-foreground"
-                    : ""
+                  state.selectedKey === key ? "bg-accent text-accent-foreground" : ""
                 }`}
                 style={{
                   top: virtualRow.start,
@@ -245,48 +226,46 @@ export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
       {/* Load more */}
       {state.hasMore && !state.loadingKeys && (
         <div className="border-t px-2 py-1.5">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 w-full text-xs"
-            onClick={handleLoadMore}
-          >
+          <Button variant="ghost" size="sm" className="h-7 w-full text-xs" onClick={handleLoadMore}>
             {t("query.loadMore")}
           </Button>
         </div>
       )}
 
       {/* Key context menu */}
-      {ctxMenu && createPortal(
-        <div
-          ref={ctxMenuRef}
-          className="z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95"
-          style={{ position: "fixed", top: ctxMenu.y + 2, left: ctxMenu.x + 2 }}
-        >
+      {ctxMenu &&
+        createPortal(
           <div
-            role="menuitem"
-            className="relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none hover:bg-accent hover:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0"
-            onClick={handleCopyKeyName}
+            ref={ctxMenuRef}
+            className="z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95"
+            style={{ position: "fixed", top: ctxMenu.y + 2, left: ctxMenu.x + 2 }}
           >
-            <Copy className="size-3.5" />
-            {t("query.copyKeyName")}
-          </div>
-          <div
-            role="menuitem"
-            className="relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none hover:bg-accent hover:text-accent-foreground text-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0"
-            onClick={handleDeleteFromCtx}
-          >
-            <Trash2 className="size-3.5" />
-            {t("query.deleteKey")}
-          </div>
-        </div>,
-        document.body
-      )}
+            <div
+              role="menuitem"
+              className="relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none hover:bg-accent hover:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0"
+              onClick={handleCopyKeyName}
+            >
+              <Copy className="size-3.5" />
+              {t("query.copyKeyName")}
+            </div>
+            <div
+              role="menuitem"
+              className="relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none hover:bg-accent hover:text-accent-foreground text-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0"
+              onClick={handleDeleteFromCtx}
+            >
+              <Trash2 className="size-3.5" />
+              {t("query.deleteKey")}
+            </div>
+          </div>,
+          document.body
+        )}
 
       {/* Delete key confirm */}
       <ConfirmDialog
         open={!!deleteTarget}
-        onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
         title={t("query.deleteKey")}
         description={t("query.deleteKeyConfirmDesc", { name: deleteTarget ?? "" })}
         cancelText={t("action.cancel")}

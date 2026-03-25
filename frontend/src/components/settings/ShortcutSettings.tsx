@@ -15,8 +15,7 @@ import {
 
 export function ShortcutSettings() {
   const { t } = useTranslation();
-  const { shortcuts, updateShortcut, resetShortcut, resetAll, setIsRecording } =
-    useShortcutStore();
+  const { shortcuts, updateShortcut, resetShortcut, resetAll, setIsRecording } = useShortcutStore();
   const [recording, setRecording] = useState<ShortcutAction | null>(null);
 
   const startRecording = (action: ShortcutAction) => {
@@ -80,22 +79,14 @@ export function ShortcutSettings() {
   const isCustomized = (action: ShortcutAction) => {
     const def = DEFAULT_SHORTCUTS[action];
     const cur = shortcuts[action];
-    return (
-      cur.code !== def.code ||
-      cur.mod !== def.mod ||
-      cur.shift !== def.shift ||
-      cur.alt !== def.alt
-    );
+    return cur.code !== def.code || cur.mod !== def.mod || cur.shift !== def.shift || cur.alt !== def.alt;
   };
 
   return (
     <div className="space-y-4">
       <div className="space-y-0.5">
         {SHORTCUT_ACTIONS.map((action) => (
-          <div
-            key={action}
-            className="flex items-center justify-between py-2 px-2 rounded hover:bg-muted/50"
-          >
+          <div key={action} className="flex items-center justify-between py-2 px-2 rounded hover:bg-muted/50">
             <span className="text-sm">{t(`shortcut.${action}`)}</span>
             <div className="flex items-center gap-1">
               <button
@@ -110,9 +101,7 @@ export function ShortcutSettings() {
                   startRecording(action);
                 }}
               >
-                {recording === action
-                  ? t("shortcut.recording")
-                  : formatBinding(shortcuts[action])}
+                {recording === action ? t("shortcut.recording") : formatBinding(shortcuts[action])}
               </button>
               {isCustomized(action) && (
                 <Button

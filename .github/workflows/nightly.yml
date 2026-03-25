@@ -116,8 +116,13 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: go build -ldflags="-s -w -X github.com/cago-frame/cago/configs.Version=${{ env.VERSION }}" -o ./internal/embedded/opsctl_bin ./cmd/opsctl/
 
+      - name: Build desktop app (Windows NSIS)
+        if: matrix.goos == 'windows'
+        run: wails build -nsis -ldflags="-s -w -X github.com/cago-frame/cago/configs.Version=${{ env.VERSION }}" -tags embed_opsctl
+
       - name: Build desktop app
-        run: wails build -platform ${{ matrix.goos }}/${{ matrix.goarch }} -ldflags="-s -w -X github.com/cago-frame/cago/configs.Version=${{ env.VERSION }}" -tags embed_opsctl ${{ matrix.goos == 'windows' && '-nsis' || '' }}
+        if: matrix.goos != 'windows'
+        run: wails build -platform ${{ matrix.goos }}/${{ matrix.goarch }} -ldflags="-s -w -X github.com/cago-frame/cago/configs.Version=${{ env.VERSION }}" -tags embed_opsctl
 
       - name: Package (macOS dmg)
         if: matrix.goos == 'darwin'
@@ -159,9 +164,7 @@ jobs:
         if: matrix.goos == 'windows'
         shell: pwsh
         run: |
-          Get-ChildItem -Path "build\bin" -Recurse | Write-Host
-          $installer = Get-ChildItem -Path "build\bin" -Filter "*installer*.exe" -Recurse | Select-Object -First 1
-          Move-Item -Path $installer.FullName -Destination "opskat-${{ matrix.platform }}-installer.exe"
+          Move-Item -Path "build\bin\opskat-amd64-installer.exe" -Destination "opskat-${{ matrix.platform }}-installer.exe"
 
       - uses: actions/upload-artifact@v7
         with:

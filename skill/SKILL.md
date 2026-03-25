@@ -36,8 +36,7 @@ Assets can be referenced by:
 | `update asset <asset> [--name X] [--host X] [--port N] [--username X] [--description X] [--group-id N]` | Update asset (needs approval) |
 | `ssh <asset>` | Interactive SSH terminal (no approval needed) |
 | `exec <asset> -- <command>` | Execute remote command (approval/policy checked) |
-| `sql <asset> "<SQL>"` | Execute SQL on database asset (approval/policy checked) |
-| `sql <asset> -f <file.sql>` | Execute SQL from file |
+| `sql <asset> [-f file] [-d database] "<SQL>"` | Execute SQL on database asset (approval/policy checked) |
 | `redis <asset> "<command>"` | Execute Redis command (approval/policy checked) |
 | `cp <src> <dst>` | File transfer: local↔remote or remote↔remote (needs approval) |
 | `grant submit <asset> <pattern>...` | Simple mode: submit exec patterns for an asset (no stdin needed) |

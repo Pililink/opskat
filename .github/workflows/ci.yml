@@ -20,6 +20,8 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - name: Create frontend dist placeholder
+        run: mkdir -p frontend/dist && touch frontend/dist/.gitkeep
       - uses: golangci/golangci-lint-action@v9
         with:
           version: latest

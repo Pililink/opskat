@@ -30,7 +30,8 @@ type LocalCLIProvider struct {
 	name      string
 	cliPath   string // CLI 可执行文件路径
 	cliType   string // "claude" 或 "codex"
-	sessionID string // Claude session ID，跨调用保持
+	// claudeSessions 每个会话的 Claude session ID 映射 (conversationID -> sessionID)
+	claudeSessions map[int64]string
 	mu        sync.Mutex
 
 	// CLI 工作目录
@@ -41,6 +42,9 @@ type LocalCLIProvider struct {
 
 	// Codex app-server 实例
 	codexServer *CodexAppServer
+
+	// codexThreads 每个会话的 Codex thread ID 映射 (conversationID -> threadID)
+	codexThreads map[int64]string
 
 	// OnPermissionRequest 权限确认回调，由外部注入
 	OnPermissionRequest func(req PermissionRequest) PermissionResponse
@@ -118,8 +122,9 @@ func (p *LocalCLIProvider) chatClaude(ctx context.Context, messages []Message) (
 		return nil, fmt.Errorf("没有用户消息")
 	}
 
-	// 构建 CLI 参数
-	args := p.buildClaudeArgs(userMsg, systemPrompt)
+	// 获取当前会话的 sessionID
+	convID := GetConversationID(ctx)
+	args := p.buildClaudeArgs(convID, userMsg, systemPrompt)
 
 	// 启动 CLI 进程
 	proc, err := StartCLIProcess(ctx, p.cliPath, args, p.workDir, p.buildEnv())
@@ -144,7 +149,10 @@ func (p *LocalCLIProvider) chatClaude(ctx context.Context, messages []Message) (
 				// 更新 sessionID 用于续话
 				if parser.SessionID != "" {
 					p.mu.Lock()
-					p.sessionID = parser.SessionID
+					if p.claudeSessions == nil {
+						p.claudeSessions = make(map[int64]string)
+					}
+					p.claudeSessions[convID] = parser.SessionID
 					p.mu.Unlock()
 				}
 				ch <- StreamEvent{Type: "done"}
@@ -155,7 +163,10 @@ func (p *LocalCLIProvider) chatClaude(ctx context.Context, messages []Message) (
 		// 进程结束但没收到 result 事件，检查是否有错误
 		if parser.SessionID != "" {
 			p.mu.Lock()
-			p.sessionID = parser.SessionID
+			if p.claudeSessions == nil {
+				p.claudeSessions = make(map[int64]string)
+			}
+			p.claudeSessions[convID] = parser.SessionID
 			p.mu.Unlock()
 		}
 		err := proc.Wait()
@@ -171,9 +182,9 @@ func (p *LocalCLIProvider) chatClaude(ctx context.Context, messages []Message) (
 }
 
 // buildClaudeArgs 构建 Claude CLI 参数
-func (p *LocalCLIProvider) buildClaudeArgs(userMsg, systemPrompt string) []string {
+func (p *LocalCLIProvider) buildClaudeArgs(convID int64, userMsg, systemPrompt string) []string {
 	p.mu.Lock()
-	sessionID := p.sessionID
+	sessionID := p.claudeSessions[convID]
 	p.mu.Unlock()
 
 	args := []string{
@@ -213,14 +224,30 @@ func (p *LocalCLIProvider) chatCodex(ctx context.Context, messages []Message) (<
 		p.codexServer = server
 	}
 
+	// 获取当前会话的 Codex thread ID
+	convID := GetConversationID(ctx)
+	p.mu.Lock()
+	if p.codexThreads == nil {
+		p.codexThreads = make(map[int64]string)
+	}
+	threadID := p.codexThreads[convID]
+	p.mu.Unlock()
+
 	ch := make(chan StreamEvent, 64)
 	go func() {
 		defer close(ch)
-		err := p.codexServer.SendTurn(ctx, userMsg, func(ev StreamEvent) {
+		// SendTurn 内部有 turnMu 互斥锁，同一时间只有一个 turn 在运行，防止事件混串
+		usedThreadID, err := p.codexServer.SendTurn(ctx, threadID, userMsg, func(ev StreamEvent) {
 			ch <- ev
 		})
 		if err != nil {
 			ch <- StreamEvent{Type: "error", Error: err.Error()}
+		}
+		// 保存新创建的 thread ID
+		if usedThreadID != threadID {
+			p.mu.Lock()
+			p.codexThreads[convID] = usedThreadID
+			p.mu.Unlock()
 		}
 		ch <- StreamEvent{Type: "done"}
 	}()
@@ -245,26 +272,34 @@ func extractLastUserAndSystem(messages []Message) (userMsg, systemPrompt string)
 	return
 }
 
-// GetSessionID 获取当前 Claude CLI sessionID
-func (p *LocalCLIProvider) GetSessionID() string {
+// GetClaudeSession 获取指定会话的 Claude CLI sessionID
+func (p *LocalCLIProvider) GetClaudeSession(convID int64) string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.sessionID
+	return p.claudeSessions[convID]
 }
 
-// SetSessionID 恢复 Claude CLI sessionID（切换会话时使用）
-func (p *LocalCLIProvider) SetSessionID(id string) {
+// SetClaudeSession 恢复指定会话的 Claude CLI sessionID（切换会话时使用）
+func (p *LocalCLIProvider) SetClaudeSession(convID int64, id string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.sessionID = id
+	if p.claudeSessions == nil {
+		p.claudeSessions = make(map[int64]string)
+	}
+	if id == "" {
+		delete(p.claudeSessions, convID)
+	} else {
+		p.claudeSessions[convID] = id
+	}
 }
 
 // ResetSession 重置会话（用户清空聊天时调用）
 func (p *LocalCLIProvider) ResetSession() {
 	p.mu.Lock()
 	oldSessionID := p.opsctlSessionID
-	p.sessionID = ""
+	p.claudeSessions = nil
 	p.opsctlSessionID = uuid.New().String()
+	p.codexThreads = nil
 	p.mu.Unlock()
 
 	if p.codexServer != nil {
@@ -276,6 +311,13 @@ func (p *LocalCLIProvider) ResetSession() {
 	if p.OnSessionReset != nil && oldSessionID != "" {
 		p.OnSessionReset(oldSessionID)
 	}
+}
+
+// ResetCodexThread 清除指定会话的 Codex thread 映射（删除会话时调用）
+func (p *LocalCLIProvider) ResetCodexThread(convID int64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.codexThreads, convID)
 }
 
 // DetectLocalCLIs 检测本地安装的 AI CLI 工具

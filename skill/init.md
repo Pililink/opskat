@@ -1,3 +1,8 @@
+---
+name: init
+description: "Asset environment discovery via SSH. Use when: user invokes /opsctl:init, asks to discover/scan server environment, or wants to auto-generate asset descriptions from remote host info."
+---
+
 # opsctl init — Asset Environment Discovery
 
 Discover server environment via SSH, generate a structured description, and persist it to the asset's `description` field.

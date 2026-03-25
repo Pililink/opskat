@@ -89,25 +89,14 @@ Scenarios that require an immediate stop:
 
 ## Session Workflow
 
-Sessions allow batch approval of operations. They auto-create on first write if none exists, so explicit `session start` is optional.
+Sessions allow batch approval of operations. **They auto-create on first write if none exists — do NOT manually `session start` or pass `--session`, just directly run commands.** Only use explicit `--session` when the user specifically requests it or in cross-terminal/scripting scenarios.
 
 **Session storage**: `.opskat/sessions/<scope>` in CWD (walks up directory tree). Scope is derived from terminal env vars (`TERM_SESSION_ID`, `ITERM_SESSION_ID`, `WT_SESSION`, `WINDOWID`) so different terminal windows get separate sessions. **Sessions expire after 24 hours.**
 
-**Session ID resolution priority**:
-1. `--session <id>` global flag (explicit)
-2. `OPSKAT_SESSION_ID` environment variable (desktop app injects this)
-3. `.opskat/sessions/<scope>` file (auto-created, walks up directory tree)
-
 ```bash
-# Auto session (no manual steps needed)
+# Default: just run commands, session is auto-managed
 opsctl exec web-01 -- uptime       # auto-creates session on first call
 opsctl exec web-02 -- df -h        # reuses same session, auto-approved after first allow
-
-# Or explicit session management
-SESSION=$(opsctl session start)
-opsctl --session $SESSION exec web-01 -- uptime
-opsctl --session $SESSION cp ./config.yml web-01:/etc/app/
-opsctl session end
 ```
 
 On the first operation, the user will be prompted to approve. If they choose **"Allow Session"**, subsequent operations in the same session are auto-approved.
@@ -115,24 +104,30 @@ On the first operation, the user will be prompted to approve. If they choose **"
 **Grant workflow** — pre-approve command patterns:
 ```bash
 # Simple mode: asset + patterns (no stdin needed)
-SESSION=$(opsctl grant submit web-01 "systemctl *" "df -h" "uptime")
+opsctl grant submit web-01 "systemctl *" "df -h" "uptime"
 # Group mode
-SESSION=$(opsctl grant submit --group production "uptime" "df -h")
+opsctl grant submit --group production "uptime" "df -h"
 # JSON mode for complex grants
-SESSION=$(opsctl grant submit web-01 < grant.json)
+opsctl grant submit web-01 < grant.json
 # Commands matching grant patterns auto-pass
-opsctl --session $SESSION exec web-01 -- systemctl restart app
+opsctl exec web-01 -- systemctl restart app
 ```
+
+**Advanced: explicit session (cross-terminal/scripting only)**:
+
+When you need to share a session across different terminal windows or in shell scripts, use explicit session management:
+```bash
+SESSION=$(opsctl session start)
+opsctl --session $SESSION exec web-01 -- uptime
+opsctl --session $SESSION cp ./config.yml web-01:/etc/app/
+opsctl session end
+```
+
+Session ID resolution priority: `--session` flag > `OPSKAT_SESSION_ID` env > `.opskat/sessions/<scope>` file.
 
 ## Init — Asset Environment Discovery
 
-Auto-discover server environment via SSH and persist a structured description to the asset's `description` field. See [references/ops-init.md](references/ops-init.md) for full instructions.
-
-```bash
-/opsctl init web-server       # Single asset
-/opsctl init --group 2        # All assets in group
-/opsctl init                  # Interactive selection
-```
+Use `/opsctl:init` to auto-discover server environment via SSH. See the `opsctl:init` skill for details.
 
 ## Common Patterns
 
@@ -160,11 +155,9 @@ cat config.yml | opsctl exec web -- tee /etc/app/config.yml
 opsctl cp staging:/var/backups/db.sql prod:/var/tmp/db.sql
 ```
 
-**Deploy workflow with session**:
+**Deploy workflow**:
 ```bash
-SESSION=$(opsctl session start)
-opsctl --session $SESSION exec web-01 -- systemctl stop app
-opsctl --session $SESSION cp ./app web-01:/usr/local/bin/app
-opsctl --session $SESSION exec web-01 -- systemctl start app
-opsctl session end
+opsctl exec web-01 -- systemctl stop app
+opsctl cp ./app web-01:/usr/local/bin/app
+opsctl exec web-01 -- systemctl start app
 ```

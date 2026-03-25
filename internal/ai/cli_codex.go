@@ -46,6 +46,9 @@ type CodexAppServer struct {
 	ctx      context.Context
 	cancel   context.CancelFunc
 
+	// turn 级别互斥锁，防止多会话并发 turn 导致事件混串
+	turnMu sync.Mutex
+
 	// OnPermissionRequest 工具调用权限确认回调
 	OnPermissionRequest func(req PermissionRequest) PermissionResponse
 
@@ -140,11 +143,11 @@ func (s *CodexAppServer) initialize() error {
 	return s.sendNotification("initialized", nil)
 }
 
-// StartThread 开始新的对话线程
-func (s *CodexAppServer) StartThread() error {
+// StartThread 开始新的对话线程，返回 thread ID
+func (s *CodexAppServer) StartThread() (string, error) {
 	result, err := s.sendRequest("thread/start", map[string]any{})
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	var resp struct {
@@ -153,27 +156,24 @@ func (s *CodexAppServer) StartThread() error {
 		} `json:"thread"`
 	}
 	if err := json.Unmarshal(result, &resp); err != nil {
-		return fmt.Errorf("解析 thread/start 响应失败: %w", err)
+		return "", fmt.Errorf("解析 thread/start 响应失败: %w", err)
 	}
-	s.mu.Lock()
-	s.threadID = resp.Thread.ID
-	s.mu.Unlock()
-	return nil
+	return resp.Thread.ID, nil
 }
 
 // SendTurn 发送用户消息开始一个 turn
-func (s *CodexAppServer) SendTurn(ctx context.Context, text string, onEvent func(StreamEvent)) error {
-	s.mu.Lock()
-	threadID := s.threadID
-	s.mu.Unlock()
+// threadID 为空时自动创建新 thread，返回实际使用的 threadID
+func (s *CodexAppServer) SendTurn(ctx context.Context, threadID, text string, onEvent func(StreamEvent)) (string, error) {
+	// turn 级别互斥：同一时间只能有一个 turn 在读取 notifyCh 事件，防止多会话事件混串
+	s.turnMu.Lock()
+	defer s.turnMu.Unlock()
 
 	if threadID == "" {
-		if err := s.StartThread(); err != nil {
-			return err
+		var err error
+		threadID, err = s.StartThread()
+		if err != nil {
+			return "", err
 		}
-		s.mu.Lock()
-		threadID = s.threadID
-		s.mu.Unlock()
 	}
 
 	params := map[string]any{
@@ -183,7 +183,7 @@ func (s *CodexAppServer) SendTurn(ctx context.Context, text string, onEvent func
 
 	_, err := s.sendRequest("turn/start", params)
 	if err != nil {
-		return err
+		return threadID, err
 	}
 
 	// 从 notifyCh 读取事件直到 turn 完成
@@ -192,10 +192,10 @@ func (s *CodexAppServer) SendTurn(ctx context.Context, text string, onEvent func
 		case msg := <-s.notifyCh:
 			done := s.handleNotification(msg, onEvent)
 			if done {
-				return nil
+				return threadID, nil
 			}
 		case <-ctx.Done():
-			return ctx.Err()
+			return threadID, ctx.Err()
 		}
 	}
 }
@@ -385,9 +385,34 @@ func (s *CodexAppServer) handleNotification(msg codexJSONRPC, onEvent func(Strea
 			s.handleItemCompleted(&p2.Msg.Item, onEvent)
 		}
 
+	// ── v1 文本流式输出（content_delta 格式）──
+	case "codex/event/agent_message_content_delta":
+		// 新版 Codex 可能通过此事件发送文本 delta，格式可能与 agent_message_delta 不同
+		var p1 struct {
+			Msg struct {
+				Delta string `json:"delta"`
+			} `json:"msg"`
+		}
+		var p2 struct {
+			Delta string `json:"delta"`
+		}
+		var p3 struct {
+			Msg struct {
+				ContentDelta string `json:"content_delta"`
+			} `json:"msg"`
+		}
+		if err := json.Unmarshal(params, &p1); err == nil && p1.Msg.Delta != "" {
+			onEvent(StreamEvent{Type: "content", Content: p1.Msg.Delta})
+		} else if err := json.Unmarshal(params, &p2); err == nil && p2.Delta != "" {
+			onEvent(StreamEvent{Type: "content", Content: p2.Delta})
+		} else if err := json.Unmarshal(params, &p3); err == nil && p3.Msg.ContentDelta != "" {
+			onEvent(StreamEvent{Type: "content", Content: p3.Msg.ContentDelta})
+		} else {
+			logger.Default().Debug("codex agent_message_content_delta: unrecognized format", zap.String("params", string(params)))
+		}
+
 	// ── 静默忽略的事件 ──
-	case "codex/event/agent_message_content_delta",
-		"codex/event/agent_message",
+	case "codex/event/agent_message",
 		"codex/event/token_count",
 		"codex/event/task_started",
 		"codex/event/task_complete",

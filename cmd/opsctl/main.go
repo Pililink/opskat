@@ -3,9 +3,9 @@ package main
 import (
 	"os"
 
-	"github.com/opskat/opskat/cmd/opsctl/cmd"
+	"github.com/opskat/opskat/cmd/opsctl/command"
 )
 
 func main() {
-	os.Exit(cmd.Execute())
+	os.Exit(command.Execute())
 }

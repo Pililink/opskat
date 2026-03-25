@@ -1,6 +1,6 @@
 //go:build windows
 
-package cmd
+package command
 
 import "golang.org/x/crypto/ssh"
 

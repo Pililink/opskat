@@ -81,6 +81,45 @@ func TestHandleNotification(t *testing.T) {
 			So(*events, ShouldHaveLength, 0)
 		})
 
+		Convey("v1 agent_message_content_delta msg.delta 格式", func() {
+			onEvent, events := collectEvents()
+			msg := codexJSONRPC{
+				Method: "codex/event/agent_message_content_delta",
+				Params: json.RawMessage(`{"msg":{"delta":"content text"}}`),
+			}
+			done := s.handleNotification(msg, onEvent)
+			So(done, ShouldBeFalse)
+			So(*events, ShouldHaveLength, 1)
+			So((*events)[0].Type, ShouldEqual, "content")
+			So((*events)[0].Content, ShouldEqual, "content text")
+		})
+
+		Convey("v1 agent_message_content_delta 顶层 delta 格式", func() {
+			onEvent, events := collectEvents()
+			msg := codexJSONRPC{
+				Method: "codex/event/agent_message_content_delta",
+				Params: json.RawMessage(`{"delta":"top level delta"}`),
+			}
+			done := s.handleNotification(msg, onEvent)
+			So(done, ShouldBeFalse)
+			So(*events, ShouldHaveLength, 1)
+			So((*events)[0].Type, ShouldEqual, "content")
+			So((*events)[0].Content, ShouldEqual, "top level delta")
+		})
+
+		Convey("v1 agent_message_content_delta content_delta 格式", func() {
+			onEvent, events := collectEvents()
+			msg := codexJSONRPC{
+				Method: "codex/event/agent_message_content_delta",
+				Params: json.RawMessage(`{"msg":{"content_delta":"cd text"}}`),
+			}
+			done := s.handleNotification(msg, onEvent)
+			So(done, ShouldBeFalse)
+			So(*events, ShouldHaveLength, 1)
+			So((*events)[0].Type, ShouldEqual, "content")
+			So((*events)[0].Content, ShouldEqual, "cd text")
+		})
+
 		Convey("item/started commandExecution 产生 tool_start", func() {
 			onEvent, events := collectEvents()
 			msg := codexJSONRPC{

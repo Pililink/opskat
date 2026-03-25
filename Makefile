@@ -1,4 +1,4 @@
-.PHONY: dev run build build-embed clean install build-cli build-cli-upx install-cli lint test test-cover
+.PHONY: dev run build build-embed clean install build-cli build-cli-upx install-cli lint test test-cover install-skill
 
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
@@ -75,6 +75,13 @@ test-cover:
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "覆盖率报告已生成: coverage.html"
 	@open coverage.html 2>/dev/null || xdg-open coverage.html 2>/dev/null || echo "请手动打开 coverage.html"
+
+# 安装 Claude Code skill（创建 symlink 到 ~/.claude/skills/opsctl）
+install-skill:
+	@mkdir -p ~/.claude/skills
+	@rm -f ~/.claude/skills/opsctl
+	@ln -s $(CURDIR)/skill ~/.claude/skills/opsctl
+	@echo "Skill installed: ~/.claude/skills/opsctl -> $(CURDIR)/skill"
 
 # 清理构建产物
 clean:

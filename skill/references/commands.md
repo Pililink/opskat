@@ -78,7 +78,7 @@ Execute remote command via SSH with stdio piping.
 opsctl exec web-server -- uptime
 opsctl exec 1 -- ls -la /var/log
 echo "data" | opsctl exec web-server -- cat
-opsctl --session $SESSION exec web-01 -- systemctl restart nginx
+opsctl exec web-01 -- systemctl restart nginx
 ```
 
 ## create
@@ -189,13 +189,13 @@ Items without asset/group inherit from positional args and `--group` flags (expa
 
 ```bash
 # Single asset
-SESSION=$(opsctl grant submit web-01 < grant.json)
+opsctl grant submit web-01 < grant.json
 # Multiple assets (each item expanded to all targets)
-SESSION=$(echo '{"items":[{"type":"exec","command":"uptime"}]}' | opsctl grant submit web-01 web-02 web-03)
+echo '{"items":[{"type":"exec","command":"uptime"}]}' | opsctl grant submit web-01 web-02 web-03
 # Per-item overrides (no expansion)
-SESSION=$(opsctl grant submit < complex-grant.json)
-# Use session
-opsctl --session $SESSION exec web-01 -- uptime
+opsctl grant submit < complex-grant.json
+# Commands matching grant patterns auto-pass
+opsctl exec web-01 -- uptime
 ```
 
 ## session
@@ -222,11 +222,11 @@ End the current active session (removes the session file).
 Show the current active session ID.
 
 ```bash
-# Auto session (no manual steps needed)
+# Auto session (default, no manual steps needed)
 opsctl exec web-01 -- uptime       # auto-creates session on first call
 opsctl exec web-02 -- df -h        # reuses same session
 
-# Or explicit management
+# Explicit management (cross-terminal/scripting only)
 SESSION=$(opsctl session start)
 opsctl --session $SESSION exec web-01 -- uptime
 opsctl session end

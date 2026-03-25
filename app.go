@@ -62,6 +62,9 @@ var skillCommandsMDContent string
 //go:embed skill/references/ops-init.md
 var skillOpsInitMDContent string
 
+//go:embed skill/init.md
+var skillInitMDContent string
+
 // ConfirmResponse 命令确认响应
 type ConfirmResponse struct {
 	Behavior string // "allow" | "allowAll" | "deny"
@@ -1814,9 +1817,9 @@ func (a *App) switchToConversation(conv *conversation_entity.Conversation) {
 		// 恢复 CLI session
 		info, err := conv.GetSessionInfo()
 		if err == nil && info.SessionID != "" {
-			p.SetSessionID(info.SessionID)
+			p.SetClaudeSession(conv.ID, info.SessionID)
 		} else {
-			p.SetSessionID("")
+			p.SetClaudeSession(conv.ID, "")
 		}
 
 		// 切换工作目录
@@ -1831,6 +1834,10 @@ func (a *App) DeleteConversation(id int64) error {
 	err := conversation_svc.Conversation().Delete(a.langCtx(), id)
 	if err != nil {
 		return err
+	}
+	// 清理 Codex thread 映射
+	if p, ok := a.aiProvider.(*ai.LocalCLIProvider); ok {
+		p.ResetCodexThread(id)
 	}
 	// 如果删的是当前会话，清空当前会话ID
 	if a.currentConversationID == id {
@@ -1919,7 +1926,7 @@ func (a *App) persistConversationState(convID int64, messages []ai.Message) {
 	if p, ok := a.aiProvider.(*ai.LocalCLIProvider); ok {
 		conv, err := conversation_svc.Conversation().Get(ctx, convID)
 		if err == nil {
-			sessionID := p.GetSessionID()
+			sessionID := p.GetClaudeSession(convID)
 			if err := conv.SetSessionInfo(&conversation_entity.SessionInfo{
 				SessionID: sessionID,
 			}); err != nil {
@@ -2690,6 +2697,9 @@ func installSkillTo(skillDir string) error {
 	if err := os.WriteFile(filepath.Join(refsDir, "ops-init.md"), []byte(skillOpsInitMDContent), 0644); err != nil {
 		return fmt.Errorf("write ops-init.md failed: %w", err)
 	}
+	if err := os.WriteFile(filepath.Join(skillDir, "init.md"), []byte(skillInitMDContent), 0644); err != nil {
+		return fmt.Errorf("write init.md failed: %w", err)
+	}
 	return nil
 }
 
@@ -2719,6 +2729,7 @@ func (a *App) InstallSkills() error {
 // GetSkillPreview 获取 Skill 文件内容预览
 func (a *App) GetSkillPreview() string {
 	return "--- SKILL.md ---\n\n" + skillMDWithDataDir() +
+		"\n\n--- init.md ---\n\n" + skillInitMDContent +
 		"\n\n--- references/commands.md ---\n\n" + skillCommandsMDContent +
 		"\n\n--- references/ops-init.md ---\n\n" + skillOpsInitMDContent
 }

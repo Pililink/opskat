@@ -31,7 +31,7 @@ export function ConnectSSHAsync(arg1:app.SSHConnectRequest):Promise<string>;
 
 export function CopyPolicyGroup(arg1:number,arg2:string):Promise<policy_group_entity.PolicyGroup>;
 
-export function CreateAIProvider(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<app.AIProviderInfo>;
+export function CreateAIProvider(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:number,arg7:number):Promise<app.AIProviderInfo>;
 
 export function CreateAsset(arg1:asset_entity.Asset):Promise<void>;
 
@@ -83,6 +83,8 @@ export function ExportToFile(arg1:string,arg2:backup_svc.ExportOptions):Promise<
 
 export function ExportToGist(arg1:string,arg2:string,arg3:string,arg4:backup_svc.ExportOptions):Promise<backup_svc.GistInfo>;
 
+export function FetchAIModels(arg1:string,arg2:string,arg3:string):Promise<Array<app.AIModelInfo>>;
+
 export function GenerateSSHKey(arg1:string,arg2:string,arg3:string,arg4:number):Promise<credential_entity.Credential>;
 
 export function GetActiveAIProvider():Promise<app.AIProviderInfo>;
@@ -108,6 +110,8 @@ export function GetGitHubUser(arg1:string):Promise<backup_svc.GitHubUser>;
 export function GetGroup(arg1:number):Promise<group_entity.Group>;
 
 export function GetLanguage():Promise<string>;
+
+export function GetModelDefaults(arg1:string):Promise<app.AIModelInfo>;
 
 export function GetOpsctlInstallDir():Promise<string>;
 
@@ -241,7 +245,7 @@ export function TestRedisConnection(arg1:string,arg2:string):Promise<void>;
 
 export function TestSSHConnection(arg1:string,arg2:string):Promise<void>;
 
-export function UpdateAIProvider(arg1:number,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string):Promise<void>;
+export function UpdateAIProvider(arg1:number,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:number,arg8:number):Promise<void>;
 
 export function UpdateAsset(arg1:asset_entity.Asset):Promise<void>;
 

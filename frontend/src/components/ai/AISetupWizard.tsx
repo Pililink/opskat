@@ -38,7 +38,7 @@ export function AISetupWizard() {
     if (!providerType) return;
     setCompleting(true);
     try {
-      const created = await CreateAIProvider(name, providerType, apiBase, apiKey, model);
+      const created = await CreateAIProvider(name, providerType, apiBase, apiKey, model, 0, 0);
       await SetActiveAIProvider(created.id);
       await useAIStore.getState().checkConfigured();
       await useAIStore.getState().fetchConversations();

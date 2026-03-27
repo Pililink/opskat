@@ -373,7 +373,17 @@
     "openai": "OpenAI Compatible",
     "anthropic": "Anthropic",
     "defaultApiBase": "Default API endpoint will be used",
-    "noProviders": "No providers configured. Add one to get started."
+    "noProviders": "No providers configured. Add one to get started.",
+    "maxOutputTokens": "Max Output Tokens",
+    "maxOutputTokensHint": "Maximum tokens for model response. 0 = use model default",
+    "contextWindow": "Context Window",
+    "contextWindowHint": "Context window size in tokens. 0 = use model default",
+    "fetchModels": "Fetch Models",
+    "fetchingModels": "Fetching...",
+    "fetchModelsError": "Failed to fetch models",
+    "selectModel": "Select or type a model",
+    "noModelsFound": "No models found",
+    "modelDefaultsApplied": "Applied defaults for this model"
   },
   "backup": {
     "title": "Backup",

@@ -34,8 +34,8 @@ export function CopyPolicyGroup(arg1, arg2) {
   return window['go']['app']['App']['CopyPolicyGroup'](arg1, arg2);
 }
 
-export function CreateAIProvider(arg1, arg2, arg3, arg4, arg5) {
-  return window['go']['app']['App']['CreateAIProvider'](arg1, arg2, arg3, arg4, arg5);
+export function CreateAIProvider(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
+  return window['go']['app']['App']['CreateAIProvider'](arg1, arg2, arg3, arg4, arg5, arg6, arg7);
 }
 
 export function CreateAsset(arg1) {
@@ -138,6 +138,10 @@ export function ExportToGist(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['ExportToGist'](arg1, arg2, arg3, arg4);
 }
 
+export function FetchAIModels(arg1, arg2, arg3) {
+  return window['go']['app']['App']['FetchAIModels'](arg1, arg2, arg3);
+}
+
 export function GenerateSSHKey(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['GenerateSSHKey'](arg1, arg2, arg3, arg4);
 }
@@ -188,6 +192,10 @@ export function GetGroup(arg1) {
 
 export function GetLanguage() {
   return window['go']['app']['App']['GetLanguage']();
+}
+
+export function GetModelDefaults(arg1) {
+  return window['go']['app']['App']['GetModelDefaults'](arg1);
 }
 
 export function GetOpsctlInstallDir() {
@@ -454,8 +462,8 @@ export function TestSSHConnection(arg1, arg2) {
   return window['go']['app']['App']['TestSSHConnection'](arg1, arg2);
 }
 
-export function UpdateAIProvider(arg1, arg2, arg3, arg4, arg5, arg6) {
-  return window['go']['app']['App']['UpdateAIProvider'](arg1, arg2, arg3, arg4, arg5, arg6);
+export function UpdateAIProvider(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) {
+  return window['go']['app']['App']['UpdateAIProvider'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
 }
 
 export function UpdateAsset(arg1) {

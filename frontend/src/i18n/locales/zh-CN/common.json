@@ -373,7 +373,17 @@
     "openai": "OpenAI 兼容",
     "anthropic": "Anthropic",
     "defaultApiBase": "将使用默认 API 地址",
-    "noProviders": "尚未配置提供商，请添加一个开始使用。"
+    "noProviders": "尚未配置提供商，请添加一个开始使用。",
+    "maxOutputTokens": "最大输出 Token 数",
+    "maxOutputTokensHint": "模型回复的最大 Token 数，0 表示使用模型默认值",
+    "contextWindow": "上下文窗口",
+    "contextWindowHint": "上下文窗口大小（Token 数），0 表示使用模型默认值",
+    "fetchModels": "获取模型",
+    "fetchingModels": "获取中...",
+    "fetchModelsError": "获取模型列表失败",
+    "selectModel": "选择或输入模型名称",
+    "noModelsFound": "未找到模型",
+    "modelDefaultsApplied": "已应用该模型的默认参数"
   },
   "backup": {
     "title": "备份",

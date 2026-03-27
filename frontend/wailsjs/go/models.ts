@@ -177,13 +177,32 @@ export namespace ai {
 
 export namespace app {
 	
+	export class AIModelInfo {
+	    id: string;
+	    maxOutputTokens: number;
+	    contextWindow: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new AIModelInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.maxOutputTokens = source["maxOutputTokens"];
+	        this.contextWindow = source["contextWindow"];
+	    }
+	}
 	export class AIProviderInfo {
 	    id: number;
 	    name: string;
 	    type: string;
 	    apiBase: string;
+	    apiKey: string;
 	    maskedApiKey: string;
 	    model: string;
+	    maxOutputTokens: number;
+	    contextWindow: number;
 	    isActive: boolean;
 	
 	    static createFrom(source: any = {}) {
@@ -196,8 +215,11 @@ export namespace app {
 	        this.name = source["name"];
 	        this.type = source["type"];
 	        this.apiBase = source["apiBase"];
+	        this.apiKey = source["apiKey"];
 	        this.maskedApiKey = source["maskedApiKey"];
 	        this.model = source["model"];
+	        this.maxOutputTokens = source["maxOutputTokens"];
+	        this.contextWindow = source["contextWindow"];
 	        this.isActive = source["isActive"];
 	    }
 	}

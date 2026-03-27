@@ -191,6 +191,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
         setGroupId(defaultGroupId);
         setIcon("server");
         setDescription("");
+        resetSharedFields("ssh");
         resetSSHFields();
         resetDatabaseFields();
         resetRedisFields();
@@ -240,6 +241,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
         resetProxyFields();
       }
     } catch {
+      resetSharedFields("ssh");
       resetSSHFields();
     }
   };
@@ -269,6 +271,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
         setPassword("");
       }
     } catch {
+      resetSharedFields("database");
       resetDatabaseFields();
     }
   };
@@ -294,8 +297,20 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
         setPassword("");
       }
     } catch {
+      resetSharedFields("redis");
       resetRedisFields();
     }
+  };
+
+  // Reset shared connection fields with type-appropriate defaults
+  const resetSharedFields = (type: AssetType, dbDriver = "mysql") => {
+    setHost("");
+    setPort(type === "database" ? (DEFAULT_PORTS[dbDriver] || 3306) : (DEFAULT_PORTS[type] || 22));
+    setUsername(type === "ssh" ? "root" : "");
+    setPassword("");
+    setEncryptedPassword("");
+    setPasswordSource("inline");
+    setPasswordCredentialId(0);
   };
 
   const resetProxyFields = () => {
@@ -307,16 +322,9 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     setEncryptedProxyPassword("");
   };
 
+  // SSH-exclusive fields only
   const resetSSHFields = () => {
-    setHost("");
-    setPort(22);
-    setUsername("root");
     setAuthType("password");
-    setPassword("");
-
-    setEncryptedPassword("");
-    setPasswordSource("inline");
-    setPasswordCredentialId(0);
     setKeySource("managed");
     setCredentialId(0);
     setSelectedKeyPaths([]);
@@ -325,15 +333,8 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     resetProxyFields();
   };
 
+  // Database-exclusive fields only
   const resetDatabaseFields = () => {
-    setHost("");
-    setPort(3306);
-    setUsername("");
-    setPassword("");
-
-    setEncryptedPassword("");
-    setPasswordSource("inline");
-    setPasswordCredentialId(0);
     setDriver("mysql");
     setDatabase("");
     setSslMode("disable");
@@ -342,15 +343,8 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     setParams("");
   };
 
+  // Redis-exclusive fields only
   const resetRedisFields = () => {
-    setHost("");
-    setPort(6379);
-    setUsername("");
-    setPassword("");
-
-    setEncryptedPassword("");
-    setPasswordSource("inline");
-    setPasswordCredentialId(0);
     setTls(false);
     setRedisSshAssetId(0);
   };
@@ -358,25 +352,16 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
   const handleTypeChange = (newType: AssetType) => {
     if (newType === assetType) return;
     setAssetType(newType);
-    setPassword("");
 
+    // Reset port/username/password to type-appropriate defaults (keep host)
+    const defaultDriver = newType === "database" ? driver : undefined;
+    setPort(newType === "database" ? (DEFAULT_PORTS[defaultDriver || "mysql"] || 3306) : (DEFAULT_PORTS[newType] || 22));
+    setUsername(newType === "ssh" ? "root" : "");
+    setPassword("");
     setEncryptedPassword("");
     setPasswordSource("inline");
     setPasswordCredentialId(0);
-
-    if (newType === "ssh") {
-      setPort(22);
-      setUsername("root");
-      setIcon(DEFAULT_ICONS.ssh);
-    } else if (newType === "database") {
-      setPort(DEFAULT_PORTS[driver] || 3306);
-      setUsername("");
-      setIcon(DEFAULT_ICONS[driver] || "mysql");
-    } else if (newType === "redis") {
-      setPort(6379);
-      setUsername("");
-      setIcon(DEFAULT_ICONS.redis);
-    }
+    setIcon(newType === "database" ? (DEFAULT_ICONS[driver] || "mysql") : (DEFAULT_ICONS[newType] || "server"));
   };
 
   const handleDriverChange = (newDriver: string) => {

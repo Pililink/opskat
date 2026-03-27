@@ -90,12 +90,13 @@ type PoolEntryInfo struct {
 
 // Pool SSH 连接池
 type Pool struct {
-	mu       sync.RWMutex
-	entries  map[int64]*poolEntry
-	dialer   PoolDialer
-	idleTime time.Duration
-	done     chan struct{}
-	wg       sync.WaitGroup
+	mu        sync.RWMutex
+	entries   map[int64]*poolEntry
+	dialer    PoolDialer
+	idleTime  time.Duration
+	done      chan struct{}
+	wg        sync.WaitGroup
+	closeOnce sync.Once
 }
 
 // NewPool 创建连接池
@@ -208,17 +209,19 @@ func (p *Pool) List() []PoolEntryInfo {
 	return infos
 }
 
-// Close 关闭连接池
+// Close 关闭连接池（可安全多次调用）
 func (p *Pool) Close() {
-	close(p.done)
-	p.wg.Wait()
+	p.closeOnce.Do(func() {
+		close(p.done)
+		p.wg.Wait()
 
-	p.mu.Lock()
-	for id, entry := range p.entries {
-		entry.close()
-		delete(p.entries, id)
-	}
-	p.mu.Unlock()
+		p.mu.Lock()
+		for id, entry := range p.entries {
+			entry.close()
+			delete(p.entries, id)
+		}
+		p.mu.Unlock()
+	})
 }
 
 // cleanupLoop 后台清理空闲连接

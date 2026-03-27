@@ -189,7 +189,7 @@ export function UpdateSection() {
         <div className="flex justify-between items-center text-sm">
           <span className="text-muted-foreground">{t("appUpdate.downloadMirror")}</span>
           <Select
-            value={mirror === "custom" ? "custom" : (mirror || "__default__")}
+            value={mirror === "custom" ? "custom" : mirror || "__default__"}
             onValueChange={(v) => handleMirrorChange(v === "__default__" ? "" : v)}
           >
             <SelectTrigger className="w-[160px] h-8 text-xs">

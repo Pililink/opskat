@@ -237,3 +237,10 @@ jobs:
             --generate-notes \
             ${{ steps.prerelease.outputs.flag }} \
             artifacts/*
+
+      - name: Upload release info for mirror fallback
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api repos/opskat/opskat/releases/tags/${{ github.ref_name }} > release-info.json
+          gh release upload ${{ github.ref_name }} release-info.json --clobber

@@ -1007,7 +1007,7 @@ func (a *App) startAutoUpdateCheck() {
 			return
 		}
 
-		info, err := update_svc.CheckForUpdate(a.GetUpdateChannel())
+		info, err := update_svc.CheckForUpdate(a.GetUpdateChannel(), "")
 		if err != nil {
 			logger.Default().Warn("auto check update failed", zap.Error(err))
 			return
@@ -1051,13 +1051,13 @@ func (a *App) SetUpdateChannel(channel string) error {
 
 // CheckForUpdate 检查是否有新版本
 func (a *App) CheckForUpdate() (*update_svc.UpdateInfo, error) {
-	return update_svc.CheckForUpdate(a.GetUpdateChannel())
+	return update_svc.CheckForUpdate(a.GetUpdateChannel(), "")
 }
 
 // DownloadAndInstallUpdate 下载并安装更新
 // 更新完成后需要用户重启应用
 func (a *App) DownloadAndInstallUpdate() error {
-	err := update_svc.DownloadAndUpdate(a.GetUpdateChannel(), func(downloaded, total int64) {
+	err := update_svc.DownloadAndUpdate(a.GetUpdateChannel(), "", false, func(downloaded, total int64) {
 		wailsRuntime.EventsEmit(a.ctx, "update:progress", map[string]int64{
 			"downloaded": downloaded,
 			"total":      total,

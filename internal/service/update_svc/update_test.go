@@ -144,6 +144,44 @@ func TestSplitPreRelease(t *testing.T) {
 	})
 }
 
+func TestFetchChecksumsErrorPrefix(t *testing.T) {
+	convey.Convey("校验文件获取失败返回特定前缀", t, func() {
+		convey.Convey("空 assets 返回 nil（兼容旧版本）", func() {
+			checksums, err := FetchChecksums(nil)
+			assert.NoError(t, err)
+			assert.Nil(t, checksums)
+		})
+
+		convey.Convey("无 SHA256SUMS.txt asset 返回 nil", func() {
+			assets := []ReleaseAsset{
+				{Name: "opskat-v1.0.0-darwin-arm64.dmg", BrowserDownloadURL: "https://example.com/file.dmg"},
+			}
+			checksums, err := FetchChecksums(assets)
+			assert.NoError(t, err)
+			assert.Nil(t, checksums)
+		})
+	})
+}
+
+func TestReleaseInfoDownloadURL(t *testing.T) {
+	convey.Convey("release-info.json URL 构造", t, func() {
+		convey.Convey("stable 通道", func() {
+			url := releaseInfoURL(ChannelStable)
+			assert.Equal(t, "https://github.com/opskat/opskat/releases/latest/download/release-info.json", url)
+		})
+
+		convey.Convey("nightly 通道", func() {
+			url := releaseInfoURL(ChannelNightly)
+			assert.Equal(t, "https://github.com/opskat/opskat/releases/download/nightly/release-info.json", url)
+		})
+
+		convey.Convey("beta 通道返回空（不支持镜像回退）", func() {
+			url := releaseInfoURL(ChannelBeta)
+			assert.Equal(t, "", url)
+		})
+	})
+}
+
 func TestParseChecksums(t *testing.T) {
 	convey.Convey("解析 SHA256SUMS.txt", t, func() {
 		convey.Convey("正常格式", func() {

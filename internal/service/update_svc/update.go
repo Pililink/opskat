@@ -33,6 +33,9 @@ const (
 	ChannelBeta = "beta"
 	// ChannelNightly 每日构建更新通道
 	ChannelNightly = "nightly"
+
+	// ChecksumFetchError 校验文件获取失败的错误前缀，前端用于识别此特定错误
+	ChecksumFetchError = "CHECKSUM_FETCH_FAILED:"
 )
 
 // ReleaseAsset GitHub release 资产
@@ -141,13 +144,61 @@ func fetchLatestBetaRelease() (*ReleaseInfo, error) {
 	return nil, fmt.Errorf("no beta or stable release found")
 }
 
+// releaseInfoURL 返回指定通道的 release-info.json 下载地址
+// beta 通道无固定地址，返回空字符串
+func releaseInfoURL(channel string) string {
+	switch channel {
+	case ChannelStable:
+		return "https://github.com/" + githubRepo + "/releases/latest/download/release-info.json"
+	case ChannelNightly:
+		return "https://github.com/" + githubRepo + "/releases/download/nightly/release-info.json"
+	default:
+		return ""
+	}
+}
+
+// fetchReleaseFromMirror 通过镜像下载 release-info.json 获取 release 信息
+func fetchReleaseFromMirror(channel, mirrorPrefix string) (*ReleaseInfo, error) {
+	infoURL := releaseInfoURL(channel)
+	if infoURL == "" {
+		return nil, fmt.Errorf("channel %s does not support mirror fallback", channel)
+	}
+
+	mirroredURL := applyMirror(infoURL, mirrorPrefix)
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(mirroredURL) //nolint:gosec,noctx // mirror URL constructed from constants
+	if err != nil {
+		return nil, fmt.Errorf("request mirror failed: %w", err)
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			logger.Default().Warn("close mirror response body", zap.Error(err))
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("mirror returned status %d", resp.StatusCode)
+	}
+
+	var release ReleaseInfo
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return nil, fmt.Errorf("decode mirror response failed: %w", err)
+	}
+	return &release, nil
+}
+
 // CheckForUpdate 检查指定通道的最新版本
-func CheckForUpdate(channel string) (*UpdateInfo, error) {
+func CheckForUpdate(channel, mirrorPrefix string) (*UpdateInfo, error) {
 	if channel == "" {
 		channel = ChannelStable
 	}
 
 	release, err := fetchRelease(channel)
+	if err != nil && mirrorPrefix != "" {
+		logger.Default().Info("GitHub API failed, trying mirror fallback",
+			zap.String("channel", channel), zap.Error(err))
+		release, err = fetchReleaseFromMirror(channel, mirrorPrefix)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -208,12 +259,17 @@ func hasUpdate(channel, currentVersion, latestVersion string) bool {
 }
 
 // DownloadAndUpdate 下载指定通道的最新版本并替换当前二进制
-func DownloadAndUpdate(channel string, onProgress func(downloaded, total int64)) error {
+func DownloadAndUpdate(channel, mirrorPrefix string, skipChecksum bool, onProgress func(downloaded, total int64)) error {
 	if channel == "" {
 		channel = ChannelStable
 	}
 
 	release, err := fetchRelease(channel)
+	if err != nil && mirrorPrefix != "" {
+		logger.Default().Info("GitHub API failed, trying mirror fallback",
+			zap.String("channel", channel), zap.Error(err))
+		release, err = fetchReleaseFromMirror(channel, mirrorPrefix)
+	}
 	if err != nil {
 		return err
 	}
@@ -237,14 +293,18 @@ func DownloadAndUpdate(channel string, onProgress func(downloaded, total int64))
 	}
 
 	// 获取校验信息
-	checksums, err := fetchChecksums(release.Assets)
-	if err != nil {
-		return fmt.Errorf("fetch checksums failed: %w", err)
+	var checksums map[string]string
+	if !skipChecksum {
+		checksums, err = FetchChecksums(release.Assets)
+		if err != nil {
+			return fmt.Errorf("%s%w", ChecksumFetchError, err)
+		}
 	}
 
 	// 下载资产
+	actualDownloadURL := applyMirror(downloadURL, mirrorPrefix)
 	dlClient := &http.Client{Timeout: 30 * time.Minute}
-	dlResp, err := dlClient.Get(downloadURL)
+	dlResp, err := dlClient.Get(actualDownloadURL)
 	if err != nil {
 		return fmt.Errorf("download failed: %w", err)
 	}
@@ -781,9 +841,9 @@ func parseChecksums(content string) map[string]string {
 	return result
 }
 
-// fetchChecksums 从 release assets 下载并解析 SHA256SUMS.txt
+// FetchChecksums 从 release assets 下载并解析 SHA256SUMS.txt
 // 如果 release 中没有 SHA256SUMS.txt，返回 nil（跳过校验，兼容旧版本 release）
-func fetchChecksums(assets []ReleaseAsset) (map[string]string, error) {
+func FetchChecksums(assets []ReleaseAsset) (map[string]string, error) {
 	var checksumURL string
 	for _, asset := range assets {
 		if asset.Name == "SHA256SUMS.txt" {

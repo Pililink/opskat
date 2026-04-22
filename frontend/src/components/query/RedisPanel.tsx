@@ -7,10 +7,10 @@ interface RedisPanelProps {
 }
 
 export function RedisPanel({ tabId }: RedisPanelProps) {
-  const { width: sidebarWidth, handleMouseDown } = useResizeHandle({
-    defaultWidth: 220,
-    minWidth: 160,
-    maxWidth: 400,
+  const { size: sidebarWidth, handleMouseDown } = useResizeHandle({
+    defaultSize: 220,
+    minSize: 160,
+    maxSize: 400,
   });
 
   return (

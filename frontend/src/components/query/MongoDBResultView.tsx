@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { ChevronLeft, ChevronRight, ChevronsLeft, RefreshCw, Loader2 } from "lucide-react";
 import { Button, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@opskat/ui";
 import { QueryResultTable } from "./QueryResultTable";
+import { CodeEditor } from "@/components/CodeEditor";
 
 interface MongoDBResultViewProps {
   data: string;
@@ -15,6 +16,8 @@ interface MongoDBResultViewProps {
   onPageSizeChange?: (size: number) => void;
   // When provided, renders a refresh button that re-invokes the current query.
   onRefresh?: () => void;
+  // Shortcut label appended to the refresh button's tooltip, e.g. "⌘R".
+  refreshShortcutLabel?: string;
 }
 
 type ViewMode = "table" | "json";
@@ -29,6 +32,7 @@ export function MongoDBResultView({
   onPageChange,
   onPageSizeChange,
   onRefresh,
+  refreshShortcutLabel,
 }: MongoDBResultViewProps) {
   const { t } = useTranslation();
   const [viewMode, setViewMode] = useState<ViewMode>("table");
@@ -126,10 +130,8 @@ export function MongoDBResultView({
             renderCell={renderMongoCell}
           />
         ) : (
-          <div className="flex-1 min-h-0 overflow-auto">
-            <pre className="p-3 text-xs font-mono whitespace-pre-wrap break-all">
-              {JSON.stringify(documents, null, 2)}
-            </pre>
+          <div className="flex-1 min-h-0 bg-background">
+            <CodeEditor value={JSON.stringify(documents, null, 2)} language="json" readOnly />
           </div>
         )}
       </div>
@@ -145,7 +147,9 @@ export function MongoDBResultView({
               className="h-6 w-6"
               onClick={onRefresh}
               disabled={loading}
-              title={t("query.refreshTable")}
+              title={
+                refreshShortcutLabel ? `${t("query.refreshTable")} (${refreshShortcutLabel})` : t("query.refreshTable")
+              }
             >
               {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
             </Button>

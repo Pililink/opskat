@@ -31,13 +31,13 @@ export function SideAssistantPanel({ collapsed, onToggle }: SideAssistantPanelPr
   const [historyOpen, setHistoryOpen] = useState(false);
 
   const {
-    width,
+    size: width,
     isResizing: resizing,
     handleMouseDown: handleResizeStart,
   } = useResizeHandle({
-    defaultWidth: 360,
-    minWidth: 280,
-    maxWidth: 520,
+    defaultSize: 360,
+    minSize: 280,
+    maxSize: 520,
     reverse: true,
     storageKey: "ai_sidebar_width",
   });

@@ -15,10 +15,10 @@ export function DatabasePanel({ tabId }: DatabasePanelProps) {
   const { dbStates, closeInnerTab, setActiveInnerTab } = useQueryStore();
   const dbState = dbStates[tabId];
 
-  const { width: sidebarWidth, handleMouseDown } = useResizeHandle({
-    defaultWidth: 200,
-    minWidth: 140,
-    maxWidth: 400,
+  const { size: sidebarWidth, handleMouseDown } = useResizeHandle({
+    defaultSize: 200,
+    minSize: 140,
+    maxSize: 400,
   });
 
   if (!dbState) return null;
@@ -94,7 +94,7 @@ export function DatabasePanel({ tabId }: DatabasePanelProps) {
             return (
               <div key={tab.id} className="absolute inset-0" style={{ display: isActive ? "block" : "none" }}>
                 {tab.type === "table" ? (
-                  <TableDataTab tabId={tabId} database={tab.database} table={tab.table} />
+                  <TableDataTab tabId={tabId} innerTabId={tab.id} database={tab.database} table={tab.table} />
                 ) : (
                   <SqlEditorTab tabId={tabId} innerTabId={tab.id} />
                 )}

@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Play, Loader2, History, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
+import type * as MonacoNS from "monaco-editor";
 import {
   Button,
   Input,
@@ -13,11 +14,14 @@ import {
   PopoverTrigger,
   PopoverContent,
   ConfirmDialog,
+  useResizeHandle,
 } from "@opskat/ui";
 import { useQueryStore } from "@/stores/queryStore";
 import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
 import { ExecuteSQLPaged } from "../../../wailsjs/go/app/App";
 import { QueryResultTable } from "./QueryResultTable";
+import { CodeEditor } from "@/components/CodeEditor";
+import type { DynamicCompletionGetter } from "@/lib/monaco-completions";
 
 interface SqlEditorTabProps {
   tabId: string;
@@ -37,10 +41,10 @@ const DEFAULT_PAGE_SIZE = 100;
 
 export function SqlEditorTab({ tabId, innerTabId }: SqlEditorTabProps) {
   const { t } = useTranslation();
-  const { dbStates, updateInnerTab } = useQueryStore();
+  const { dbStates, updateInnerTab, addSqlHistory } = useQueryStore();
   const tab = useTabStore((s) => s.tabs.find((t) => t.id === tabId));
   const queryMeta = tab?.meta as QueryTabMeta | undefined;
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const editorRef = useRef<MonacoNS.editor.IStandaloneCodeEditor | null>(null);
 
   const dbState = dbStates[tabId];
   const assetId = queryMeta?.assetId ?? 0;
@@ -50,6 +54,17 @@ export function SqlEditorTab({ tabId, innerTabId }: SqlEditorTabProps) {
   const innerTab = dbState?.innerTabs.find((t) => t.id === innerTabId);
   const persistedSql = innerTab?.type === "sql" ? innerTab.sql : undefined;
   const persistedDb = innerTab?.type === "sql" ? innerTab.selectedDb : undefined;
+  const persistedHeight = innerTab?.type === "sql" ? innerTab.editorHeight : undefined;
+  const sqlHistory = innerTab?.type === "sql" ? innerTab.history || [] : [];
+
+  // Editor/result split — drag the bar between them to adjust editor height.
+  const { size: editorHeight, handleMouseDown: handleSplitterDown } = useResizeHandle({
+    axis: "y",
+    defaultSize: persistedHeight && persistedHeight > 0 ? persistedHeight : 160,
+    minSize: 80,
+    maxSize: 800,
+    onResizeEnd: (h) => updateInnerTab(tabId, innerTabId, { editorHeight: h }),
+  });
 
   const [sql, setSql] = useState(persistedSql || "");
   const [selectedDb, setSelectedDb] = useState(persistedDb || queryMeta?.defaultDatabase || "");
@@ -60,7 +75,6 @@ export function SqlEditorTab({ tabId, innerTabId }: SqlEditorTabProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showDangerConfirm, setShowDangerConfirm] = useState(false);
-  const [sqlHistory, setSqlHistory] = useState<string[]>([]);
   const [showHistory, setShowHistory] = useState(false);
 
   // Pagination state
@@ -100,11 +114,12 @@ export function SqlEditorTab({ tabId, innerTabId }: SqlEditorTabProps) {
 
   // Get the SQL text to execute: selected text if any, otherwise full text
   const getExecutableSQL = useCallback(() => {
-    const textarea = textareaRef.current;
-    if (textarea) {
-      const { selectionStart, selectionEnd } = textarea;
-      if (selectionStart !== selectionEnd) {
-        return sql.substring(selectionStart, selectionEnd).trim();
+    const editor = editorRef.current;
+    if (editor) {
+      const sel = editor.getSelection();
+      if (sel && !sel.isEmpty()) {
+        const text = editor.getModel()?.getValueInRange(sel) ?? "";
+        return text.trim();
       }
     }
     return sql.trim();
@@ -148,13 +163,12 @@ export function SqlEditorTab({ tabId, innerTabId }: SqlEditorTabProps) {
     const execSql = getExecutableSQL();
     if (!execSql || !assetId) return;
 
-    // Record to history (dedup, max 30)
-    setSqlHistory((prev) => [execSql, ...prev.filter((s) => s !== execSql)].slice(0, 30));
+    addSqlHistory(tabId, innerTabId, execSql);
 
     setLastExecSql(execSql);
     setPage(0);
     await fetchPage(execSql, 0);
-  }, [getExecutableSQL, assetId, fetchPage]);
+  }, [getExecutableSQL, assetId, fetchPage, addSqlHistory, tabId, innerTabId]);
 
   // Re-fetch when page changes (but not on initial execute)
   useEffect(() => {
@@ -183,30 +197,33 @@ export function SqlEditorTab({ tabId, innerTabId }: SqlEditorTabProps) {
     }
   }, [getExecutableSQL, assetId, isDangerousSQL, doExecute]);
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-        // IME 合成中：不触发执行，交给 IME 处理
+  // Monaco 命令是在 onMount 时一次性注册的，闭包里拿到的 execute 会过期；
+  // 用 ref 桥接到最新版。
+  const executeRef = useRef(execute);
+  useEffect(() => {
+    executeRef.current = execute;
+  }, [execute]);
 
-        if (e.nativeEvent.isComposing || e.keyCode === 229) return;
-        e.preventDefault();
-        execute();
-        return;
-      }
-      // Tab key inserts two spaces instead of moving focus
-      if (e.key === "Tab") {
-        e.preventDefault();
-        const textarea = e.currentTarget;
-        const { selectionStart, selectionEnd } = textarea;
-        const newValue = sql.substring(0, selectionStart) + "  " + sql.substring(selectionEnd);
-        setSql(newValue);
-        // Restore cursor position after state update
-        requestAnimationFrame(() => {
-          textarea.selectionStart = textarea.selectionEnd = selectionStart + 2;
-        });
-      }
-    },
-    [execute, sql]
+  const handleEditorMount = useCallback((editor: MonacoNS.editor.IStandaloneCodeEditor, monaco: typeof MonacoNS) => {
+    editorRef.current = editor;
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
+      executeRef.current();
+    });
+  }, []);
+
+  // 把当前选中库的表名注入到 monaco 补全（在 . 触发或主动唤起时一并出现）
+  const tables = dbState?.tables?.[selectedDb] ?? [];
+  const tableCompletions = useCallback<DynamicCompletionGetter>(
+    ({ monaco, range }) =>
+      tables.map((tableName) => ({
+        label: tableName,
+        kind: monaco.languages.CompletionItemKind.Class,
+        insertText: tableName,
+        detail: selectedDb ? `table · ${selectedDb}` : "table",
+        range,
+        sortText: "0_" + tableName, // 表名排在关键字之前
+      })),
+    [tables, selectedDb]
   );
 
   const handlePageInputConfirm = useCallback(() => {
@@ -226,7 +243,7 @@ export function SqlEditorTab({ tabId, innerTabId }: SqlEditorTabProps) {
   return (
     <div className="flex flex-col h-full">
       {/* SQL editor area */}
-      <div className="flex flex-col border-b border-border shrink-0">
+      <div className="flex flex-col shrink-0" style={{ height: editorHeight }}>
         {/* Toolbar */}
         <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border bg-muted/30">
           <Button
@@ -277,20 +294,26 @@ export function SqlEditorTab({ tabId, innerTabId }: SqlEditorTabProps) {
             </Popover>
           )}
         </div>
-        {/* Textarea */}
-        <textarea
-          ref={textareaRef}
-          value={sql}
-          onChange={(e) => setSql(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={t("query.sqlPlaceholder")}
-          className="w-full min-h-[120px] max-h-[300px] resize-y bg-background px-3 py-2 text-xs font-mono outline-none placeholder:text-muted-foreground/60"
-          spellCheck={false}
-          autoComplete="off"
-          autoCorrect="off"
-          autoCapitalize="off"
-        />
+        {/* Monaco editor; automaticLayout lets it reflow when the splitter changes height */}
+        <div className="flex-1 min-h-0 w-full overflow-hidden bg-background">
+          <CodeEditor
+            value={sql}
+            onChange={setSql}
+            language="sql"
+            placeholder={t("query.sqlPlaceholder")}
+            onMount={handleEditorMount}
+            dynamicCompletions={tableCompletions}
+          />
+        </div>
       </div>
+
+      {/* Vertical splitter between editor and results */}
+      <div
+        role="separator"
+        aria-orientation="horizontal"
+        className="h-[4px] shrink-0 cursor-row-resize border-y border-border bg-muted/30 hover:bg-ring/40 active:bg-ring/60 transition-colors"
+        onMouseDown={handleSplitterDown}
+      />
 
       {/* Result area */}
       <div className="flex-1 min-h-0 flex flex-col">

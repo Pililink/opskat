@@ -101,10 +101,11 @@ func (a *App) InitAIProvider() {
 
 // ConversationDisplayMessage 返回给前端的会话消息（用于恢复显示）
 type ConversationDisplayMessage struct {
-	Role     string                             `json:"role"`
-	Content  string                             `json:"content"`
-	Blocks   []conversation_entity.ContentBlock `json:"blocks"`
-	Mentions []conversation_entity.MentionRef   `json:"mentions"`
+	Role       string                             `json:"role"`
+	Content    string                             `json:"content"`
+	Blocks     []conversation_entity.ContentBlock `json:"blocks"`
+	Mentions   []conversation_entity.MentionRef   `json:"mentions"`
+	TokenUsage *conversation_entity.TokenUsage    `json:"tokenUsage,omitempty"`
 }
 
 // CreateConversation 创建新会话
@@ -175,11 +176,16 @@ func (a *App) loadConversationDisplayMessages(ctx context.Context, id int64) ([]
 		if err != nil {
 			logger.Default().Warn("get message mentions", zap.Error(err))
 		}
+		usage, err := msg.GetTokenUsage()
+		if err != nil {
+			logger.Default().Warn("get message token usage", zap.Error(err))
+		}
 		displayMsgs = append(displayMsgs, ConversationDisplayMessage{
-			Role:     msg.Role,
-			Content:  msg.Content,
-			Blocks:   blocks,
-			Mentions: mentions,
+			Role:       msg.Role,
+			Content:    msg.Content,
+			Blocks:     blocks,
+			Mentions:   mentions,
+			TokenUsage: usage,
 		})
 	}
 	return displayMsgs, nil
@@ -373,6 +379,9 @@ func (a *App) SaveConversationMessages(convID int64, displayMsgs []ConversationD
 		}
 		if err := msg.SetMentions(dm.Mentions); err != nil {
 			logger.Default().Error("set message mentions", zap.Error(err))
+		}
+		if err := msg.SetTokenUsage(dm.TokenUsage); err != nil {
+			logger.Default().Error("set message token usage", zap.Error(err))
 		}
 		msgs = append(msgs, msg)
 	}

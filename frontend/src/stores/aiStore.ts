@@ -53,12 +53,21 @@ export interface ContentBlock {
   approvalSessionId?: string;
 }
 
+// Assistant 消息累计 token 使用量；单次用户 turn 可能跨多轮 LLM 调用，前端按 usage 事件累加。
+export interface TokenUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheCreationTokens?: number;
+  cacheReadTokens?: number;
+}
+
 export interface ChatMessage {
   role: "user" | "assistant" | "tool";
   content: string;
   blocks: ContentBlock[];
   streaming?: boolean;
   mentions?: MentionRef[];
+  tokenUsage?: TokenUsage;
 }
 
 export interface PendingQueueItem {
@@ -88,6 +97,13 @@ interface StreamEventData {
   }>;
   description?: string;
   session_id?: string;
+  // usage 事件：后端下发每轮 LLM 调用的 token 使用量
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_creation_tokens?: number;
+    cache_read_tokens?: number;
+  };
 }
 
 interface TabState {
@@ -282,6 +298,7 @@ function toDisplayMessages(msgs: ChatMessage[], includeStreaming = false): app.C
                 end: mr.end,
               })
           ),
+          tokenUsage: m.tokenUsage ? new conversation_entity.TokenUsage(m.tokenUsage) : undefined,
         })
     );
 }
@@ -303,6 +320,14 @@ function convertDisplayMessages(displayMsgs: app.ConversationDisplayMessage[]): 
       start: mr.start,
       end: mr.end,
     })),
+    tokenUsage: dm.tokenUsage
+      ? {
+          inputTokens: dm.tokenUsage.inputTokens,
+          outputTokens: dm.tokenUsage.outputTokens,
+          cacheCreationTokens: dm.tokenUsage.cacheCreationTokens,
+          cacheReadTokens: dm.tokenUsage.cacheReadTokens,
+        }
+      : undefined,
     streaming: false,
   }));
 }
@@ -420,6 +445,25 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
   const msgs = useAIStore.getState().conversationMessages[convId] || currentMsgs;
 
   switch (event.type) {
+    case "usage": {
+      if (!event.usage) break;
+      const delta = event.usage;
+      const updated = updateLastAssistant(msgs, (msg) => {
+        const prev = msg.tokenUsage || {};
+        const merged: TokenUsage = {
+          inputTokens: (prev.inputTokens || 0) + (delta.input_tokens || 0),
+          outputTokens: (prev.outputTokens || 0) + (delta.output_tokens || 0),
+          cacheCreationTokens: (prev.cacheCreationTokens || 0) + (delta.cache_creation_tokens || 0),
+          cacheReadTokens: (prev.cacheReadTokens || 0) + (delta.cache_read_tokens || 0),
+        };
+        return { ...msg, tokenUsage: merged };
+      });
+      if (updated) {
+        updateConversation(convId, { messages: updated });
+      }
+      break;
+    }
+
     case "agent_start": {
       const updated = updateLastAssistant(msgs, (msg) => ({
         ...msg,

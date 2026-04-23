@@ -27,6 +27,17 @@ interface ToolBlockProps {
   block: ContentBlock;
 }
 
+function formatToolInput(input?: string): string {
+  if (!input) return "";
+  const trimmed = input.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return input;
+  try {
+    return JSON.stringify(JSON.parse(trimmed), null, 2);
+  } catch {
+    return input;
+  }
+}
+
 export function ToolBlock({ block }: ToolBlockProps) {
   const [expanded, setExpanded] = useState(false);
   const Icon = toolIcons[block.toolName || ""] || Terminal;
@@ -34,6 +45,8 @@ export function ToolBlock({ block }: ToolBlockProps) {
   const isError = block.status === "error";
   const isCancelled = block.status === "cancelled";
   const hasOutput = block.content && block.content.length > 0;
+  const hasInput = !!block.toolInput;
+  const canExpand = hasOutput || hasInput;
 
   return (
     <div
@@ -43,10 +56,10 @@ export function ToolBlock({ block }: ToolBlockProps) {
     >
       <button
         className="flex items-center gap-2 w-full min-w-0 px-3 py-2 h-[34px] text-left hover:bg-muted/50 transition-colors"
-        onClick={() => hasOutput && setExpanded(!expanded)}
-        disabled={!hasOutput}
+        onClick={() => canExpand && setExpanded(!expanded)}
+        disabled={!canExpand}
       >
-        {hasOutput && (
+        {canExpand && (
           <ChevronRight
             className={`h-3 w-3 shrink-0 text-muted-foreground transition-transform duration-150 ${
               expanded ? "rotate-90 opacity-100" : "opacity-50"
@@ -71,11 +84,26 @@ export function ToolBlock({ block }: ToolBlockProps) {
         </span>
       </button>
 
-      {expanded && hasOutput && (
-        <div className="border-t border-border/40 px-3 py-2 max-h-48 overflow-auto">
-          <pre className="whitespace-pre-wrap break-all font-mono text-[11px] text-muted-foreground leading-relaxed">
-            {block.content}
-          </pre>
+      {expanded && canExpand && (
+        <div className="border-t border-border/40 max-h-96 overflow-auto">
+          {hasInput && (
+            <div className="px-3 py-2">
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground/60 mb-1">参数</div>
+              <pre className="whitespace-pre-wrap break-all font-mono text-[11px] text-foreground/70 leading-relaxed">
+                {formatToolInput(block.toolInput)}
+              </pre>
+            </div>
+          )}
+          {hasOutput && (
+            <div className={`px-3 py-2 ${hasInput ? "border-t border-border/40" : ""}`}>
+              {hasInput && (
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground/60 mb-1">输出</div>
+              )}
+              <pre className="whitespace-pre-wrap break-all font-mono text-[11px] text-muted-foreground leading-relaxed">
+                {block.content}
+              </pre>
+            </div>
+          )}
         </div>
       )}
     </div>

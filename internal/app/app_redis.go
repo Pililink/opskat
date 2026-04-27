@@ -1,10 +1,6 @@
 package app
 
-import (
-	"context"
-
-	"github.com/opskat/opskat/internal/service/redis_svc"
-)
+import "github.com/opskat/opskat/internal/service/redis_svc"
 
 func (a *App) redisSvc() *redis_svc.Service {
 	if a.redisService == nil {
@@ -107,11 +103,4 @@ func (a *App) RedisFormatValue(value string, format string) redis_svc.RedisForma
 
 func (a *App) RedisEncodeValue(value string, format string) (string, error) {
 	return redis_svc.EncodeValueForStorage(value, format)
-}
-
-func (a *App) redisEventContext() context.Context {
-	if a.ctx != nil {
-		return a.ctx
-	}
-	return context.Background()
 }

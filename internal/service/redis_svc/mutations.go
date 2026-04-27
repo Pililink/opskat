@@ -154,7 +154,8 @@ func streamAdd(ctx context.Context, exec redisExecutor, key, id string, fields [
 	if id == "" {
 		id = "*"
 	}
-	args := []any{"XADD", key, id}
+	args := make([]any, 0, 3+2*len(fields))
+	args = append(args, "XADD", key, id)
 	for _, field := range fields {
 		args = append(args, field.Field, field.Value)
 	}

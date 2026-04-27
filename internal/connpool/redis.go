@@ -85,7 +85,7 @@ func buildRedisTLSConfig(cfg *asset_entity.RedisConfig) (*tls.Config, error) {
 	tlsConfig := &tls.Config{
 		MinVersion:         tls.VersionTLS12,
 		ServerName:         cfg.TLSServerName,
-		InsecureSkipVerify: cfg.TLSInsecure, //nolint:gosec // User-controlled option for self-signed Redis deployments.
+		InsecureSkipVerify: cfg.TLSInsecure,
 	}
 	if cfg.TLSCAFile != "" {
 		ca, err := os.ReadFile(cfg.TLSCAFile)
@@ -100,7 +100,7 @@ func buildRedisTLSConfig(cfg *asset_entity.RedisConfig) (*tls.Config, error) {
 	}
 	if cfg.TLSCertFile != "" || cfg.TLSKeyFile != "" {
 		if cfg.TLSCertFile == "" || cfg.TLSKeyFile == "" {
-			return nil, fmt.Errorf("Redis TLS 客户端证书和私钥必须同时配置")
+			return nil, fmt.Errorf("redis TLS 客户端证书和私钥必须同时配置")
 		}
 		cert, err := tls.LoadX509KeyPair(cfg.TLSCertFile, cfg.TLSKeyFile)
 		if err != nil {

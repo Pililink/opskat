@@ -182,7 +182,7 @@ func (s *Service) withClient(ctx context.Context, assetID int64, db int, fn func
 	if err != nil {
 		return fmt.Errorf("解析 Redis 凭据失败: %w", err)
 	}
-	opCtx := ctx
+	var opCtx context.Context
 	var cancel context.CancelFunc
 	if cfg.CommandTimeoutSeconds > 0 {
 		opCtx, cancel = context.WithTimeout(ctx, time.Duration(cfg.CommandTimeoutSeconds)*time.Second)

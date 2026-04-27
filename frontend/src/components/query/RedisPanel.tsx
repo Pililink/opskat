@@ -2,6 +2,7 @@ import { useRef } from "react";
 import { useResizeHandle } from "@opskat/ui";
 import { RedisKeyBrowser } from "./RedisKeyBrowser";
 import { RedisKeyDetail } from "./RedisKeyDetail";
+import { RedisOpsPanel } from "./RedisOpsPanel";
 
 interface RedisPanelProps {
   tabId: string;
@@ -27,8 +28,13 @@ export function RedisPanel({ tabId }: RedisPanelProps) {
       <div className="w-1 shrink-0 cursor-col-resize hover:bg-accent active:bg-accent" onMouseDown={handleMouseDown} />
 
       {/* Right: Key detail */}
-      <div className="min-w-0 flex-1">
-        <RedisKeyDetail tabId={tabId} />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="min-h-0 flex-1">
+          <RedisKeyDetail tabId={tabId} />
+        </div>
+        <div className="h-56 shrink-0 border-t">
+          <RedisOpsPanel tabId={tabId} />
+        </div>
       </div>
     </div>
   );

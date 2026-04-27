@@ -31,14 +31,14 @@ import {
 } from "@opskat/ui";
 import { useQueryStore } from "@/stores/queryStore";
 import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
-import { ExecuteRedisArgs } from "../../../wailsjs/go/app/App";
+import { RedisDeleteKeys } from "../../../wailsjs/go/app/App";
 
 interface RedisKeyBrowserProps {
   tabId: string;
 }
 
 const KEY_ROW_HEIGHT = 28;
-const SEPARATOR = ":";
+const DEFAULT_SEPARATOR = ":";
 
 // --- Tree logic ---
 
@@ -49,10 +49,11 @@ interface TreeNode {
   keyCount: number; // total leaf keys under this node
 }
 
-function buildKeyTree(keys: string[]): TreeNode {
+function buildKeyTree(keys: string[], separator: string): TreeNode {
   const root: TreeNode = { name: "", fullKey: null, children: new Map(), keyCount: 0 };
+  const sep = separator || DEFAULT_SEPARATOR;
   for (const key of keys) {
-    const parts = key.split(SEPARATOR);
+    const parts = key.split(sep);
     let node = root;
     for (let i = 0; i < parts.length; i++) {
       const segment = parts[i];
@@ -96,8 +97,9 @@ interface FlatTreeRow {
   nodeId: string; // unique ID for expansion tracking (prefix path)
 }
 
-function flattenTree(root: TreeNode, expandedSet: Set<string>): FlatTreeRow[] {
+function flattenTree(root: TreeNode, expandedSet: Set<string>, separator: string): FlatTreeRow[] {
   const result: FlatTreeRow[] = [];
+  const sep = separator || DEFAULT_SEPARATOR;
   const walk = (node: TreeNode, depth: number, prefix: string) => {
     // Sort children: folders first, then leaves
     const entries = Array.from(node.children.values()).sort((a, b) => {
@@ -107,7 +109,7 @@ function flattenTree(root: TreeNode, expandedSet: Set<string>): FlatTreeRow[] {
       return a.name.localeCompare(b.name);
     });
     for (const child of entries) {
-      const nodeId = prefix ? `${prefix}${SEPARATOR}${child.name}` : child.name;
+      const nodeId = prefix ? `${prefix}${sep}${child.name}` : child.name;
       const isExpanded = expandedSet.has(nodeId);
       result.push({
         depth,
@@ -139,6 +141,7 @@ export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
   const removeKey = useQueryStore((s) => s.removeKey);
   const tab = useTabStore((s) => s.tabs.find((tb) => tb.id === tabId));
   const tabMeta = tab?.meta as QueryTabMeta | undefined;
+  const keySeparator = tabMeta?.redisKeySeparator || DEFAULT_SEPARATOR;
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -154,14 +157,14 @@ export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
   // Build tree data
   const keyTree = useMemo(() => {
     if (viewMode !== "tree" || !state) return null;
-    return buildKeyTree(state.keys);
+    return buildKeyTree(state.keys, keySeparator);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewMode, state?.keys]);
+  }, [viewMode, state?.keys, keySeparator]);
 
   const flatRows = useMemo(() => {
     if (!keyTree) return [];
-    return flattenTree(keyTree, treeExpanded);
-  }, [keyTree, treeExpanded]);
+    return flattenTree(keyTree, treeExpanded, keySeparator);
+  }, [keyTree, treeExpanded, keySeparator]);
 
   const virtualizer = useVirtualizer({
     count: viewMode === "tree" ? flatRows.length : (state?.keys.length ?? 0),
@@ -268,7 +271,7 @@ export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
   const confirmDelete = useCallback(async () => {
     if (!deleteTarget || !tabMeta || !state) return;
     try {
-      await ExecuteRedisArgs(tabMeta.assetId, ["DEL", deleteTarget], state.currentDb);
+      await RedisDeleteKeys(tabMeta.assetId, state.currentDb, [deleteTarget]);
       removeKey(tabId, deleteTarget);
       loadDbKeyCounts(tabId);
     } catch (err) {
@@ -279,7 +282,7 @@ export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
 
   if (!state) return null;
 
-  const dbOptions = Array.from({ length: 16 }, (_, i) => i);
+  const dbOptions = Array.from({ length: Math.max(16, state.currentDb + 1) }, (_, i) => i);
 
   return (
     <div className="flex h-full flex-col">

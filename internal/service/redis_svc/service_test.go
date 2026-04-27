@@ -75,25 +75,58 @@ func TestScanKeys(t *testing.T) {
 }
 
 func TestGetKeyDetail(t *testing.T) {
-	exec := &fakeRedisExecutor{results: []any{
-		"hash",
-		int64(120),
-		int64(42),
-		int64(2),
-		[]any{"0", []any{"field", "value"}},
-	}}
+	t.Run("loads hash page", func(t *testing.T) {
+		exec := &fakeRedisExecutor{results: []any{
+			"hash",
+			int64(120),
+			int64(42),
+			int64(2),
+			[]any{"0", []any{"field", "value"}},
+		}}
 
-	got, err := getKeyDetail(context.Background(), exec, RedisKeyRequest{Key: "user:1"})
+		got, err := getKeyDetail(context.Background(), exec, RedisKeyRequest{Key: "user:1"})
 
-	require.NoError(t, err)
-	assert.Equal(t, "hash", got.Type)
-	assert.Equal(t, int64(120), got.TTL)
-	assert.Equal(t, int64(42), got.Size)
-	assert.Equal(t, int64(2), got.Total)
-	assert.Equal(t, []RedisHashEntry{{Field: "field", Value: "value"}}, got.Value)
-	assert.Equal(t, []any{"TYPE", "user:1"}, exec.calls[0])
-	assert.Equal(t, []any{"TTL", "user:1"}, exec.calls[1])
-	assert.Equal(t, []any{"MEMORY", "USAGE", "user:1"}, exec.calls[2])
-	assert.Equal(t, []any{"HLEN", "user:1"}, exec.calls[3])
-	assert.Equal(t, []any{"HSCAN", "user:1", "0", "COUNT", int64(100)}, exec.calls[4])
+		require.NoError(t, err)
+		assert.Equal(t, "hash", got.Type)
+		assert.Equal(t, int64(120), got.TTL)
+		assert.Equal(t, int64(42), got.Size)
+		assert.Equal(t, int64(2), got.Total)
+		assert.Equal(t, []RedisHashEntry{{Field: "field", Value: "value"}}, got.Value)
+		assert.Equal(t, []any{"TYPE", "user:1"}, exec.calls[0])
+		assert.Equal(t, []any{"TTL", "user:1"}, exec.calls[1])
+		assert.Equal(t, []any{"MEMORY", "USAGE", "user:1"}, exec.calls[2])
+		assert.Equal(t, []any{"HLEN", "user:1"}, exec.calls[3])
+		assert.Equal(t, []any{"HSCAN", "user:1", "0", "COUNT", int64(100)}, exec.calls[4])
+	})
+
+	t.Run("loads next stream page without duplicating cursor entry", func(t *testing.T) {
+		exec := &fakeRedisExecutor{results: []any{
+			"stream",
+			int64(-1),
+			int64(80),
+			int64(4),
+			[]any{
+				[]any{"1-0", []any{"name", "old"}},
+				[]any{"2-0", []any{"name", "Ada"}},
+				[]any{"3-0", []any{"name", "Lin"}},
+			},
+		}}
+
+		got, err := getKeyDetail(context.Background(), exec, RedisKeyRequest{
+			Key:    "events",
+			Cursor: "1-0",
+			Offset: 2,
+			Count:  2,
+		})
+
+		require.NoError(t, err)
+		assert.Equal(t, []RedisStreamEntry{
+			{ID: "2-0", Fields: map[string]string{"name": "Ada"}},
+			{ID: "3-0", Fields: map[string]string{"name": "Lin"}},
+		}, got.Value)
+		assert.Equal(t, "3-0", got.ValueCursor)
+		assert.Equal(t, int64(4), got.ValueOffset)
+		assert.False(t, got.HasMoreValues)
+		assert.Equal(t, []any{"XRANGE", "events", "1-0", "+", "COUNT", int64(3)}, exec.calls[4])
+	})
 }

@@ -3,6 +3,7 @@ package redis_svc
 import (
 	"context"
 	"fmt"
+	"time"
 )
 
 func setKeyTTL(ctx context.Context, exec redisExecutor, key string, seconds int64) error {
@@ -91,6 +92,19 @@ func listSet(ctx context.Context, exec redisExecutor, key string, index int64, v
 	_, err := exec.Do(ctx, "LSET", key, index, value)
 	if err != nil {
 		return fmt.Errorf("set Redis list value: %w", err)
+	}
+	return nil
+}
+
+func listDelete(ctx context.Context, exec redisExecutor, key string, index int64, sentinel string) error {
+	if sentinel == "" {
+		sentinel = fmt.Sprintf("__OPSKAT_LIST_DELETE_%d__", time.Now().UnixNano())
+	}
+	if _, err := exec.Do(ctx, "LSET", key, index, sentinel); err != nil {
+		return fmt.Errorf("mark Redis list value for deletion: %w", err)
+	}
+	if _, err := exec.Do(ctx, "LREM", key, int64(1), sentinel); err != nil {
+		return fmt.Errorf("delete Redis list value: %w", err)
 	}
 	return nil
 }

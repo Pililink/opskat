@@ -121,6 +121,12 @@ func (s *Service) ListSet(ctx context.Context, assetID int64, db int, key string
 	})
 }
 
+func (s *Service) ListDelete(ctx context.Context, assetID int64, db int, key string, index int64) error {
+	return s.withClient(ctx, assetID, db, func(ctx context.Context, exec redisExecutor) error {
+		return listDelete(ctx, exec, key, index, "")
+	})
+}
+
 func (s *Service) SetAdd(ctx context.Context, assetID int64, db int, key, member string) error {
 	return s.withClient(ctx, assetID, db, func(ctx context.Context, exec redisExecutor) error {
 		return setAdd(ctx, exec, key, member)
@@ -390,13 +396,22 @@ func getKeyDetail(ctx context.Context, exec redisExecutor, req RedisKeyRequest) 
 			return RedisKeyDetail{}, fmt.Errorf("load Redis stream length: %w", err)
 		}
 		detail.Total = toInt64(total)
-		value, err := exec.Do(ctx, "XRANGE", req.Key, "-", "+", "COUNT", count)
+		start := "-"
+		queryCount := count
+		if cursor != "0" {
+			start = cursor
+			queryCount = count + 1
+		}
+		value, err := exec.Do(ctx, "XRANGE", req.Key, start, "+", "COUNT", queryCount)
 		if err != nil {
 			return RedisKeyDetail{}, fmt.Errorf("load Redis stream values: %w", err)
 		}
 		entries := toStreamEntries(value)
+		if cursor != "0" && len(entries) > 0 && entries[0].ID == cursor {
+			entries = entries[1:]
+		}
 		detail.Value = entries
-		detail.ValueOffset = int64(len(entries))
+		detail.ValueOffset = req.Offset + int64(len(entries))
 		detail.HasMoreValues = detail.ValueOffset < detail.Total
 		if len(entries) > 0 {
 			detail.ValueCursor = entries[len(entries)-1].ID

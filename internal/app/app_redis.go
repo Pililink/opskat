@@ -61,6 +61,10 @@ func (a *App) RedisListSet(assetID int64, db int, key string, index int64, value
 	return a.redisSvc().ListSet(a.langCtx(), assetID, db, key, index, value)
 }
 
+func (a *App) RedisListDelete(assetID int64, db int, key string, index int64) error {
+	return a.redisSvc().ListDelete(a.langCtx(), assetID, db, key, index)
+}
+
 func (a *App) RedisSetAdd(assetID int64, db int, key string, member string) error {
 	return a.redisSvc().SetAdd(a.langCtx(), assetID, db, key, member)
 }

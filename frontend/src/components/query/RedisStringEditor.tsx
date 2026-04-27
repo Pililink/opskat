@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { Button, Textarea, ScrollArea } from "@opskat/ui";
 import { useQueryStore } from "@/stores/queryStore";
 import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
-import { ExecuteRedisArgs } from "../../../wailsjs/go/app/App";
+import { RedisSetStringValue } from "../../../wailsjs/go/app/App";
 
 export function RedisStringEditor({ tabId, t }: { tabId: string; t: (key: string) => string }) {
   const { redisStates, selectKey } = useQueryStore();
@@ -14,7 +14,7 @@ export function RedisStringEditor({ tabId, t }: { tabId: string; t: (key: string
   const [editing, setEditing] = useState(false);
   const [editVal, setEditVal] = useState("");
   const [saving, setSaving] = useState(false);
-  const [jsonFormatted, setJsonFormatted] = useState(true);
+  const [viewMode, setViewMode] = useState<"raw" | "json" | "hex" | "base64">("raw");
 
   const originalVal = String(state?.keyInfo?.value ?? "");
 
@@ -29,30 +29,50 @@ export function RedisStringEditor({ tabId, t }: { tabId: string; t: (key: string
     }
   }, [originalVal]);
 
+  const hexValue = useMemo(
+    () => Array.from(new TextEncoder().encode(originalVal), (b) => b.toString(16).padStart(2, "0")).join(""),
+    [originalVal]
+  );
+
+  const base64Value = useMemo(() => {
+    const bytes = new TextEncoder().encode(originalVal);
+    let binary = "";
+    for (const b of bytes) binary += String.fromCharCode(b);
+    return btoa(binary);
+  }, [originalVal]);
+
   const displayValue = useMemo(() => {
-    if (isJson && jsonFormatted) {
+    if (viewMode === "json" && isJson) {
       try {
         return JSON.stringify(JSON.parse(originalVal), null, 2);
       } catch {
         return originalVal;
       }
     }
+    if (viewMode === "hex") return hexValue;
+    if (viewMode === "base64") return base64Value;
     return originalVal;
-  }, [isJson, jsonFormatted, originalVal]);
+  }, [base64Value, hexValue, isJson, originalVal, viewMode]);
 
   if (!state?.keyInfo || !state.selectedKey || !tabMeta) return null;
 
   const db = state.currentDb;
 
   const startEdit = () => {
-    setEditVal(originalVal);
+    setEditVal(displayValue);
     setEditing(true);
   };
 
   const save = async () => {
     setSaving(true);
     try {
-      await ExecuteRedisArgs(tabMeta.assetId, ["SET", state.selectedKey!, editVal], db);
+      await RedisSetStringValue({
+        assetId: tabMeta.assetId,
+        db,
+        key: state.selectedKey!,
+        value: editVal,
+        format: viewMode,
+      });
       selectKey(tabId, state.selectedKey!);
       setEditing(false);
     } catch (err) {
@@ -89,25 +109,35 @@ export function RedisStringEditor({ tabId, t }: { tabId: string; t: (key: string
   return (
     <ScrollArea className="flex-1">
       <div className="p-3">
-        {/* JSON format toggle */}
-        {isJson && (
-          <div className="mb-2 flex justify-end">
-            <div className="inline-flex rounded-md border text-xs">
-              <button
-                className={`px-2 py-0.5 rounded-l-md ${jsonFormatted ? "bg-accent text-accent-foreground" : ""}`}
-                onClick={() => setJsonFormatted(true)}
-              >
-                {t("query.formatJson")}
-              </button>
-              <button
-                className={`px-2 py-0.5 rounded-r-md ${!jsonFormatted ? "bg-accent text-accent-foreground" : ""}`}
-                onClick={() => setJsonFormatted(false)}
-              >
-                {t("query.rawText")}
-              </button>
-            </div>
+        <div className="mb-2 flex justify-end">
+          <div className="inline-flex rounded-md border text-xs">
+            <button
+              className={`px-2 py-0.5 rounded-l-md ${viewMode === "raw" ? "bg-accent text-accent-foreground" : ""}`}
+              onClick={() => setViewMode("raw")}
+            >
+              {t("query.rawText")}
+            </button>
+            <button
+              className={`px-2 py-0.5 ${viewMode === "json" ? "bg-accent text-accent-foreground" : ""}`}
+              onClick={() => setViewMode("json")}
+              disabled={!isJson}
+            >
+              {t("query.formatJson")}
+            </button>
+            <button
+              className={`px-2 py-0.5 ${viewMode === "hex" ? "bg-accent text-accent-foreground" : ""}`}
+              onClick={() => setViewMode("hex")}
+            >
+              Hex
+            </button>
+            <button
+              className={`px-2 py-0.5 rounded-r-md ${viewMode === "base64" ? "bg-accent text-accent-foreground" : ""}`}
+              onClick={() => setViewMode("base64")}
+            >
+              Base64
+            </button>
           </div>
-        )}
+        </div>
         <div className="group/str relative">
           <pre className="whitespace-pre-wrap break-all rounded border bg-muted/50 p-3 font-mono text-xs">
             {displayValue}

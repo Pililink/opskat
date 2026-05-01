@@ -18,6 +18,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/tetratelabs/wazero v1.11.0
 	github.com/twmb/franz-go v1.21.0
+	github.com/twmb/franz-go/pkg/kadm v1.18.0
 	github.com/wailsapp/wails/v2 v2.12.0
 	github.com/zalando/go-keyring v0.2.8
 	go.mongodb.org/mongo-driver/v2 v2.5.1

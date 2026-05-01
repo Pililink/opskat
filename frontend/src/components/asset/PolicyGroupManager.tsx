@@ -25,6 +25,7 @@ const builtinTabs: { key: string; label: string }[] = [
   { key: "command", label: "SSH" },
   { key: "query", label: "Database" },
   { key: "redis", label: "Redis" },
+  { key: "mongo", label: "MongoDB" },
 ];
 
 const builtinTabKeys = new Set(builtinTabs.map((t) => t.key));

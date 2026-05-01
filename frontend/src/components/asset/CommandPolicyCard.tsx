@@ -62,6 +62,8 @@ export function CommandPolicyCard({
         ? ("query" as const)
         : policyType === "redis"
           ? ("redis" as const)
+          : policyType === "mongodb"
+            ? ("mongo" as const)
           : (policyType as string);
 
   return (

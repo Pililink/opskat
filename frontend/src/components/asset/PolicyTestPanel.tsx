@@ -24,6 +24,7 @@ const PLACEHOLDER_MAP: Record<string, string> = {
   database: "asset.policyTestSqlPlaceholder",
   redis: "asset.policyTestRedisPlaceholder",
   mongodb: "asset.policyTestMongoPlaceholder",
+  mongo: "asset.policyTestMongoPlaceholder",
 };
 
 const RESULT_CONFIG = {

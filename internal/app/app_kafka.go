@@ -76,3 +76,11 @@ func (a *App) KafkaIncreasePartitions(req kafka_svc.IncreasePartitionsRequest) (
 func (a *App) KafkaDeleteRecords(req kafka_svc.DeleteRecordsRequest) (kafka_svc.DeleteRecordsResponse, error) {
 	return a.kafkaSvc().DeleteRecords(a.langCtx(), req)
 }
+
+func (a *App) KafkaResetConsumerGroupOffset(req kafka_svc.ResetConsumerGroupOffsetRequest) (kafka_svc.ResetConsumerGroupOffsetResponse, error) {
+	return a.kafkaSvc().ResetConsumerGroupOffset(a.langCtx(), req)
+}
+
+func (a *App) KafkaDeleteConsumerGroup(assetID int64, group string) (kafka_svc.DeleteConsumerGroupResponse, error) {
+	return a.kafkaSvc().DeleteConsumerGroup(a.langCtx(), assetID, group)
+}

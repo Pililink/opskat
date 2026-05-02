@@ -157,6 +157,33 @@ type ConsumerGroupPartitionLag struct {
 	Error           string `json:"error,omitempty"`
 }
 
+type ResetConsumerGroupOffsetRequest struct {
+	AssetID         int64   `json:"assetId"`
+	Group           string  `json:"group"`
+	Topic           string  `json:"topic"`
+	Partitions      []int32 `json:"partitions,omitempty"`
+	Mode            string  `json:"mode"`
+	Offset          int64   `json:"offset,omitempty"`
+	TimestampMillis int64   `json:"timestampMillis,omitempty"`
+}
+
+type ResetConsumerGroupOffsetResponse struct {
+	Group      string                           `json:"group"`
+	Topic      string                           `json:"topic"`
+	Partitions []ConsumerGroupOffsetResetResult `json:"partitions"`
+}
+
+type ConsumerGroupOffsetResetResult struct {
+	Partition int32  `json:"partition"`
+	Offset    int64  `json:"offset"`
+	Error     string `json:"error,omitempty"`
+}
+
+type DeleteConsumerGroupResponse struct {
+	Group string `json:"group"`
+	Error string `json:"error,omitempty"`
+}
+
 type BrowseMessagesRequest struct {
 	AssetID         int64  `json:"assetId"`
 	Topic           string `json:"topic"`

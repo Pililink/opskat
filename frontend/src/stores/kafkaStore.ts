@@ -1,9 +1,14 @@
 import { create } from "zustand";
 import {
+  KafkaAlterTopicConfig,
   KafkaBrowseMessages,
   KafkaClusterOverview,
+  KafkaCreateTopic,
+  KafkaDeleteRecords,
+  KafkaDeleteTopic,
   KafkaGetConsumerGroup,
   KafkaGetTopic,
+  KafkaIncreasePartitions,
   KafkaListBrokers,
   KafkaListConsumerGroups,
   KafkaListTopics,
@@ -163,6 +168,17 @@ export interface KafkaProduceState {
   valueEncoding: KafkaPayloadEncoding;
 }
 
+export interface KafkaTopicConfigMutation {
+  name: string;
+  value?: string;
+  op?: "set" | "delete" | "append" | "subtract";
+}
+
+export interface KafkaDeleteRecordsPartition {
+  partition: number;
+  offset: number;
+}
+
 export interface KafkaTabState {
   activeView: KafkaView;
   overview?: KafkaClusterOverviewInfo;
@@ -184,6 +200,7 @@ export interface KafkaTabState {
   loadingTopicDetail: boolean;
   loadingMessages: boolean;
   producingMessage: boolean;
+  topicAdminLoading: boolean;
   loadingGroups: boolean;
   loadingGroupDetail: boolean;
   error: string | null;
@@ -201,6 +218,11 @@ interface KafkaStoreState {
   loadBrokers: (tabId: string) => Promise<void>;
   loadTopics: (tabId: string) => Promise<void>;
   loadTopicDetail: (tabId: string, topic: string) => Promise<void>;
+  createTopic: (tabId: string, req: { topic: string; partitions: number; replicationFactor: number; configs?: Record<string, string> }) => Promise<void>;
+  deleteTopic: (tabId: string, topic: string) => Promise<void>;
+  alterTopicConfig: (tabId: string, topic: string, configs: KafkaTopicConfigMutation[]) => Promise<void>;
+  increasePartitions: (tabId: string, topic: string, partitions: number) => Promise<void>;
+  deleteTopicRecords: (tabId: string, topic: string, partitions: KafkaDeleteRecordsPartition[]) => Promise<void>;
   browseMessages: (tabId: string) => Promise<void>;
   produceKafkaMessage: (tabId: string) => Promise<void>;
   loadConsumerGroups: (tabId: string) => Promise<void>;
@@ -225,6 +247,7 @@ function defaultKafkaState(): KafkaTabState {
     loadingTopicDetail: false,
     loadingMessages: false,
     producingMessage: false,
+    topicAdminLoading: false,
     loadingGroups: false,
     loadingGroupDetail: false,
     error: null,
@@ -404,6 +427,119 @@ export const useKafkaStore = create<KafkaStoreState>((set, get) => ({
       set((s) => ({
         states: { ...s.states, [tabId]: { ...s.states[tabId], loadingTopicDetail: false, error: String(err) } },
       }));
+    }
+  },
+
+  createTopic: async (tabId, req) => {
+    const assetId = getKafkaAssetId(tabId);
+    if (!assetId) return;
+    get().ensureTab(tabId);
+    set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], topicAdminLoading: true } } }));
+    try {
+      await KafkaCreateTopic({
+        assetId,
+        topic: req.topic,
+        partitions: req.partitions,
+        replicationFactor: req.replicationFactor,
+        configs: req.configs,
+      });
+      set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], topicAdminLoading: false, error: null } } }));
+      await Promise.all([get().loadTopics(tabId), get().loadOverview(tabId)]);
+      await get().loadTopicDetail(tabId, req.topic);
+    } catch (err) {
+      set((s) => ({
+        states: { ...s.states, [tabId]: { ...s.states[tabId], topicAdminLoading: false, error: String(err) } },
+      }));
+      throw err;
+    }
+  },
+
+  deleteTopic: async (tabId, topic) => {
+    const assetId = getKafkaAssetId(tabId);
+    if (!assetId) return;
+    get().ensureTab(tabId);
+    set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], topicAdminLoading: true } } }));
+    try {
+      await KafkaDeleteTopic(assetId, topic);
+      set((s) => ({
+        states: {
+          ...s.states,
+          [tabId]: {
+            ...s.states[tabId],
+            selectedTopic: undefined,
+            topicDetail: undefined,
+            messageBrowser: { ...s.states[tabId].messageBrowser, response: undefined },
+            topicAdminLoading: false,
+            error: null,
+          },
+        },
+      }));
+      await Promise.all([get().loadTopics(tabId), get().loadOverview(tabId)]);
+    } catch (err) {
+      set((s) => ({
+        states: { ...s.states, [tabId]: { ...s.states[tabId], topicAdminLoading: false, error: String(err) } },
+      }));
+      throw err;
+    }
+  },
+
+  alterTopicConfig: async (tabId, topic, configs) => {
+    const assetId = getKafkaAssetId(tabId);
+    if (!assetId) return;
+    get().ensureTab(tabId);
+    set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], topicAdminLoading: true } } }));
+    try {
+      await KafkaAlterTopicConfig({ assetId, topic, configs });
+      set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], topicAdminLoading: false, error: null } } }));
+      await get().loadTopicDetail(tabId, topic);
+    } catch (err) {
+      set((s) => ({
+        states: { ...s.states, [tabId]: { ...s.states[tabId], topicAdminLoading: false, error: String(err) } },
+      }));
+      throw err;
+    }
+  },
+
+  increasePartitions: async (tabId, topic, partitions) => {
+    const assetId = getKafkaAssetId(tabId);
+    if (!assetId) return;
+    get().ensureTab(tabId);
+    set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], topicAdminLoading: true } } }));
+    try {
+      await KafkaIncreasePartitions({ assetId, topic, partitions });
+      set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], topicAdminLoading: false, error: null } } }));
+      await Promise.all([get().loadTopics(tabId), get().loadTopicDetail(tabId, topic), get().loadOverview(tabId)]);
+    } catch (err) {
+      set((s) => ({
+        states: { ...s.states, [tabId]: { ...s.states[tabId], topicAdminLoading: false, error: String(err) } },
+      }));
+      throw err;
+    }
+  },
+
+  deleteTopicRecords: async (tabId, topic, partitions) => {
+    const assetId = getKafkaAssetId(tabId);
+    if (!assetId) return;
+    get().ensureTab(tabId);
+    set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], topicAdminLoading: true } } }));
+    try {
+      await KafkaDeleteRecords({ assetId, topic, partitions });
+      set((s) => ({
+        states: {
+          ...s.states,
+          [tabId]: {
+            ...s.states[tabId],
+            messageBrowser: { ...s.states[tabId].messageBrowser, response: undefined },
+            topicAdminLoading: false,
+            error: null,
+          },
+        },
+      }));
+    } catch (err) {
+      set((s) => ({
+        states: { ...s.states, [tabId]: { ...s.states[tabId], topicAdminLoading: false, error: String(err) } },
+      }));
+      throw err;
     }
   },
 

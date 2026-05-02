@@ -84,3 +84,15 @@ func (a *App) KafkaResetConsumerGroupOffset(req kafka_svc.ResetConsumerGroupOffs
 func (a *App) KafkaDeleteConsumerGroup(assetID int64, group string) (kafka_svc.DeleteConsumerGroupResponse, error) {
 	return a.kafkaSvc().DeleteConsumerGroup(a.langCtx(), assetID, group)
 }
+
+func (a *App) KafkaListACLs(req kafka_svc.ListACLsRequest) (kafka_svc.ListACLsResponse, error) {
+	return a.kafkaSvc().ListACLs(a.langCtx(), req)
+}
+
+func (a *App) KafkaCreateACL(req kafka_svc.CreateACLRequest) (kafka_svc.ACLMutationResponse, error) {
+	return a.kafkaSvc().CreateACL(a.langCtx(), req)
+}
+
+func (a *App) KafkaDeleteACL(req kafka_svc.DeleteACLRequest) (kafka_svc.ACLMutationResponse, error) {
+	return a.kafkaSvc().DeleteACL(a.langCtx(), req)
+}

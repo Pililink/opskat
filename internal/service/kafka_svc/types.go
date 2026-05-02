@@ -184,6 +184,64 @@ type DeleteConsumerGroupResponse struct {
 	Error string `json:"error,omitempty"`
 }
 
+type ListACLsRequest struct {
+	AssetID      int64  `json:"assetId"`
+	ResourceType string `json:"resourceType,omitempty"`
+	ResourceName string `json:"resourceName,omitempty"`
+	PatternType  string `json:"patternType,omitempty"`
+	Principal    string `json:"principal,omitempty"`
+	Host         string `json:"host,omitempty"`
+	Operation    string `json:"operation,omitempty"`
+	Permission   string `json:"permission,omitempty"`
+	Page         int    `json:"page,omitempty"`
+	PageSize     int    `json:"pageSize,omitempty"`
+}
+
+type ListACLsResponse struct {
+	ACLs     []KafkaACL `json:"acls"`
+	Total    int        `json:"total"`
+	Page     int        `json:"page"`
+	PageSize int        `json:"pageSize"`
+}
+
+type KafkaACL struct {
+	ResourceType string `json:"resourceType"`
+	ResourceName string `json:"resourceName"`
+	PatternType  string `json:"patternType"`
+	Principal    string `json:"principal"`
+	Host         string `json:"host"`
+	Operation    string `json:"operation"`
+	Permission   string `json:"permission"`
+	Error        string `json:"error,omitempty"`
+}
+
+type CreateACLRequest struct {
+	AssetID      int64  `json:"assetId"`
+	ResourceType string `json:"resourceType"`
+	ResourceName string `json:"resourceName,omitempty"`
+	PatternType  string `json:"patternType,omitempty"`
+	Principal    string `json:"principal"`
+	Host         string `json:"host,omitempty"`
+	Operation    string `json:"operation"`
+	Permission   string `json:"permission"`
+}
+
+type DeleteACLRequest struct {
+	AssetID      int64  `json:"assetId"`
+	ResourceType string `json:"resourceType"`
+	ResourceName string `json:"resourceName,omitempty"`
+	PatternType  string `json:"patternType,omitempty"`
+	Principal    string `json:"principal"`
+	Host         string `json:"host"`
+	Operation    string `json:"operation"`
+	Permission   string `json:"permission"`
+}
+
+type ACLMutationResponse struct {
+	ACLs  []KafkaACL `json:"acls"`
+	Count int        `json:"count"`
+}
+
 type BrowseMessagesRequest struct {
 	AssetID         int64  `json:"assetId"`
 	Topic           string `json:"topic"`

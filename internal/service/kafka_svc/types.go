@@ -103,3 +103,78 @@ type ConsumerGroupPartitionLag struct {
 	MemberID        string `json:"memberId,omitempty"`
 	Error           string `json:"error,omitempty"`
 }
+
+type BrowseMessagesRequest struct {
+	AssetID         int64  `json:"assetId"`
+	Topic           string `json:"topic"`
+	Partition       *int32 `json:"partition,omitempty"`
+	StartMode       string `json:"startMode,omitempty"`
+	Offset          int64  `json:"offset,omitempty"`
+	TimestampMillis int64  `json:"timestampMillis,omitempty"`
+	Limit           int    `json:"limit,omitempty"`
+	MaxBytes        int    `json:"maxBytes,omitempty"`
+	DecodeMode      string `json:"decodeMode,omitempty"`
+	MaxWaitMillis   int    `json:"maxWaitMillis,omitempty"`
+}
+
+type BrowseMessagesResponse struct {
+	Topic      string          `json:"topic"`
+	Partitions []int32         `json:"partitions"`
+	StartMode  string          `json:"startMode"`
+	Limit      int             `json:"limit"`
+	MaxBytes   int             `json:"maxBytes"`
+	Records    []KafkaRecord   `json:"records"`
+	NextOffset map[int32]int64 `json:"nextOffset,omitempty"`
+	Errors     []string        `json:"errors,omitempty"`
+}
+
+type KafkaRecord struct {
+	Topic           string              `json:"topic"`
+	Partition       int32               `json:"partition"`
+	Offset          int64               `json:"offset"`
+	Timestamp       string              `json:"timestamp"`
+	TimestampMillis int64               `json:"timestampMillis"`
+	Key             string              `json:"key,omitempty"`
+	KeyBytes        int                 `json:"keyBytes"`
+	KeyEncoding     string              `json:"keyEncoding"`
+	KeyTruncated    bool                `json:"keyTruncated"`
+	Value           string              `json:"value,omitempty"`
+	ValueBytes      int                 `json:"valueBytes"`
+	ValueEncoding   string              `json:"valueEncoding"`
+	ValueTruncated  bool                `json:"valueTruncated"`
+	Headers         []KafkaRecordHeader `json:"headers,omitempty"`
+}
+
+type KafkaRecordHeader struct {
+	Key            string `json:"key"`
+	Value          string `json:"value,omitempty"`
+	ValueBytes     int    `json:"valueBytes"`
+	ValueEncoding  string `json:"valueEncoding"`
+	ValueTruncated bool   `json:"valueTruncated"`
+}
+
+type ProduceMessageRequest struct {
+	AssetID         int64                  `json:"assetId"`
+	Topic           string                 `json:"topic"`
+	Partition       *int32                 `json:"partition,omitempty"`
+	Key             string                 `json:"key,omitempty"`
+	KeyEncoding     string                 `json:"keyEncoding,omitempty"`
+	Value           string                 `json:"value,omitempty"`
+	ValueEncoding   string                 `json:"valueEncoding,omitempty"`
+	Headers         []ProduceMessageHeader `json:"headers,omitempty"`
+	TimestampMillis int64                  `json:"timestampMillis,omitempty"`
+}
+
+type ProduceMessageHeader struct {
+	Key      string `json:"key"`
+	Value    string `json:"value,omitempty"`
+	Encoding string `json:"encoding,omitempty"`
+}
+
+type ProduceMessageResponse struct {
+	Topic           string `json:"topic"`
+	Partition       int32  `json:"partition"`
+	Offset          int64  `json:"offset"`
+	Timestamp       string `json:"timestamp"`
+	TimestampMillis int64  `json:"timestampMillis"`
+}

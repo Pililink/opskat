@@ -48,3 +48,11 @@ func (a *App) KafkaListConsumerGroups(assetID int64) ([]kafka_svc.ConsumerGroup,
 func (a *App) KafkaGetConsumerGroup(assetID int64, group string) (kafka_svc.ConsumerGroupDetail, error) {
 	return a.kafkaSvc().GetConsumerGroup(a.langCtx(), assetID, group)
 }
+
+func (a *App) KafkaBrowseMessages(req kafka_svc.BrowseMessagesRequest) (kafka_svc.BrowseMessagesResponse, error) {
+	return a.kafkaSvc().BrowseMessages(a.langCtx(), req)
+}
+
+func (a *App) KafkaProduceMessage(req kafka_svc.ProduceMessageRequest) (kafka_svc.ProduceMessageResponse, error) {
+	return a.kafkaSvc().ProduceMessage(a.langCtx(), req)
+}

@@ -111,6 +111,102 @@ func TestKafkaLiveProduceAndBrowse(t *testing.T) {
 	assert.Equal(t, "opskat-live-value", browsed.Records[0].Value)
 }
 
+func TestKafkaLiveTopicAndConsumerGroupAdmin(t *testing.T) {
+	brokersText := strings.TrimSpace(os.Getenv("OPSKAT_KAFKA_TEST_BROKERS"))
+	if brokersText == "" {
+		t.Skip("set OPSKAT_KAFKA_TEST_BROKERS to run live Kafka admin test")
+	}
+
+	ctx := context.Background()
+	cfg := &asset_entity.KafkaConfig{
+		Brokers:               splitBrokers(brokersText),
+		SASLMechanism:         asset_entity.KafkaSASLNone,
+		RequestTimeoutSeconds: 5,
+		MessageFetchLimit:     10,
+		MessagePreviewBytes:   1024,
+	}
+	asset := &asset_entity.Asset{ID: 9002, Name: "live-kafka-admin", Type: asset_entity.AssetTypeKafka}
+	require.NoError(t, asset.SetKafkaConfig(cfg))
+
+	mockCtrl := gomock.NewController(t)
+	t.Cleanup(mockCtrl.Finish)
+	mockRepo := mock_asset_repo.NewMockAssetRepo(mockCtrl)
+	mockRepo.EXPECT().Find(gomock.Any(), int64(9002)).Return(asset, nil).AnyTimes()
+	origRepo := asset_repo.Asset()
+	asset_repo.RegisterAsset(mockRepo)
+	t.Cleanup(func() {
+		if origRepo != nil {
+			asset_repo.RegisterAsset(origRepo)
+		}
+	})
+
+	svc := New(nil)
+	defer svc.Close()
+
+	topic := fmt.Sprintf("opskat-admin-%d", time.Now().UnixNano())
+	_, err := svc.CreateTopic(ctx, CreateTopicRequest{
+		AssetID:           asset.ID,
+		Topic:             topic,
+		Partitions:        1,
+		ReplicationFactor: 1,
+		Configs:           map[string]string{"retention.ms": "600000"},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _, _ = svc.DeleteTopic(context.Background(), asset.ID, topic) })
+
+	_, err = svc.AlterTopicConfig(ctx, AlterTopicConfigRequest{
+		AssetID: asset.ID,
+		Topic:   topic,
+		Configs: []TopicConfigMutation{{Name: "retention.ms", Value: "601000", Op: "set"}},
+	})
+	require.NoError(t, err)
+
+	_, err = svc.IncreasePartitions(ctx, IncreasePartitionsRequest{AssetID: asset.ID, Topic: topic, Partitions: 2})
+	require.NoError(t, err)
+	detail, err := svc.GetTopic(ctx, asset.ID, topic)
+	require.NoError(t, err)
+	assert.Equal(t, 2, detail.PartitionCount)
+
+	partition := int32(0)
+	produced, err := svc.ProduceMessage(ctx, ProduceMessageRequest{
+		AssetID:   asset.ID,
+		Topic:     topic,
+		Partition: &partition,
+		Value:     "delete-records-target",
+	})
+	require.NoError(t, err)
+
+	deletedRecords, err := svc.DeleteRecords(ctx, DeleteRecordsRequest{
+		AssetID: asset.ID,
+		Topic:   topic,
+		Partitions: []DeleteRecordsPartition{
+			{Partition: partition, Offset: produced.Offset + 1},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, deletedRecords.Partitions, 1)
+	assert.GreaterOrEqual(t, deletedRecords.Partitions[0].LowWatermark, produced.Offset+1)
+
+	group := fmt.Sprintf("opskat-admin-group-%d", time.Now().UnixNano())
+	reset, err := svc.ResetConsumerGroupOffset(ctx, ResetConsumerGroupOffsetRequest{
+		AssetID:    asset.ID,
+		Group:      group,
+		Topic:      topic,
+		Partitions: []int32{0, 1},
+		Mode:       "latest",
+	})
+	require.NoError(t, err)
+	assert.Len(t, reset.Partitions, 2)
+
+	deletedGroup, err := svc.DeleteConsumerGroup(ctx, asset.ID, group)
+	require.NoError(t, err)
+	assert.Equal(t, group, deletedGroup.Group)
+
+	deletedTopic, err := svc.DeleteTopic(ctx, asset.ID, topic)
+	require.NoError(t, err)
+	assert.Equal(t, topic, deletedTopic.Topic)
+}
+
 func splitBrokers(value string) []string {
 	parts := strings.Split(value, ",")
 	out := make([]string, 0, len(parts))

@@ -21,12 +21,12 @@ func (s *Service) GetBrokerConfig(ctx context.Context, assetID int64, brokerID i
 			return fmt.Errorf("读取 Broker 配置失败: %w", err)
 		}
 		if len(resources) == 0 {
-			return fmt.Errorf("Broker 配置响应为空: %d", brokerID)
+			return fmt.Errorf("broker 配置响应为空: %d", brokerID)
 		}
 		rc := resources[0]
 		if rc.Err != nil {
 			out.Error = rc.Err.Error()
-			return nil
+			return nil //nolint:nilerr // Kafka per-resource errors are exposed in the response payload.
 		}
 		out.Configs = configEntriesFromKadm(rc.Configs)
 		return nil
@@ -51,7 +51,7 @@ func (s *Service) ListClusterConfigs(ctx context.Context, assetID int64) (Cluste
 		rc := resources[0]
 		if rc.Err != nil {
 			out.Error = rc.Err.Error()
-			return nil
+			return nil //nolint:nilerr // Kafka per-resource errors are exposed in the response payload.
 		}
 		out.Configs = configEntriesFromKadm(rc.Configs)
 		return nil
@@ -120,7 +120,7 @@ func (s *Service) GetTopic(ctx context.Context, assetID int64, topic string) (To
 	err := s.withClient(ctx, assetID, func(ctx context.Context, _ *kgo.Client, admin *kadm.Client, _ *asset_entity.Asset, _ *asset_entity.KafkaConfig) error {
 		name := strings.TrimSpace(topic)
 		if name == "" {
-			return fmt.Errorf("Topic不能为空")
+			return fmt.Errorf("topic 不能为空")
 		}
 		topics, err := admin.ListTopicsWithInternal(ctx, name)
 		if err != nil {
@@ -128,7 +128,7 @@ func (s *Service) GetTopic(ctx context.Context, assetID int64, topic string) (To
 		}
 		detail, ok := topics[name]
 		if !ok {
-			return fmt.Errorf("Topic不存在: %s", name)
+			return fmt.Errorf("topic 不存在: %s", name)
 		}
 		out = topicDetailFromKadm(detail)
 		return nil
@@ -154,7 +154,7 @@ func (s *Service) GetConsumerGroup(ctx context.Context, assetID int64, group str
 	err := s.withClient(ctx, assetID, func(ctx context.Context, _ *kgo.Client, admin *kadm.Client, _ *asset_entity.Asset, _ *asset_entity.KafkaConfig) error {
 		name := strings.TrimSpace(group)
 		if name == "" {
-			return fmt.Errorf("Consumer Group不能为空")
+			return fmt.Errorf("consumer group 不能为空")
 		}
 		groups, err := admin.DescribeGroups(ctx, name)
 		if err != nil {
@@ -162,14 +162,14 @@ func (s *Service) GetConsumerGroup(ctx context.Context, assetID int64, group str
 		}
 		detail, ok := groups[name]
 		if !ok {
-			return fmt.Errorf("Consumer Group不存在: %s", name)
+			return fmt.Errorf("consumer group 不存在: %s", name)
 		}
 		out = consumerGroupDetailFromKadm(detail)
 
 		lags, lagErr := admin.Lag(ctx, name)
 		if lagErr != nil {
 			out.LagError = lagErr.Error()
-			return nil
+			return nil //nolint:nilerr // lag lookup is optional; expose the per-operation error in the response payload.
 		}
 		if lag, ok := lags[name]; ok {
 			applyConsumerGroupLag(&out, lag)

@@ -16,7 +16,7 @@ func (s *Service) CreateTopic(ctx context.Context, req CreateTopicRequest) (Topi
 	err := s.withClient(ctx, req.AssetID, func(ctx context.Context, client *kgo.Client, admin *kadm.Client, _ *asset_entity.Asset, _ *asset_entity.KafkaConfig) error {
 		topic := strings.TrimSpace(req.Topic)
 		if topic == "" {
-			return fmt.Errorf("Topic不能为空")
+			return fmt.Errorf("topic 不能为空")
 		}
 		if req.Partitions <= 0 {
 			return fmt.Errorf("分区数必须大于0")
@@ -44,7 +44,7 @@ func (s *Service) DeleteTopic(ctx context.Context, assetID int64, topic string) 
 	err := s.withClient(ctx, assetID, func(ctx context.Context, client *kgo.Client, admin *kadm.Client, _ *asset_entity.Asset, _ *asset_entity.KafkaConfig) error {
 		name := strings.TrimSpace(topic)
 		if name == "" {
-			return fmt.Errorf("Topic不能为空")
+			return fmt.Errorf("topic 不能为空")
 		}
 		deleted, err := admin.DeleteTopic(ctx, name)
 		if err != nil {
@@ -65,7 +65,7 @@ func (s *Service) AlterTopicConfig(ctx context.Context, req AlterTopicConfigRequ
 	err := s.withClient(ctx, req.AssetID, func(ctx context.Context, client *kgo.Client, admin *kadm.Client, _ *asset_entity.Asset, _ *asset_entity.KafkaConfig) error {
 		topic := strings.TrimSpace(req.Topic)
 		if topic == "" {
-			return fmt.Errorf("Topic不能为空")
+			return fmt.Errorf("topic 不能为空")
 		}
 		configs, err := topicConfigMutations(req.Configs)
 		if err != nil {
@@ -94,7 +94,7 @@ func (s *Service) IncreasePartitions(ctx context.Context, req IncreasePartitions
 	err := s.withClient(ctx, req.AssetID, func(ctx context.Context, client *kgo.Client, admin *kadm.Client, _ *asset_entity.Asset, _ *asset_entity.KafkaConfig) error {
 		topic := strings.TrimSpace(req.Topic)
 		if topic == "" {
-			return fmt.Errorf("Topic不能为空")
+			return fmt.Errorf("topic 不能为空")
 		}
 		if req.Partitions <= 0 {
 			return fmt.Errorf("分区数必须大于0")
@@ -122,7 +122,7 @@ func (s *Service) DeleteRecords(ctx context.Context, req DeleteRecordsRequest) (
 	err := s.withClient(ctx, req.AssetID, func(ctx context.Context, _ *kgo.Client, admin *kadm.Client, _ *asset_entity.Asset, _ *asset_entity.KafkaConfig) error {
 		topic := strings.TrimSpace(req.Topic)
 		if topic == "" {
-			return fmt.Errorf("Topic不能为空")
+			return fmt.Errorf("topic 不能为空")
 		}
 		if len(req.Partitions) == 0 {
 			return fmt.Errorf("至少需要一个 Partition offset")
@@ -130,10 +130,10 @@ func (s *Service) DeleteRecords(ctx context.Context, req DeleteRecordsRequest) (
 		offsets := kadm.Offsets{}
 		for _, partition := range req.Partitions {
 			if partition.Partition < 0 {
-				return fmt.Errorf("Partition不能小于0")
+				return fmt.Errorf("partition 不能小于0")
 			}
 			if partition.Offset < 0 {
-				return fmt.Errorf("Offset不能小于0")
+				return fmt.Errorf("offset 不能小于0")
 			}
 			offsets.Add(kadm.Offset{Topic: topic, Partition: partition.Partition, At: partition.Offset})
 		}

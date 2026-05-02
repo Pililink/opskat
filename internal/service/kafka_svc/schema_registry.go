@@ -62,7 +62,7 @@ func (s *Service) GetSchemaSubjectVersions(ctx context.Context, assetID int64, s
 	err := s.withSchemaRegistry(ctx, assetID, func(ctx context.Context, client *schemaRegistryClient, _ *asset_entity.Asset, _ *asset_entity.KafkaConfig) error {
 		subject = strings.TrimSpace(subject)
 		if subject == "" {
-			return fmt.Errorf("Subject不能为空")
+			return fmt.Errorf("subject 不能为空")
 		}
 		var versions []int
 		if err := client.do(ctx, http.MethodGet, schemaRegistryPath("subjects", subject, "versions"), nil, nil, &versions); err != nil {
@@ -79,7 +79,7 @@ func (s *Service) GetSchema(ctx context.Context, assetID int64, subject string, 
 	err := s.withSchemaRegistry(ctx, assetID, func(ctx context.Context, client *schemaRegistryClient, _ *asset_entity.Asset, _ *asset_entity.KafkaConfig) error {
 		subject = strings.TrimSpace(subject)
 		if subject == "" {
-			return fmt.Errorf("Subject不能为空")
+			return fmt.Errorf("subject 不能为空")
 		}
 		version = normalizeSchemaVersion(version)
 		if err := client.do(ctx, http.MethodGet, schemaRegistryPath("subjects", subject, "versions", version), nil, nil, &out); err != nil {
@@ -95,10 +95,10 @@ func (s *Service) CheckSchemaCompatibility(ctx context.Context, req CheckSchemaC
 	err := s.withSchemaRegistry(ctx, req.AssetID, func(ctx context.Context, client *schemaRegistryClient, _ *asset_entity.Asset, _ *asset_entity.KafkaConfig) error {
 		subject := strings.TrimSpace(req.Subject)
 		if subject == "" {
-			return fmt.Errorf("Subject不能为空")
+			return fmt.Errorf("subject 不能为空")
 		}
 		if strings.TrimSpace(req.Schema) == "" {
-			return fmt.Errorf("Schema不能为空")
+			return fmt.Errorf("schema 不能为空")
 		}
 		version := normalizeSchemaVersion(req.Version)
 		payload := schemaRegistryPayload{Schema: req.Schema, SchemaType: strings.TrimSpace(req.SchemaType), References: req.References}
@@ -122,10 +122,10 @@ func (s *Service) RegisterSchema(ctx context.Context, req RegisterSchemaRequest)
 	err := s.withSchemaRegistry(ctx, req.AssetID, func(ctx context.Context, client *schemaRegistryClient, _ *asset_entity.Asset, _ *asset_entity.KafkaConfig) error {
 		subject := strings.TrimSpace(req.Subject)
 		if subject == "" {
-			return fmt.Errorf("Subject不能为空")
+			return fmt.Errorf("subject 不能为空")
 		}
 		if strings.TrimSpace(req.Schema) == "" {
-			return fmt.Errorf("Schema不能为空")
+			return fmt.Errorf("schema 不能为空")
 		}
 		payload := schemaRegistryPayload{Schema: req.Schema, SchemaType: strings.TrimSpace(req.SchemaType), References: req.References}
 		var response schemaRegistryIDResponse
@@ -143,7 +143,7 @@ func (s *Service) DeleteSchema(ctx context.Context, req DeleteSchemaRequest) (De
 	err := s.withSchemaRegistry(ctx, req.AssetID, func(ctx context.Context, client *schemaRegistryClient, _ *asset_entity.Asset, _ *asset_entity.KafkaConfig) error {
 		subject := strings.TrimSpace(req.Subject)
 		if subject == "" {
-			return fmt.Errorf("Subject不能为空")
+			return fmt.Errorf("subject 不能为空")
 		}
 		query := url.Values{}
 		if req.Permanent {
@@ -175,10 +175,10 @@ func (s *Service) withSchemaRegistry(ctx context.Context, assetID int64, fn func
 	}
 	schemaCfg := cfg.SchemaRegistry
 	if !schemaCfg.Enabled {
-		return fmt.Errorf("Schema Registry未启用")
+		return fmt.Errorf("schema registry 未启用")
 	}
 	if strings.TrimSpace(schemaCfg.URL) == "" {
-		return fmt.Errorf("Schema Registry URL不能为空")
+		return fmt.Errorf("schema registry URL 不能为空")
 	}
 	password, err := credential_resolver.Default().ResolvePasswordGeneric(ctx, &schemaCfg)
 	if err != nil {
@@ -239,7 +239,7 @@ func schemaRegistryTLSConfig(cfg *asset_entity.KafkaSchemaRegistryConfig) (*tls.
 	}
 	if cfg.TLSCertFile != "" || cfg.TLSKeyFile != "" {
 		if cfg.TLSCertFile == "" || cfg.TLSKeyFile == "" {
-			return nil, fmt.Errorf("Schema Registry TLS客户端证书和私钥必须同时配置")
+			return nil, fmt.Errorf("schema registry TLS 客户端证书和私钥必须同时配置")
 		}
 		cert, err := tls.LoadX509KeyPair(cfg.TLSCertFile, cfg.TLSKeyFile)
 		if err != nil {
@@ -278,7 +278,7 @@ func (c *schemaRegistryClient) do(ctx context.Context, method string, path strin
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return schemaRegistryHTTPError(resp)
 	}
@@ -315,7 +315,7 @@ func (c *schemaRegistryClient) applyAuth(req *http.Request) error {
 			token = c.username
 		}
 		if token == "" {
-			return fmt.Errorf("Bearer Token不能为空")
+			return fmt.Errorf("bearer token 不能为空")
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
 		return nil
@@ -328,13 +328,13 @@ func schemaRegistryHTTPError(resp *http.Response) error {
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	var body schemaRegistryErrorResponse
 	if err := json.Unmarshal(data, &body); err == nil && body.Message != "" {
-		return fmt.Errorf("HTTP %d schema_registry_code=%d: %s", resp.StatusCode, body.ErrorCode, body.Message)
+		return fmt.Errorf("http %d schema_registry_code=%d: %s", resp.StatusCode, body.ErrorCode, body.Message)
 	}
 	text := strings.TrimSpace(string(data))
 	if text == "" {
 		text = http.StatusText(resp.StatusCode)
 	}
-	return fmt.Errorf("HTTP %d: %s", resp.StatusCode, text)
+	return fmt.Errorf("http %d: %s", resp.StatusCode, text)
 }
 
 func schemaRegistryPath(parts ...string) string {

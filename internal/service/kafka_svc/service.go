@@ -48,7 +48,7 @@ func (s *Service) CloseAsset(assetID int64) {
 
 func (s *Service) TestConnection(ctx context.Context, cfg *asset_entity.KafkaConfig, plainPassword string, tunnelID int64) error {
 	if cfg == nil {
-		return fmt.Errorf("Kafka配置为空")
+		return fmt.Errorf("kafka 配置为空")
 	}
 	password := plainPassword
 	if password == "" {
@@ -110,7 +110,7 @@ func (s *Service) withOneOffClient(ctx context.Context, assetID int64, extraOpts
 	}
 	defer client.Close()
 	if err := client.Ping(opCtx); err != nil {
-		return fmt.Errorf("Kafka 连接失败: %w", err)
+		return fmt.Errorf("kafka 连接失败: %w", err)
 	}
 
 	admin := kadm.NewClient(client)

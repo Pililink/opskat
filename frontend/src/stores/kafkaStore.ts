@@ -433,7 +433,10 @@ interface KafkaStoreState {
   loadClusterConfigs: (tabId: string) => Promise<void>;
   loadTopics: (tabId: string) => Promise<void>;
   loadTopicDetail: (tabId: string, topic: string) => Promise<void>;
-  createTopic: (tabId: string, req: { topic: string; partitions: number; replicationFactor: number; configs?: Record<string, string> }) => Promise<void>;
+  createTopic: (
+    tabId: string,
+    req: { topic: string; partitions: number; replicationFactor: number; configs?: Record<string, string> }
+  ) => Promise<void>;
   deleteTopic: (tabId: string, topic: string) => Promise<void>;
   alterTopicConfig: (tabId: string, topic: string, configs: KafkaTopicConfigMutation[]) => Promise<void>;
   increasePartitions: (tabId: string, topic: string, partitions: number) => Promise<void>;
@@ -655,12 +658,18 @@ export const useKafkaStore = create<KafkaStoreState>((set, get) => ({
     if (!assetId) return;
     get().ensureTab(tabId);
     set((s) => ({
-      states: { ...s.states, [tabId]: { ...s.states[tabId], selectedBroker: brokerId, brokerConfig: undefined, loadingBrokerConfig: true } },
+      states: {
+        ...s.states,
+        [tabId]: { ...s.states[tabId], selectedBroker: brokerId, brokerConfig: undefined, loadingBrokerConfig: true },
+      },
     }));
     try {
       const result = (await KafkaGetBrokerConfig(assetId, brokerId)) as KafkaBrokerConfig;
       set((s) => ({
-        states: { ...s.states, [tabId]: { ...s.states[tabId], brokerConfig: result, loadingBrokerConfig: false, error: null } },
+        states: {
+          ...s.states,
+          [tabId]: { ...s.states[tabId], brokerConfig: result, loadingBrokerConfig: false, error: null },
+        },
       }));
     } catch (err) {
       set((s) => ({
@@ -679,7 +688,10 @@ export const useKafkaStore = create<KafkaStoreState>((set, get) => ({
     try {
       const result = (await KafkaListClusterConfigs(assetId)) as KafkaClusterConfigs;
       set((s) => ({
-        states: { ...s.states, [tabId]: { ...s.states[tabId], clusterConfigs: result, loadingClusterConfigs: false, error: null } },
+        states: {
+          ...s.states,
+          [tabId]: { ...s.states[tabId], clusterConfigs: result, loadingClusterConfigs: false, error: null },
+        },
       }));
     } catch (err) {
       set((s) => ({
@@ -1036,7 +1048,10 @@ export const useKafkaStore = create<KafkaStoreState>((set, get) => ({
     try {
       const schemaVersions = (await KafkaGetSchemaSubjectVersions(assetId, subject)) as KafkaSchemaSubjectVersions;
       set((s) => ({
-        states: { ...s.states, [tabId]: { ...s.states[tabId], schemaVersions, loadingSchemaDetail: false, error: null } },
+        states: {
+          ...s.states,
+          [tabId]: { ...s.states[tabId], schemaVersions, loadingSchemaDetail: false, error: null },
+        },
       }));
       const latest = schemaVersions.versions?.[schemaVersions.versions.length - 1];
       if (latest !== undefined) {
@@ -1059,7 +1074,13 @@ export const useKafkaStore = create<KafkaStoreState>((set, get) => ({
       set((s) => ({
         states: {
           ...s.states,
-          [tabId]: { ...s.states[tabId], selectedSchemaSubject: subject, schemaDetail, loadingSchemaDetail: false, error: null },
+          [tabId]: {
+            ...s.states[tabId],
+            selectedSchemaSubject: subject,
+            schemaDetail,
+            loadingSchemaDetail: false,
+            error: null,
+          },
         },
       }));
     } catch (err) {
@@ -1078,7 +1099,9 @@ export const useKafkaStore = create<KafkaStoreState>((set, get) => ({
       const result = (await KafkaCheckSchemaCompatibility(
         new kafka_svc.CheckSchemaCompatibilityRequest({ assetId, ...req })
       )) as KafkaSchemaCompatibilityResponse;
-      set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], schemaAdminLoading: false, error: null } } }));
+      set((s) => ({
+        states: { ...s.states, [tabId]: { ...s.states[tabId], schemaAdminLoading: false, error: null } },
+      }));
       return result;
     } catch (err) {
       set((s) => ({
@@ -1095,7 +1118,9 @@ export const useKafkaStore = create<KafkaStoreState>((set, get) => ({
     set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], schemaAdminLoading: true } } }));
     try {
       await KafkaRegisterSchema(new kafka_svc.RegisterSchemaRequest({ assetId, ...req }));
-      set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], schemaAdminLoading: false, error: null } } }));
+      set((s) => ({
+        states: { ...s.states, [tabId]: { ...s.states[tabId], schemaAdminLoading: false, error: null } },
+      }));
       await get().loadSchemaSubjects(tabId);
       await get().loadSchemaVersions(tabId, req.subject);
     } catch (err) {
@@ -1187,7 +1212,8 @@ export const useKafkaStore = create<KafkaStoreState>((set, get) => ({
       },
     }));
     try {
-      const connectors = ((await KafkaListConnectors({ assetId, cluster: selectedConnectCluster })) || []) as KafkaConnectorSummary[];
+      const connectors = ((await KafkaListConnectors({ assetId, cluster: selectedConnectCluster })) ||
+        []) as KafkaConnectorSummary[];
       set((s) => ({
         states: { ...s.states, [tabId]: { ...s.states[tabId], connectors, loadingConnectors: false, error: null } },
       }));
@@ -1206,7 +1232,12 @@ export const useKafkaStore = create<KafkaStoreState>((set, get) => ({
     set((s) => ({
       states: {
         ...s.states,
-        [tabId]: { ...s.states[tabId], selectedConnector: name, connectorDetail: undefined, loadingConnectorDetail: true },
+        [tabId]: {
+          ...s.states[tabId],
+          selectedConnector: name,
+          connectorDetail: undefined,
+          loadingConnectorDetail: true,
+        },
       },
     }));
     try {
@@ -1232,7 +1263,9 @@ export const useKafkaStore = create<KafkaStoreState>((set, get) => ({
     set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], connectAdminLoading: true } } }));
     try {
       await KafkaCreateConnector({ assetId, ...req, cluster });
-      set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], connectAdminLoading: false, error: null } } }));
+      set((s) => ({
+        states: { ...s.states, [tabId]: { ...s.states[tabId], connectAdminLoading: false, error: null } },
+      }));
       await get().loadConnectors(tabId, cluster);
       await get().loadConnectorDetail(tabId, req.name);
     } catch (err) {
@@ -1251,7 +1284,9 @@ export const useKafkaStore = create<KafkaStoreState>((set, get) => ({
     set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], connectAdminLoading: true } } }));
     try {
       await KafkaUpdateConnectorConfig({ assetId, ...req, cluster });
-      set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], connectAdminLoading: false, error: null } } }));
+      set((s) => ({
+        states: { ...s.states, [tabId]: { ...s.states[tabId], connectAdminLoading: false, error: null } },
+      }));
       await get().loadConnectorDetail(tabId, req.name);
     } catch (err) {
       set((s) => ({
@@ -1262,11 +1297,23 @@ export const useKafkaStore = create<KafkaStoreState>((set, get) => ({
   },
 
   pauseConnector: async (tabId, name) => {
-    await mutateConnectorState(tabId, name, (assetId, cluster) => KafkaPauseConnector(assetId, cluster, name), get, set);
+    await mutateConnectorState(
+      tabId,
+      name,
+      (assetId, cluster) => KafkaPauseConnector(assetId, cluster, name),
+      get,
+      set
+    );
   },
 
   resumeConnector: async (tabId, name) => {
-    await mutateConnectorState(tabId, name, (assetId, cluster) => KafkaResumeConnector(assetId, cluster, name), get, set);
+    await mutateConnectorState(
+      tabId,
+      name,
+      (assetId, cluster) => KafkaResumeConnector(assetId, cluster, name),
+      get,
+      set
+    );
   },
 
   restartConnector: async (tabId, name, includeTasks, onlyFailed) => {
@@ -1462,7 +1509,12 @@ async function mutateConnectorState(
   name: string,
   fn: (assetId: number, cluster: string) => Promise<unknown>,
   get: () => KafkaStoreState,
-  set: (partial: KafkaStoreState | Partial<KafkaStoreState> | ((state: KafkaStoreState) => KafkaStoreState | Partial<KafkaStoreState>)) => void
+  set: (
+    partial:
+      | KafkaStoreState
+      | Partial<KafkaStoreState>
+      | ((state: KafkaStoreState) => KafkaStoreState | Partial<KafkaStoreState>)
+  ) => void
 ) {
   const assetId = getKafkaAssetId(tabId);
   if (!assetId) return;

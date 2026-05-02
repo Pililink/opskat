@@ -59,7 +59,7 @@ func (s *Service) DeleteConsumerGroup(ctx context.Context, assetID int64, group 
 	err := s.withClient(ctx, assetID, func(ctx context.Context, _ *kgo.Client, admin *kadm.Client, _ *asset_entity.Asset, _ *asset_entity.KafkaConfig) error {
 		name := strings.TrimSpace(group)
 		if name == "" {
-			return fmt.Errorf("Consumer Group不能为空")
+			return fmt.Errorf("consumer group 不能为空")
 		}
 		deleted, err := admin.DeleteGroup(ctx, name)
 		if err != nil {
@@ -79,10 +79,10 @@ func normalizeResetConsumerGroupOffsetRequest(req ResetConsumerGroupOffsetReques
 	req.Topic = strings.TrimSpace(req.Topic)
 	req.Mode = strings.ToLower(strings.TrimSpace(req.Mode))
 	if req.Group == "" {
-		return req, fmt.Errorf("Consumer Group不能为空")
+		return req, fmt.Errorf("consumer group 不能为空")
 	}
 	if req.Topic == "" {
-		return req, fmt.Errorf("Topic不能为空")
+		return req, fmt.Errorf("topic 不能为空")
 	}
 	if req.Mode == "" {
 		req.Mode = "latest"
@@ -91,18 +91,18 @@ func normalizeResetConsumerGroupOffsetRequest(req ResetConsumerGroupOffsetReques
 	case "earliest", "latest":
 	case "offset":
 		if req.Offset < 0 {
-			return req, fmt.Errorf("Offset不能小于0")
+			return req, fmt.Errorf("offset 不能小于0")
 		}
 	case "timestamp":
 		if req.TimestampMillis <= 0 {
-			return req, fmt.Errorf("Timestamp不能为空")
+			return req, fmt.Errorf("timestamp 不能为空")
 		}
 	default:
 		return req, fmt.Errorf("不支持的 Offset 重置模式: %s", req.Mode)
 	}
 	for _, partition := range req.Partitions {
 		if partition < 0 {
-			return req, fmt.Errorf("Partition不能小于0")
+			return req, fmt.Errorf("partition 不能小于0")
 		}
 	}
 	return req, nil
@@ -115,7 +115,7 @@ func consumerGroupResetPartitions(ctx context.Context, admin *kadm.Client, topic
 	}
 	detail, ok := topics[topic]
 	if !ok {
-		return nil, fmt.Errorf("Topic不存在: %s", topic)
+		return nil, fmt.Errorf("topic 不存在: %s", topic)
 	}
 	if detail.Err != nil {
 		return nil, fmt.Errorf("读取 Topic 失败: %w", detail.Err)
@@ -138,7 +138,7 @@ func consumerGroupResetPartitions(ctx context.Context, admin *kadm.Client, topic
 	seen := map[int32]bool{}
 	for _, partition := range selected {
 		if !exists[partition] {
-			return nil, fmt.Errorf("Topic %s 不存在 Partition %d", topic, partition)
+			return nil, fmt.Errorf("topic %s 不存在 partition %d", topic, partition)
 		}
 		if seen[partition] {
 			continue

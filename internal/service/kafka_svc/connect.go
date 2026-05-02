@@ -94,7 +94,7 @@ func (s *Service) ListConnectClusters(ctx context.Context, assetID int64) ([]Kaf
 		return nil, err
 	}
 	if !cfg.Connect.Enabled {
-		return nil, fmt.Errorf("Kafka Connect未启用")
+		return nil, fmt.Errorf("kafka connect 未启用")
 	}
 	out := make([]KafkaConnectCluster, 0, len(cfg.Connect.Clusters))
 	for _, cluster := range cfg.Connect.Clusters {
@@ -108,7 +108,7 @@ func (s *Service) ListConnectClusters(ctx context.Context, assetID int64) ([]Kaf
 		out = append(out, KafkaConnectCluster{Name: name, URL: strings.TrimSpace(cluster.URL)})
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("Kafka Connect Cluster不能为空")
+		return nil, fmt.Errorf("kafka connect cluster 不能为空")
 	}
 	return out, nil
 }
@@ -143,7 +143,7 @@ func (s *Service) GetConnector(ctx context.Context, assetID int64, cluster strin
 	err := s.withKafkaConnect(ctx, assetID, cluster, func(ctx context.Context, client *kafkaConnectClient, _ *asset_entity.Asset, _ *asset_entity.KafkaConfig) error {
 		name = strings.TrimSpace(name)
 		if name == "" {
-			return fmt.Errorf("Connector不能为空")
+			return fmt.Errorf("connector 不能为空")
 		}
 		var info connectConnectorInfo
 		if err := client.do(ctx, http.MethodGet, connectPath("connectors", name), nil, nil, &info); err != nil {
@@ -205,7 +205,7 @@ func (s *Service) RestartConnector(ctx context.Context, req RestartConnectorRequ
 	err := s.withKafkaConnect(ctx, req.AssetID, req.Cluster, func(ctx context.Context, client *kafkaConnectClient, _ *asset_entity.Asset, _ *asset_entity.KafkaConfig) error {
 		name := strings.TrimSpace(req.Name)
 		if name == "" {
-			return fmt.Errorf("Connector不能为空")
+			return fmt.Errorf("connector 不能为空")
 		}
 		query := url.Values{}
 		if req.IncludeTasks {
@@ -232,7 +232,7 @@ func (s *Service) connectNoBodyOperation(ctx context.Context, assetID int64, clu
 	err := s.withKafkaConnect(ctx, assetID, cluster, func(ctx context.Context, client *kafkaConnectClient, _ *asset_entity.Asset, _ *asset_entity.KafkaConfig) error {
 		name = strings.TrimSpace(name)
 		if name == "" {
-			return fmt.Errorf("Connector不能为空")
+			return fmt.Errorf("connector 不能为空")
 		}
 		parts := []string{"connectors", name}
 		if action != "" {
@@ -269,7 +269,7 @@ func (s *Service) withKafkaConnect(ctx context.Context, assetID int64, clusterNa
 
 func selectKafkaConnectCluster(cfg *asset_entity.KafkaConfig, name string) (asset_entity.KafkaConnectClusterConfig, string, error) {
 	if cfg == nil || !cfg.Connect.Enabled {
-		return asset_entity.KafkaConnectClusterConfig{}, "", fmt.Errorf("Kafka Connect未启用")
+		return asset_entity.KafkaConnectClusterConfig{}, "", fmt.Errorf("kafka connect 未启用")
 	}
 	name = strings.TrimSpace(name)
 	for _, cluster := range cfg.Connect.Clusters {
@@ -290,7 +290,7 @@ func selectKafkaConnectCluster(cfg *asset_entity.KafkaConfig, name string) (asse
 	if name == "" {
 		return asset_entity.KafkaConnectClusterConfig{}, "", fmt.Errorf("存在多个 Kafka Connect Cluster，请指定 cluster 名称")
 	}
-	return asset_entity.KafkaConnectClusterConfig{}, "", fmt.Errorf("Kafka Connect Cluster不存在: %s", name)
+	return asset_entity.KafkaConnectClusterConfig{}, "", fmt.Errorf("kafka connect cluster 不存在: %s", name)
 }
 
 func newKafkaConnectClient(cfg *asset_entity.KafkaConnectClusterConfig, cluster string, password string, timeout time.Duration) (*kafkaConnectClient, error) {
@@ -342,7 +342,7 @@ func kafkaConnectTLSConfig(cfg *asset_entity.KafkaConnectClusterConfig) (*tls.Co
 	}
 	if cfg.TLSCertFile != "" || cfg.TLSKeyFile != "" {
 		if cfg.TLSCertFile == "" || cfg.TLSKeyFile == "" {
-			return nil, fmt.Errorf("Kafka Connect TLS客户端证书和私钥必须同时配置")
+			return nil, fmt.Errorf("kafka connect TLS 客户端证书和私钥必须同时配置")
 		}
 		cert, err := tls.LoadX509KeyPair(cfg.TLSCertFile, cfg.TLSKeyFile)
 		if err != nil {
@@ -381,7 +381,7 @@ func (c *kafkaConnectClient) do(ctx context.Context, method string, path string,
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return kafkaConnectHTTPError(resp)
 	}
@@ -418,7 +418,7 @@ func (c *kafkaConnectClient) applyAuth(req *http.Request) error {
 			token = c.username
 		}
 		if token == "" {
-			return fmt.Errorf("Bearer Token不能为空")
+			return fmt.Errorf("bearer token 不能为空")
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
 		return nil
@@ -458,10 +458,10 @@ func connectPath(parts ...string) string {
 func normalizeConnectorConfig(name string, config map[string]string) (string, map[string]string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return "", nil, fmt.Errorf("Connector不能为空")
+		return "", nil, fmt.Errorf("connector 不能为空")
 	}
 	if len(config) == 0 {
-		return "", nil, fmt.Errorf("Connector配置不能为空")
+		return "", nil, fmt.Errorf("connector 配置不能为空")
 	}
 	out := make(map[string]string, len(config)+1)
 	for key, value := range config {

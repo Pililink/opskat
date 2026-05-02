@@ -163,7 +163,7 @@ func handleKafkaTopic(ctx context.Context, args map[string]any) (string, error) 
 			}
 			detail, ok := topics[topic]
 			if !ok {
-				return "", fmt.Errorf("Kafka topic not found: %s", topic)
+				return "", fmt.Errorf("kafka topic not found: %s", topic)
 			}
 			return marshalResult(map[string]any{"topic": kafkaTopicDetailResult(detail)})
 		}
@@ -261,7 +261,7 @@ func handleKafkaConsumerGroup(ctx context.Context, args map[string]any) (string,
 			}
 			detail, ok := groups[group]
 			if !ok {
-				return "", fmt.Errorf("Kafka consumer group not found: %s", group)
+				return "", fmt.Errorf("kafka consumer group not found: %s", group)
 			}
 			result := kafkaConsumerGroupDetailResult(detail)
 			if lags, lagErr := admin.Lag(ctx, group); lagErr != nil {
@@ -1348,8 +1348,9 @@ func kafkaConsumerGroupMembersResult(members []kadm.DescribedGroupMember) []map[
 }
 
 func kafkaConsumerGroupLagResult(lag kadm.DescribedGroupLag) []map[string]any {
-	out := make([]map[string]any, 0)
-	for _, partitionLag := range lag.Lag.Sorted() {
+	sorted := lag.Lag.Sorted()
+	out := make([]map[string]any, 0, len(sorted))
+	for _, partitionLag := range sorted {
 		item := map[string]any{
 			"topic":            partitionLag.Topic,
 			"partition":        partitionLag.Partition,

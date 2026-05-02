@@ -568,10 +568,10 @@ func (a *Asset) validateMongoDB() error {
 func (a *Asset) validateKafka() error {
 	cfg, err := a.GetKafkaConfig()
 	if err != nil {
-		return fmt.Errorf("Kafka配置无效: %w", err)
+		return fmt.Errorf("kafka配置无效: %w", err)
 	}
 	if len(cfg.Brokers) == 0 {
-		return errors.New("Kafka broker不能为空")
+		return errors.New("kafka broker不能为空")
 	}
 	for _, broker := range cfg.Brokers {
 		if err := validateKafkaBroker(broker); err != nil {
@@ -582,25 +582,25 @@ func (a *Asset) validateKafka() error {
 	case KafkaSASLNone:
 	case KafkaSASLPlain, KafkaSASLSCRAMSHA256, KafkaSASLSCRAMSHA512:
 		if strings.TrimSpace(cfg.Username) == "" {
-			return errors.New("Kafka SASL用户名不能为空")
+			return errors.New("kafka SASL用户名不能为空")
 		}
 		if cfg.CredentialID == 0 && strings.TrimSpace(cfg.Password) == "" {
-			return errors.New("Kafka SASL密码不能为空")
+			return errors.New("kafka SASL密码不能为空")
 		}
 	default:
 		return fmt.Errorf("不支持的Kafka SASL机制: %s", cfg.SASLMechanism)
 	}
 	if (cfg.TLSCertFile == "") != (cfg.TLSKeyFile == "") {
-		return errors.New("Kafka TLS客户端证书和私钥必须同时配置")
+		return errors.New("kafka TLS客户端证书和私钥必须同时配置")
 	}
 	if cfg.RequestTimeoutSeconds < 0 || cfg.RequestTimeoutSeconds > 300 {
-		return errors.New("Kafka请求超时时间无效")
+		return errors.New("kafka 请求超时时间无效")
 	}
 	if cfg.MessagePreviewBytes < 0 || cfg.MessagePreviewBytes > 1024*1024 {
-		return errors.New("Kafka消息预览大小无效")
+		return errors.New("kafka 消息预览大小无效")
 	}
 	if cfg.MessageFetchLimit < 0 || cfg.MessageFetchLimit > 1000 {
-		return errors.New("Kafka消息读取数量无效")
+		return errors.New("kafka 消息读取数量无效")
 	}
 	return nil
 }
@@ -608,15 +608,15 @@ func (a *Asset) validateKafka() error {
 func validateKafkaBroker(broker string) error {
 	broker = strings.TrimSpace(broker)
 	if broker == "" {
-		return errors.New("Kafka broker不能为空")
+		return errors.New("kafka broker不能为空")
 	}
 	host, portText, err := net.SplitHostPort(broker)
 	if err != nil || strings.TrimSpace(host) == "" {
-		return fmt.Errorf("Kafka broker必须为host:port格式: %s", broker)
+		return fmt.Errorf("kafka broker必须为host:port格式: %s", broker)
 	}
 	port, err := strconv.Atoi(portText)
 	if err != nil || port <= 0 || port > 65535 {
-		return fmt.Errorf("Kafka broker端口无效: %s", broker)
+		return fmt.Errorf("kafka broker端口无效: %s", broker)
 	}
 	return nil
 }

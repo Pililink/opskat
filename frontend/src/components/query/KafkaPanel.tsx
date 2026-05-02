@@ -401,7 +401,9 @@ function BrokersView({ tabId, state }: { tabId: string; state: KafkaTabState }) 
           {t("query.kafkaClusterConfig")}
         </Button>
       </div>
-      <div className={`grid min-h-0 flex-1 ${showDetail ? "grid-cols-[minmax(320px,1fr)_minmax(300px,0.8fr)]" : "grid-cols-1"}`}>
+      <div
+        className={`grid min-h-0 flex-1 ${showDetail ? "grid-cols-[minmax(320px,1fr)_minmax(300px,0.8fr)]" : "grid-cols-1"}`}
+      >
         <div className="min-h-0 overflow-auto">
           <div className="p-4">
             <div className="overflow-hidden rounded-md border">
@@ -438,7 +440,10 @@ function BrokersView({ tabId, state }: { tabId: string; state: KafkaTabState }) 
               state={state}
               onClose={() =>
                 useKafkaStore.setState((s) => ({
-                  states: { ...s.states, [tabId]: { ...s.states[tabId], selectedBroker: undefined, brokerConfig: undefined } },
+                  states: {
+                    ...s.states,
+                    [tabId]: { ...s.states[tabId], selectedBroker: undefined, brokerConfig: undefined },
+                  },
                 }))
               }
             />
@@ -504,7 +509,11 @@ function BrokerConfigPanel({ state, onClose }: { state: KafkaTabState; onClose: 
   );
 }
 
-function ConfigTable({ configs }: { configs: { name: string; value?: string; isSensitive: boolean; source?: string }[] }) {
+function ConfigTable({
+  configs,
+}: {
+  configs: { name: string; value?: string; isSensitive: boolean; source?: string }[];
+}) {
   const { t } = useTranslation();
   const [search, setSearch] = useState("");
   const filtered = configs.filter((c) => !search || c.name.toLowerCase().includes(search.toLowerCase()));
@@ -797,12 +806,7 @@ function TopicDetailPanel({ tabId, state }: { tabId: string; state: KafkaTabStat
       </div>
       <MessageBrowser tabId={tabId} state={state} />
       <ProduceMessagePanel tabId={tabId} state={state} />
-      <AlterTopicConfigDialog
-        tabId={tabId}
-        topic={detail.name}
-        open={configOpen}
-        onOpenChange={setConfigOpen}
-      />
+      <AlterTopicConfigDialog tabId={tabId} topic={detail.name} open={configOpen} onOpenChange={setConfigOpen} />
       <IncreasePartitionsDialog
         tabId={tabId}
         topic={detail.name}
@@ -927,10 +931,7 @@ function IncreasePartitionsDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             {t("action.cancel")}
           </Button>
-          <Button
-            disabled={state?.topicAdminLoading || nextCount <= currentCount}
-            onClick={() => setConfirmOpen(true)}
-          >
+          <Button disabled={state?.topicAdminLoading || nextCount <= currentCount} onClick={() => setConfirmOpen(true)}>
             {state?.topicAdminLoading && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
             {t("query.kafkaIncreasePartitions")}
           </Button>
@@ -1083,7 +1084,8 @@ function DeleteRecordsDialog({
 
   const partitionValue = Number(partition);
   const offsetValue = Number(offset);
-  const canSubmit = Number.isInteger(partitionValue) && partitionValue >= 0 && Number.isInteger(offsetValue) && offsetValue >= 0;
+  const canSubmit =
+    Number.isInteger(partitionValue) && partitionValue >= 0 && Number.isInteger(offsetValue) && offsetValue >= 0;
 
   const confirm = async () => {
     const partitions: KafkaDeleteRecordsPartition[] = [{ partition: partitionValue, offset: offsetValue }];
@@ -1279,7 +1281,10 @@ function ProduceMessagePanel({ tabId, state }: { tabId: string; state: KafkaTabS
             onChange={(e) => setProduceMessage(tabId, { key: e.target.value })}
             placeholder={t("query.kafkaMessageKey")}
           />
-          <EncodingSelect value={form.keyEncoding} onChange={(value) => setProduceMessage(tabId, { keyEncoding: value })} />
+          <EncodingSelect
+            value={form.keyEncoding}
+            onChange={(value) => setProduceMessage(tabId, { keyEncoding: value })}
+          />
           <EncodingSelect
             value={form.valueEncoding}
             onChange={(value) => setProduceMessage(tabId, { valueEncoding: value })}
@@ -1298,8 +1303,17 @@ function ProduceMessagePanel({ tabId, state }: { tabId: string; state: KafkaTabS
           placeholder={t("query.kafkaHeadersPlaceholder")}
         />
         <div className="flex justify-end">
-          <Button className="h-8 gap-1.5" size="sm" disabled={state.producingMessage} onClick={() => setConfirmOpen(true)}>
-            {state.producingMessage ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+          <Button
+            className="h-8 gap-1.5"
+            size="sm"
+            disabled={state.producingMessage}
+            onClick={() => setConfirmOpen(true)}
+          >
+            {state.producingMessage ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Send className="h-3.5 w-3.5" />
+            )}
             {t("query.kafkaSendMessage")}
           </Button>
         </div>
@@ -1619,7 +1633,15 @@ function CreateACLDialog({
   );
 }
 
-function CompactSelect({ value, onChange, items }: { value: string; onChange: (value: string) => void; items: string[] }) {
+function CompactSelect({
+  value,
+  onChange,
+  items,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  items: string[];
+}) {
   return (
     <Select value={value} onValueChange={onChange}>
       <SelectTrigger className="h-8 text-xs">
@@ -1912,7 +1934,9 @@ function RegisterSchemaDialog({
           {compatibility && (
             <div
               className={`rounded-md border px-3 py-2 text-sm ${
-                compatibility.compatible ? "border-emerald-500/30 bg-emerald-500/10" : "border-destructive/30 bg-destructive/10"
+                compatibility.compatible
+                  ? "border-emerald-500/30 bg-emerald-500/10"
+                  : "border-destructive/30 bg-destructive/10"
               }`}
             >
               {compatibility.compatible ? t("query.kafkaSchemaCompatible") : t("query.kafkaSchemaIncompatible")}
@@ -2604,12 +2628,7 @@ function ConsumerGroupDetailPanel({ tabId, state }: { tabId: string; state: Kafk
         <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs">{detail.lagError}</div>
       )}
       <LagTable detail={detail} />
-      <ResetConsumerGroupOffsetDialog
-        tabId={tabId}
-        group={detail.group}
-        open={resetOpen}
-        onOpenChange={setResetOpen}
-      />
+      <ResetConsumerGroupOffsetDialog tabId={tabId} group={detail.group} open={resetOpen} onOpenChange={setResetOpen} />
       <ConfirmDialog
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
@@ -2657,7 +2676,10 @@ function ResetConsumerGroupOffsetDialog({
   };
 
   const modeValue = mode === "timestamp" ? timestampMillis : offset;
-  const canSubmit = topic.trim() && (mode === "offset" ? offset.trim() : true) && (mode === "timestamp" ? timestampMillis.trim() : true);
+  const canSubmit =
+    topic.trim() &&
+    (mode === "offset" ? offset.trim() : true) &&
+    (mode === "timestamp" ? timestampMillis.trim() : true);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

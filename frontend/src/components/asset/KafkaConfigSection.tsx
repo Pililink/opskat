@@ -369,7 +369,10 @@ function KafkaCompanionAuthFields({
     <div className="grid gap-3">
       <div className="grid gap-2">
         <Label>{t("asset.kafkaCompanionAuthType")}</Label>
-        <Select value={value.authType} onValueChange={(authType) => onChange(kafkaCompanionAuthTypePatch(value, authType))}>
+        <Select
+          value={value.authType}
+          onValueChange={(authType) => onChange(kafkaCompanionAuthTypePatch(value, authType))}
+        >
           <SelectTrigger>
             <SelectValue />
           </SelectTrigger>
@@ -428,10 +431,7 @@ function KafkaCompanionAuthFields({
   );
 }
 
-function kafkaCompanionAuthTypePatch(
-  value: KafkaCompanionAuthForm,
-  authType: string
-): Partial<KafkaCompanionAuthForm> {
+function kafkaCompanionAuthTypePatch(value: KafkaCompanionAuthForm, authType: string): Partial<KafkaCompanionAuthForm> {
   const patch: Partial<KafkaCompanionAuthForm> = { authType };
   if (authType === "bearer") {
     if (value.username && !value.password && !value.encryptedPassword && !value.credentialId) {

@@ -80,10 +80,10 @@ func (s *Service) ProduceMessage(ctx context.Context, req ProduceMessageRequest)
 	var out ProduceMessageResponse
 	topic := strings.TrimSpace(req.Topic)
 	if topic == "" {
-		return out, fmt.Errorf("Topic不能为空")
+		return out, fmt.Errorf("topic 不能为空")
 	}
 	if req.Partition != nil && *req.Partition < 0 {
-		return out, fmt.Errorf("Partition不能小于0")
+		return out, fmt.Errorf("partition 不能小于0")
 	}
 
 	extraOpts := []kgo.Opt(nil)
@@ -137,10 +137,10 @@ func (s *Service) ProduceMessage(ctx context.Context, req ProduceMessageRequest)
 func normalizeBrowseMessagesRequest(req BrowseMessagesRequest, cfg *asset_entity.KafkaConfig) (normalizedBrowseRequest, error) {
 	topic := strings.TrimSpace(req.Topic)
 	if topic == "" {
-		return normalizedBrowseRequest{}, fmt.Errorf("Topic不能为空")
+		return normalizedBrowseRequest{}, fmt.Errorf("topic 不能为空")
 	}
 	if req.Partition != nil && *req.Partition < 0 {
-		return normalizedBrowseRequest{}, fmt.Errorf("Partition不能小于0")
+		return normalizedBrowseRequest{}, fmt.Errorf("partition 不能小于0")
 	}
 
 	startMode := strings.ToLower(strings.TrimSpace(req.StartMode))
@@ -153,10 +153,10 @@ func normalizeBrowseMessagesRequest(req BrowseMessagesRequest, cfg *asset_entity
 		return normalizedBrowseRequest{}, fmt.Errorf("不支持的 Kafka 消息起始模式: %s", req.StartMode)
 	}
 	if startMode == "offset" && req.Offset < 0 {
-		return normalizedBrowseRequest{}, fmt.Errorf("Offset不能小于0")
+		return normalizedBrowseRequest{}, fmt.Errorf("offset 不能小于0")
 	}
 	if startMode == "timestamp" && req.TimestampMillis <= 0 {
-		return normalizedBrowseRequest{}, fmt.Errorf("Timestamp不能为空")
+		return normalizedBrowseRequest{}, fmt.Errorf("timestamp 不能为空")
 	}
 
 	limitDefault := defaultKafkaMessageFetchLimit
@@ -228,7 +228,7 @@ func browseTopicPartitions(ctx context.Context, admin *kadm.Client, topic string
 	}
 	detail, ok := topics[topic]
 	if !ok {
-		return nil, fmt.Errorf("Topic不存在: %s", topic)
+		return nil, fmt.Errorf("topic 不存在: %s", topic)
 	}
 	if detail.Err != nil {
 		return nil, fmt.Errorf("读取 Topic 失败: %w", detail.Err)
@@ -244,7 +244,7 @@ func browseTopicPartitions(ctx context.Context, admin *kadm.Client, topic string
 	}
 	if selected != nil {
 		if !exists[*selected] {
-			return nil, fmt.Errorf("Topic %s 不存在 Partition %d", topic, *selected)
+			return nil, fmt.Errorf("topic %s 不存在 partition %d", topic, *selected)
 		}
 		partitions = append(partitions, *selected)
 	}
@@ -436,7 +436,7 @@ func produceHeaders(headers []ProduceMessageHeader) ([]kgo.RecordHeader, error) 
 	for _, header := range headers {
 		key := strings.TrimSpace(header.Key)
 		if key == "" {
-			return nil, fmt.Errorf("Header key不能为空")
+			return nil, fmt.Errorf("header key 不能为空")
 		}
 		value, err := decodeKafkaInput(header.Value, header.Encoding)
 		if err != nil {

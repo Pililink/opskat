@@ -161,7 +161,7 @@ func normalizeCreateACLRequest(req CreateACLRequest) (aclFilter, error) {
 	}
 	principal := strings.TrimSpace(req.Principal)
 	if principal == "" {
-		return aclFilter{}, fmt.Errorf("Principal不能为空")
+		return aclFilter{}, fmt.Errorf("principal 不能为空")
 	}
 	return aclFilter{
 		assetID:      req.AssetID,
@@ -198,11 +198,11 @@ func normalizeDeleteACLRequest(req DeleteACLRequest) (aclFilter, error) {
 	}
 	principal := strings.TrimSpace(req.Principal)
 	if principal == "" {
-		return aclFilter{}, fmt.Errorf("Principal不能为空")
+		return aclFilter{}, fmt.Errorf("principal 不能为空")
 	}
 	host := strings.TrimSpace(req.Host)
 	if host == "" {
-		return aclFilter{}, fmt.Errorf("Host不能为空")
+		return aclFilter{}, fmt.Errorf("host 不能为空")
 	}
 	return aclFilter{
 		assetID:      req.AssetID,
@@ -333,12 +333,12 @@ func normalizeACLResourceName(resourceType kmsg.ACLResourceType, value string, r
 			return "kafka-cluster", nil
 		}
 		if !strings.EqualFold(name, "kafka-cluster") {
-			return "", fmt.Errorf("CLUSTER ResourceName必须为 kafka-cluster")
+			return "", fmt.Errorf("cluster resource name 必须为 kafka-cluster")
 		}
 		return "kafka-cluster", nil
 	}
 	if required && name == "" {
-		return "", fmt.Errorf("ResourceName不能为空")
+		return "", fmt.Errorf("resource name 不能为空")
 	}
 	return name, nil
 }
@@ -349,14 +349,14 @@ func parseACLResourceType(value string, allowAny bool) (kmsg.ACLResourceType, er
 		if allowAny {
 			return kmsg.ACLResourceTypeAny, nil
 		}
-		return kmsg.ACLResourceTypeUnknown, fmt.Errorf("ResourceType不能为空")
+		return kmsg.ACLResourceTypeUnknown, fmt.Errorf("resource type 不能为空")
 	}
 	resourceType, err := kmsg.ParseACLResourceType(value)
 	if err != nil {
 		return kmsg.ACLResourceTypeUnknown, fmt.Errorf("不支持的 ACL Resource Type: %s", value)
 	}
 	if resourceType == kmsg.ACLResourceTypeAny && !allowAny {
-		return kmsg.ACLResourceTypeUnknown, fmt.Errorf("ResourceType不能为 ANY")
+		return kmsg.ACLResourceTypeUnknown, fmt.Errorf("resource type 不能为 ANY")
 	}
 	if resourceType == kmsg.ACLResourceTypeUser {
 		return kmsg.ACLResourceTypeUnknown, fmt.Errorf("暂不支持 USER Resource Type")
@@ -378,7 +378,7 @@ func parseACLPatternType(value string, fallback kmsg.ACLResourcePatternType, cre
 		case kmsg.ACLResourcePatternTypeLiteral, kmsg.ACLResourcePatternTypePrefixed:
 			return patternType, nil
 		default:
-			return kmsg.ACLResourcePatternTypeUnknown, fmt.Errorf("PatternType必须为 LITERAL 或 PREFIXED")
+			return kmsg.ACLResourcePatternTypeUnknown, fmt.Errorf("pattern type 必须为 LITERAL 或 PREFIXED")
 		}
 	}
 	return patternType, nil
@@ -390,17 +390,17 @@ func parseACLOperation(value string, allowAny bool) (kmsg.ACLOperation, error) {
 		if allowAny {
 			return kmsg.ACLOperationAny, nil
 		}
-		return kmsg.ACLOperationUnknown, fmt.Errorf("Operation不能为空")
+		return kmsg.ACLOperationUnknown, fmt.Errorf("operation不能为空")
 	}
 	operation, err := kmsg.ParseACLOperation(value)
 	if err != nil {
 		return kmsg.ACLOperationUnknown, fmt.Errorf("不支持的 ACL Operation: %s", value)
 	}
 	if operation == kmsg.ACLOperationAny && !allowAny {
-		return kmsg.ACLOperationUnknown, fmt.Errorf("Operation不能为 ANY")
+		return kmsg.ACLOperationUnknown, fmt.Errorf("operation不能为 ANY")
 	}
 	if operation == kmsg.ACLOperationUnknown {
-		return kmsg.ACLOperationUnknown, fmt.Errorf("Operation不能为 UNKNOWN")
+		return kmsg.ACLOperationUnknown, fmt.Errorf("operation不能为 UNKNOWN")
 	}
 	return operation, nil
 }
@@ -411,17 +411,17 @@ func parseACLPermission(value string, allowAny bool) (kmsg.ACLPermissionType, er
 		if allowAny {
 			return kmsg.ACLPermissionTypeAny, nil
 		}
-		return kmsg.ACLPermissionTypeUnknown, fmt.Errorf("Permission不能为空")
+		return kmsg.ACLPermissionTypeUnknown, fmt.Errorf("permission不能为空")
 	}
 	permission, err := kmsg.ParseACLPermissionType(value)
 	if err != nil {
 		return kmsg.ACLPermissionTypeUnknown, fmt.Errorf("不支持的 ACL Permission: %s", value)
 	}
 	if permission == kmsg.ACLPermissionTypeAny && !allowAny {
-		return kmsg.ACLPermissionTypeUnknown, fmt.Errorf("Permission不能为 ANY")
+		return kmsg.ACLPermissionTypeUnknown, fmt.Errorf("permission不能为 ANY")
 	}
 	if permission == kmsg.ACLPermissionTypeUnknown {
-		return kmsg.ACLPermissionTypeUnknown, fmt.Errorf("Permission不能为 UNKNOWN")
+		return kmsg.ACLPermissionTypeUnknown, fmt.Errorf("permission不能为 UNKNOWN")
 	}
 	return permission, nil
 }

@@ -56,7 +56,7 @@ func NewKafkaClientManager(sshPool *sshpool.Pool) *KafkaClientManager {
 
 func (m *KafkaClientManager) Get(ctx context.Context, asset *asset_entity.Asset, cfg *asset_entity.KafkaConfig, password string) (*kgo.Client, error) {
 	if asset == nil || cfg == nil {
-		return nil, fmt.Errorf("Kafka资产配置为空")
+		return nil, fmt.Errorf("kafka 资产配置为空")
 	}
 	fingerprint := KafkaConfigFingerprint(asset, cfg)
 	key := fmt.Sprintf("%d:%s", asset.ID, fingerprint)
@@ -148,7 +148,7 @@ func DialKafka(ctx context.Context, asset *asset_entity.Asset, cfg *asset_entity
 	}
 	if err := client.Ping(ctx); err != nil {
 		client.Close()
-		return nil, fmt.Errorf("Kafka 连接失败: %w", err)
+		return nil, fmt.Errorf("kafka 连接失败: %w", err)
 	}
 	return client, nil
 }
@@ -156,7 +156,7 @@ func DialKafka(ctx context.Context, asset *asset_entity.Asset, cfg *asset_entity
 func BuildKafkaOptions(asset *asset_entity.Asset, cfg *asset_entity.KafkaConfig, password string, sshPool *sshpool.Pool) ([]kgo.Opt, error) {
 	brokers := NormalizeKafkaBrokers(cfg.Brokers)
 	if len(brokers) == 0 {
-		return nil, fmt.Errorf("Kafka broker不能为空")
+		return nil, fmt.Errorf("kafka broker不能为空")
 	}
 	opts := []kgo.Opt{
 		kgo.SeedBrokers(brokers...),
@@ -292,11 +292,11 @@ func normalizeKafkaSASLMechanism(v string) string {
 func splitKafkaAddr(addr string) (string, int, error) {
 	host, portText, err := net.SplitHostPort(addr)
 	if err != nil {
-		return "", 0, fmt.Errorf("Kafka broker地址无效: %s", addr)
+		return "", 0, fmt.Errorf("kafka broker地址无效: %s", addr)
 	}
 	port, err := strconv.Atoi(portText)
 	if err != nil || port <= 0 || port > 65535 {
-		return "", 0, fmt.Errorf("Kafka broker端口无效: %s", addr)
+		return "", 0, fmt.Errorf("kafka broker端口无效: %s", addr)
 	}
 	return host, port, nil
 }
@@ -320,7 +320,7 @@ func buildKafkaTLSConfig(cfg *asset_entity.KafkaConfig) (*tls.Config, error) {
 	}
 	if cfg.TLSCertFile != "" || cfg.TLSKeyFile != "" {
 		if cfg.TLSCertFile == "" || cfg.TLSKeyFile == "" {
-			return nil, fmt.Errorf("Kafka TLS 客户端证书和私钥必须同时配置")
+			return nil, fmt.Errorf("kafka TLS 客户端证书和私钥必须同时配置")
 		}
 		cert, err := tls.LoadX509KeyPair(cfg.TLSCertFile, cfg.TLSKeyFile)
 		if err != nil {

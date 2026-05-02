@@ -77,11 +77,7 @@ describe("AssetTypeFilterButton", () => {
     const onChange = vi.fn();
     render(
       <TooltipProvider>
-        <AssetTypeFilterButton
-          value={builtinValues}
-          options={builtinOpts}
-          onChange={onChange}
-        />
+        <AssetTypeFilterButton value={builtinValues} options={builtinOpts} onChange={onChange} />
       </TooltipProvider>
     );
     await user.click(screen.getByRole("button", { name: /asset.filterByTypeActive/i }));

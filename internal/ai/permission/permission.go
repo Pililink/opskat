@@ -29,16 +29,16 @@ const (
 	GrantToolCpWrite = "cp:write"
 )
 
-// CheckPermission 统一权限检查（策略 + DB Grant 匹配）。
+// CheckPermission 统一权限检查（策略 + DB Grant 匹配），之后按资产的权限模式做模型审核（见 applyReview）。
 // 不包含用户确认逻辑 — aictx.NeedConfirm 时由调用方处理。
 // assetType: "ssh" | "serial" | "database" | "redis" | "mongodb" | "kafka" | "k8s" |
 // "exec"（exec 等同于 ssh）| "sql"（sql 等同于 database）| "mongo"（mongo 等同于 mongodb）
 func CheckPermission(ctx context.Context, assetType string, assetID int64, command string) aictx.CheckResult {
-	handler, ok := permissionTypeFor(assetType)
-	if !ok {
-		return aictx.CheckResult{Decision: aictx.NeedConfirm}
+	result := aictx.CheckResult{Decision: aictx.NeedConfirm}
+	if handler, ok := permissionTypeFor(assetType); ok {
+		result = handler.check(ctx, assetID, command)
 	}
-	return handler.check(ctx, assetID, command)
+	return applyReview(ctx, assetType, assetID, command, result)
 }
 
 // --- SSH / Serial（共用 shell 命令策略） ---

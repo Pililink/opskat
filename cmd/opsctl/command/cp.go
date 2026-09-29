@@ -444,6 +444,7 @@ func requireCpBatchApproval(ctx context.Context, subjects []cpSubject, detail st
 				DecisionSource: result.DecisionSource,
 				MatchedPattern: result.MatchedPattern,
 				SessionID:      session,
+				Review:         result.Review,
 			}, fmt.Errorf("transfer denied by policy: %s", result.Message)
 		case aictx.Allow:
 			allowed = result
@@ -457,6 +458,7 @@ func requireCpBatchApproval(ctx context.Context, subjects []cpSubject, detail st
 				AssetName: subject.assetName,
 				Command:   subject.command,
 				Detail:    detail,
+				Review:    result.Review,
 			})
 		}
 	}
@@ -466,6 +468,7 @@ func requireCpBatchApproval(ctx context.Context, subjects []cpSubject, detail st
 			DecisionSource: allowed.DecisionSource,
 			MatchedPattern: allowed.MatchedPattern,
 			SessionID:      session,
+			Review:         allowed.Review,
 		}, nil
 	}
 	return cpBatchSendFn(items, session)

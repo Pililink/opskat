@@ -220,6 +220,7 @@ func handleBatchCommand(ctx context.Context, args map[string]any) (string, error
 					AssetID:   r.assetID,
 					AssetName: r.assetName,
 					Command:   r.checkCommand,
+					Review:    r.checkResult.Review,
 				})
 				needConfirmIndices = append(needConfirmIndices, i)
 			}
@@ -228,6 +229,8 @@ func handleBatchCommand(ctx context.Context, args map[string]any) (string, error
 			resp := checker.ConfirmFunc()(ctx, permission.ApprovalKindBatch, needConfirmItems)
 			parsed, parseErr := permission.ParseApprovalResponse(permission.ApprovalKindBatch, resp, needConfirmItems)
 			for _, idx := range needConfirmIndices {
+				// 人确认后的结果保留模型审核结果，审计据此记下"模型没通过、人批准了"。
+				review := resolved[idx].checkResult.Review
 				switch {
 				case parseErr != nil:
 					resolved[idx].decision = "deny"
@@ -256,6 +259,7 @@ func handleBatchCommand(ctx context.Context, args map[string]any) (string, error
 						Message: resolved[idx].denyMsg,
 					}
 				}
+				resolved[idx].checkResult.Review = review
 			}
 		}
 	}

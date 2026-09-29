@@ -467,6 +467,12 @@ func (a *AI) SendAIMessage(convID int64, messages []runner.Message, aiCtx runner
 	chatCtx = aictx.WithConversationID(chatCtx, convID)
 	chatCtx = aictx.WithSessionID(chatCtx, fmt.Sprintf("conv_%d", convID))
 	chatCtx = logger.WithContextField(chatCtx, zap.Int64("conv_id", convID))
+	// 模型审核用用户本轮的要求判断命令是否超出范围；Autopilot 开关由对话界面按本次对话传入。
+	history, lastUserText := runner.SplitForReplay(messages)
+	chatCtx = aictx.WithUserRequest(chatCtx, lastUserText)
+	if aiCtx.Autopilot {
+		chatCtx = aictx.WithAutopilot(chatCtx)
+	}
 	if a.pool != nil {
 		chatCtx = helper.WithSSHPool(chatCtx, a.pool)
 	}
@@ -540,7 +546,6 @@ func (a *AI) SendAIMessage(convID int64, messages []runner.Message, aiCtx runner
 		return outwardErr
 	}
 
-	history, lastUserText := runner.SplitForReplay(messages)
 	agentConv := agent.LoadConversation(fmt.Sprintf("opskat-conv-%d", convID), runner.ToAgentMessages(history))
 	aiRunner := sys.Agent().Runner(agentConv)
 

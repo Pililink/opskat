@@ -1,0 +1,188 @@
+package permission
+
+import (
+	"context"
+	"testing"
+
+	. "github.com/smartystreets/goconvey/convey"
+	"go.uber.org/mock/gomock"
+
+	"github.com/opskat/opskat/internal/ai/aictx"
+	"github.com/opskat/opskat/internal/model/entity/asset_entity"
+	"github.com/opskat/opskat/internal/model/entity/group_entity"
+	policyent "github.com/opskat/opskat/internal/model/entity/policy"
+	"github.com/opskat/opskat/internal/service/command_review_svc"
+)
+
+// fakeReviewer 返回预设结果，并记录收到的输入。
+type fakeReviewer struct {
+	result command_review_svc.Result
+	calls  []command_review_svc.Input
+}
+
+func (f *fakeReviewer) Review(_ context.Context, in command_review_svc.Input) command_review_svc.Result {
+	f.calls = append(f.calls, in)
+	return f.result
+}
+
+func (f *fakeReviewer) TestConnection(context.Context) error { return nil }
+
+func registerFakeReviewer(t *testing.T, r command_review_svc.Result) *fakeReviewer {
+	f := &fakeReviewer{result: r}
+	orig := command_review_svc.Default()
+	command_review_svc.Register(f)
+	t.Cleanup(func() { command_review_svc.Register(orig) })
+	return f
+}
+
+var (
+	reviewPass   = command_review_svc.Result{Outcome: command_review_svc.OutcomePass, Model: "jev-1.13.0"}
+	reviewReject = command_review_svc.Result{Outcome: command_review_svc.OutcomeReject, Failed: []string{"disruptive"}, Model: "jev-1.13.0"}
+	reviewFail   = command_review_svc.Result{Outcome: command_review_svc.OutcomeFail, Reason: command_review_svc.ReasonTimeout}
+)
+
+// sshAsset 的策略只放行 ls，所以 "systemctl restart nginx" 会落到"需要人确认"。
+func sshAsset(mode string, groupID int64) *asset_entity.Asset {
+	return &asset_entity.Asset{
+		ID:             1,
+		Type:           asset_entity.AssetTypeSSH,
+		GroupID:        groupID,
+		PermissionMode: mode,
+		CmdPolicy:      mustJSON(asset_entity.CommandPolicy{AllowList: []string{"ls *", "systemctl status *"}}),
+	}
+}
+
+func TestApplyReview(t *testing.T) {
+	Convey("模型审核只处理原本要问人的命令，并按权限模式处理结果", t, func() {
+		ctx, mockRepo, groups := setupPolicyTest(t)
+		const cmd = "systemctl restart nginx"
+
+		Convey("默认模式不审核，结果和原来一样", func() {
+			f := registerFakeReviewer(t, reviewPass)
+			mockRepo.EXPECT().Find(gomock.Any(), int64(1)).Return(sshAsset("", 0), nil).AnyTimes()
+
+			r := CheckPermission(ctx, asset_entity.AssetTypeSSH, 1, cmd)
+			So(r.Decision, ShouldEqual, aictx.NeedConfirm)
+			So(r.Review, ShouldBeNil)
+			So(f.calls, ShouldBeEmpty)
+		})
+
+		Convey("规则已经放行或拒绝的命令不审核", func() {
+			f := registerFakeReviewer(t, reviewReject)
+			mockRepo.EXPECT().Find(gomock.Any(), int64(1)).Return(sshAsset(policyent.PermissionModeAutopilot, 0), nil).AnyTimes()
+
+			r := CheckPermission(ctx, asset_entity.AssetTypeSSH, 1, "ls -la")
+			So(r.Decision, ShouldEqual, aictx.Allow)
+			So(r.DecisionSource, ShouldEqual, aictx.SourcePolicyAllow)
+			So(f.calls, ShouldBeEmpty)
+		})
+
+		Convey("辅助审批", func() {
+			mockRepo.EXPECT().Find(gomock.Any(), int64(1)).Return(sshAsset(policyent.PermissionModeAssisted, 0), nil).AnyTimes()
+
+			Convey("审核通过：自动放行", func() {
+				f := registerFakeReviewer(t, reviewPass)
+				r := CheckPermission(ctx, asset_entity.AssetTypeSSH, 1, cmd)
+				So(r.Decision, ShouldEqual, aictx.Allow)
+				So(r.DecisionSource, ShouldEqual, aictx.SourceAssistedAllow)
+				So(r.Review.Outcome, ShouldEqual, "pass")
+				So(f.calls, ShouldResemble, []command_review_svc.Input{{AssetType: asset_entity.AssetTypeSSH, Command: cmd}})
+			})
+
+			Convey("审核未通过：仍然问人，保留规则提示并带上审核结果", func() {
+				registerFakeReviewer(t, reviewReject)
+				r := CheckPermission(ctx, asset_entity.AssetTypeSSH, 1, cmd)
+				So(r.Decision, ShouldEqual, aictx.NeedConfirm)
+				So(r.HintRules, ShouldContain, "systemctl status *")
+				So(r.Review.Outcome, ShouldEqual, "reject")
+				So(r.Review.Failed, ShouldResemble, []string{"disruptive"})
+			})
+
+			Convey("审核失败：仍然问人", func() {
+				registerFakeReviewer(t, reviewFail)
+				r := CheckPermission(ctx, asset_entity.AssetTypeSSH, 1, cmd)
+				So(r.Decision, ShouldEqual, aictx.NeedConfirm)
+				So(r.Review.Outcome, ShouldEqual, "fail")
+				So(r.Review.Reason, ShouldEqual, command_review_svc.ReasonTimeout)
+			})
+		})
+
+		Convey("Autopilot", func() {
+			mockRepo.EXPECT().Find(gomock.Any(), int64(1)).Return(sshAsset(policyent.PermissionModeAutopilot, 0), nil).AnyTimes()
+
+			Convey("审核通过：自动放行", func() {
+				registerFakeReviewer(t, reviewPass)
+				r := CheckPermission(ctx, asset_entity.AssetTypeSSH, 1, cmd)
+				So(r.Decision, ShouldEqual, aictx.Allow)
+				So(r.DecisionSource, ShouldEqual, aictx.SourceAutopilotAllow)
+			})
+
+			Convey("审核未通过：直接拒绝，告诉调用方不要原样重试", func() {
+				registerFakeReviewer(t, reviewReject)
+				r := CheckPermission(aictx.WithPolicyLang(ctx, "zh-CN"), asset_entity.AssetTypeSSH, 1, cmd)
+				So(r.Decision, ShouldEqual, aictx.Deny)
+				So(r.DecisionSource, ShouldEqual, aictx.SourceAutopilotDeny)
+				So(r.Message, ShouldContainSubstring, "模型审核未通过")
+				So(r.Message, ShouldContainSubstring, "不要原样重试")
+				So(r.Review.Outcome, ShouldEqual, "reject")
+			})
+
+			Convey("审核失败：直接拒绝，并写明原因", func() {
+				registerFakeReviewer(t, reviewFail)
+				r := CheckPermission(aictx.WithPolicyLang(ctx, "zh-CN"), asset_entity.AssetTypeSSH, 1, cmd)
+				So(r.Decision, ShouldEqual, aictx.Deny)
+				So(r.DecisionSource, ShouldEqual, aictx.SourceAutopilotDeny)
+				So(r.Message, ShouldContainSubstring, "模型审核失败")
+				So(r.Message, ShouldContainSubstring, "超时")
+			})
+		})
+
+		Convey("资产没有设置时沿用分组链上最近的设置", func() {
+			groups.groups[10] = &group_entity.Group{ID: 10, ParentID: 20}
+			groups.groups[20] = &group_entity.Group{ID: 20, PermissionMode: policyent.PermissionModeAutopilot}
+			registerFakeReviewer(t, reviewReject)
+
+			Convey("资产为空：用上级分组的 Autopilot", func() {
+				mockRepo.EXPECT().Find(gomock.Any(), int64(1)).Return(sshAsset("", 10), nil).AnyTimes()
+				r := CheckPermission(ctx, asset_entity.AssetTypeSSH, 1, cmd)
+				So(r.DecisionSource, ShouldEqual, aictx.SourceAutopilotDeny)
+			})
+
+			Convey("资产显式设为默认：不受分组影响", func() {
+				mockRepo.EXPECT().Find(gomock.Any(), int64(1)).Return(sshAsset(policyent.PermissionModeDefault, 10), nil).AnyTimes()
+				r := CheckPermission(ctx, asset_entity.AssetTypeSSH, 1, cmd)
+				So(r.Decision, ShouldEqual, aictx.NeedConfirm)
+				So(r.Review, ShouldBeNil)
+			})
+		})
+
+		Convey("辅助审批审核未通过时，审批项带上审核结果，人批准后结果里也保留", func() {
+			registerFakeReviewer(t, reviewReject)
+			mockRepo.EXPECT().Find(gomock.Any(), int64(1)).Return(sshAsset(policyent.PermissionModeAssisted, 0), nil).AnyTimes()
+
+			var shown []ApprovalItem
+			checker := NewCommandPolicyChecker(func(_ context.Context, _ string, items []ApprovalItem) ApprovalResponse {
+				shown = items
+				return ApprovalResponse{Decision: "allow"}
+			})
+			r := checker.CheckForAsset(ctx, 1, asset_entity.AssetTypeSSH, cmd)
+
+			So(shown, ShouldHaveLength, 1)
+			So(shown[0].Review, ShouldNotBeNil)
+			So(shown[0].Review.Outcome, ShouldEqual, "reject")
+			So(r.Decision, ShouldEqual, aictx.Allow)
+			So(r.DecisionSource, ShouldEqual, aictx.SourceUserAllow)
+			So(r.Review.Outcome, ShouldEqual, "reject")
+		})
+
+		Convey("AI 对话临时开启的 Autopilot 优先于资产设置，并把用户的要求交给审核", func() {
+			f := registerFakeReviewer(t, reviewReject)
+			mockRepo.EXPECT().Find(gomock.Any(), int64(1)).Return(sshAsset(policyent.PermissionModeDefault, 0), nil).AnyTimes()
+
+			chatCtx := aictx.WithUserRequest(aictx.WithAutopilot(ctx), "重启 nginx")
+			r := CheckPermission(chatCtx, asset_entity.AssetTypeSSH, 1, cmd)
+			So(r.DecisionSource, ShouldEqual, aictx.SourceAutopilotDeny)
+			So(f.calls[0].UserRequest, ShouldEqual, "重启 nginx")
+		})
+	})
+}

@@ -23,6 +23,8 @@ type TabInfo struct {
 // AIContext 前端传入的上下文信息
 type AIContext struct {
 	OpenTabs []TabInfo `json:"openTabs"`
+	// Autopilot 表示用户在对话界面里为本次对话临时开启了 Autopilot（见 aictx.WithAutopilot）。
+	Autopilot bool `json:"autopilot"`
 }
 
 // PromptBuilder 动态构建 System Prompt

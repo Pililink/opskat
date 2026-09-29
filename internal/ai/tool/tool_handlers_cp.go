@@ -317,6 +317,8 @@ func checkAccessBatch(
 				continue
 			}
 			seen[item] = true
+			// 去重之后再挂审核结果：它是指针，参与比较会让同一条主体出现两次。
+			item.Review = result.Review
 
 			items = append(items, item)
 		}

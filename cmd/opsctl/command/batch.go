@@ -257,6 +257,7 @@ func cmdBatch(ctx context.Context, handlers map[string]tool.ToolHandlerFunc, arg
 				// pattern 落库，掺入节点地址会让同一条命令因 scope 不同匹配不上同一条
 				// 规则——同 exec.go 的 execApprovalDetail。
 				Detail: batchItemScopeDetail(cmd.scope),
+				Review: b.result.Review,
 			})
 		}
 
@@ -274,7 +275,7 @@ func cmdBatch(ctx context.Context, handlers map[string]tool.ToolHandlerFunc, arg
 				cmd := resolved[b.idx]
 				results[b.idx].Error = fmt.Sprintf("approval failed: %v", approvalErr)
 				argsJSON := batchArgsJSON(cmd.asset.ID, cmd.command, cmd.scope)
-				decision := &aictx.CheckResult{Decision: aictx.Deny, DecisionSource: approvalResult.DecisionSource}
+				decision := &aictx.CheckResult{Decision: aictx.Deny, DecisionSource: approvalResult.DecisionSource, Review: b.result.Review}
 				deniedCtx := withBatchAuditCommand(auditCtx, cmd.checkCommand)
 				writeOpsctlAudit(deniedCtx, batchAuditTool, argsJSON, "", approvalErr, decision)
 			}
@@ -286,6 +287,7 @@ func cmdBatch(ctx context.Context, handlers map[string]tool.ToolHandlerFunc, arg
 				resolved[b.idx].decision = &aictx.CheckResult{
 					Decision:       aictx.Allow,
 					DecisionSource: aictx.SourceUserAllow,
+					Review:         b.result.Review,
 				}
 				execSet[b.idx] = true
 			}

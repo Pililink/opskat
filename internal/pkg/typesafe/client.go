@@ -49,6 +49,36 @@ type Answer struct {
 	Noul float64 `json:"noul"`
 }
 
+// UnmarshalJSON 要求是/否题的答案带着概率：缺了这个字段时解码失败，不能当成概率 0。
+func (a *Answer) UnmarshalJSON(b []byte) error {
+	var raw struct {
+		Type string   `json:"type"`
+		Noul *float64 `json:"noul"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	a.Type = raw.Type
+	if raw.Type == QuestionNoul {
+		if raw.Noul == nil {
+			return fmt.Errorf("noul answer without a probability")
+		}
+		a.Noul = *raw.Noul
+	}
+	return nil
+}
+
+// check 检查答案和题目对得上：题型一致，是/否题的概率在 0~1 之间。
+func (a Answer) check(q Question) error {
+	if a.Type != q.Type {
+		return fmt.Errorf("answer type %q, want %q", a.Type, q.Type)
+	}
+	if a.Type == QuestionNoul && (a.Noul < 0 || a.Noul > 1) {
+		return fmt.Errorf("noul probability %v out of range", a.Noul)
+	}
+	return nil
+}
+
 // Usage 是一次请求消耗的 token。
 type Usage struct {
 	InputTokens  int `json:"input_tokens"`
@@ -116,7 +146,8 @@ func New(apiKey string, opts ...Option) *Client {
 }
 
 // Evaluate 发送一次评估请求。429 / 529 按退避重试；其余非 2xx 直接返回 *APIError。
-// 返回的 Response 保证包含请求里的每一道题。
+// 返回的 Response 保证包含请求里的每一道题，且每个答案的题型和取值都合法——服务地址可以是
+// 任意兼容的服务，答案不合法时报错，不交给调用方当成正常的评分。
 func (c *Client) Evaluate(ctx context.Context, req Request) (*Response, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -126,9 +157,13 @@ func (c *Client) Evaluate(ctx context.Context, req Request) (*Response, error) {
 	for attempt := 0; ; attempt++ {
 		resp, retryAfter, err := c.post(ctx, body)
 		if err == nil {
-			for id := range req.Questions {
-				if _, ok := resp.Answers[id]; !ok {
+			for id, q := range req.Questions {
+				a, ok := resp.Answers[id]
+				if !ok {
 					return nil, fmt.Errorf("typesafe: missing answer %q in response", id)
+				}
+				if err := a.check(q); err != nil {
+					return nil, fmt.Errorf("typesafe: invalid answer %q: %w", id, err)
 				}
 			}
 			return resp, nil

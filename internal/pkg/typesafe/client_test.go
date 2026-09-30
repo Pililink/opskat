@@ -119,6 +119,26 @@ func TestEvaluateStopsWhenContextCancelled(t *testing.T) {
 	assert.True(t, errors.Is(err, context.DeadlineExceeded))
 }
 
+// 兼容服务（Base URL 可以是自建的）返回的答案不合法时报错，不能当成"是"的概率很低：
+// 调用方据此放行命令，宁可审核失败。
+func TestEvaluateRejectsInvalidAnswer(t *testing.T) {
+	for _, body := range []string{
+		`{"model":"m","answers":{"q":{"type":"noul","noul":1.5}}}`,
+		`{"model":"m","answers":{"q":{"type":"noul","noul":-0.1}}}`,
+		`{"model":"m","answers":{"q":{"type":"noul"}}}`,
+		`{"model":"m","answers":{"q":{"type":"bool","value":true}}}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte(body))
+			})
+
+			_, err := c.Evaluate(context.Background(), Request{Model: "m", State: "x", Questions: map[string]Question{"q": {Type: QuestionNoul, Instructions: "?"}}})
+			assert.Error(t, err)
+		})
+	}
+}
+
 func TestEvaluateRejectsAnswerMissingFromResponse(t *testing.T) {
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"model":"jev-1.13.0","answers":{}}`))

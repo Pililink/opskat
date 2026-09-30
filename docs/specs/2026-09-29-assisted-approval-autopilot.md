@@ -24,9 +24,9 @@
 
 - **输入**：资产类型名 + 替换掉敏感信息的整条命令。**不区分资产类型**，所有类型同一组题目、同一个通过标准。
 - **替换敏感信息**（`RedactSensitive`）：只换值本身，不动命令结构——命令名、分隔符、管道、重定向，以及 `$(…)`、反引号里要执行的内容都原样留给模型看；值里带命令替换时也不换，宁可把这个值发出去，也不能把要执行的代码藏起来。按命令的写法分三种找法，由资产类型注册权限检查时声明：
-  - **shell**（SSH、串口、k8s）：用 shell 解析器逐个参数判断，包括名字带 password / token / secret / key 的变量赋值和参数（`DB_PASSWORD=…`、`--password …`、`--api-key=…`、`aws_secret_access_key …`、`ENCRYPTION_KEY=…`、`--key …`；key 按名字里完整的一段认，monkey、keyboard 不算），以及 `mysql -p密码`、`sshpass -p`、`redis-cli -a`、`curl -u 用户:密码`。再在引号里的内容、heredoc 和注释里按下面纯文本的办法找。**解析不了就不发送**，按审核失败处理（命令无法解析）。
+  - **shell**（SSH、串口、k8s）：用 shell 解析器逐个参数判断，包括名字带 password / token / secret / key 的变量赋值和参数（`DB_PASSWORD=…`、`--password …`、`--api-key=…`、`aws_secret_access_key …`、`ENCRYPTION_KEY=…`、`--key …`；key 按名字的最后一段认，monkey、keyboard、KEY_ID 不算），以及 `mysql -p密码`、`sshpass -p`、`redis-cli -a`、`curl -u 用户:密码`。再在引号里的内容、heredoc 和注释里按下面纯文本的办法找，只是这里没加引号的值到重定向（`<` `>`）为止——引号里可能是远端要执行的命令，重定向要留给模型看。名字表示文件位置的（`MYSQL_PASSWORD_FILE`、`TOKEN_PATH`、`KEY_DIR`）值是路径不是密钥，不换，否则 `KEY_DIR=/ rm -rf $KEY_DIR/*` 会藏起删的是哪里。**解析不了就不发送**，按审核失败处理（命令无法解析）。
   - **Redis**：`AUTH`、`HELLO … AUTH`、`MIGRATE … AUTH / AUTH2`、`CONFIG SET requirepass / masterauth`、`ACL SETUSER` 里的密码。
-  - **纯文本**（SQL，mongo / etcd / kafka / OSS 的命令，文件路径，扩展类型）：按格式和紧挨着的键名找，如 `IDENTIFIED BY '…'`、`PASSWORD '…'`、`"password": "…"`、`pwd: "…"`、`NAME=值`、网址里的 `用户名:密码@`、`Authorization:` 请求头。这些命令不经过 shell 执行，不会因为解析失败被拒。
+  - **纯文本**（SQL，mongo / etcd / kafka / OSS 的命令，文件路径，扩展类型）：按格式和紧挨着的键名找，如 `IDENTIFIED BY '…'`、`PASSWORD '…'`、`"password": "…"`、`pwd: "…"`、`NAME=值`、网址里的 `用户名:密码@`、`Authorization:` 请求头。这些命令不经过 shell 执行，不会因为解析失败被拒；`<` `>` 是值的一部分。
   - 所有写法都认常见服务的密钥格式：AWS、GitHub、GitLab、Slack、Stripe、`sk-` 前缀（OpenAI、Anthropic、DeepSeek 等）、Google Cloud、Docker Hub、JWT、阿里云、私钥块等二十多种。这些格式取自 [betterleaks](https://github.com/betterleaks/betterleaks)（MIT）的规则，只选带固定前缀、不需要上下文就能认出来的。没有直接引入 betterleaks：实测它认已知格式很准，但认不出 `mysql -p`、`--password` 这类命令行参数，而且会带进约 50 个用不到的依赖。
 - **题目**（全部是是/否题，任意一题"是"的概率 ≥ 阈值即不通过），只问明确的危险；每道题的"否"都写明只读查看（状态、日志、配置、进程、容器、定时任务、网络状态）不算：
   - `destructive`：明确地删除、清空、覆盖或不可恢复地修改数据、文件、数据库、用户、凭据、密钥（如递归删除、删库删表、批量删 key）；容易撤销的小改动不算；
@@ -36,7 +36,7 @@
 - **审核所有操作**：读和写都可以通过，只要上面的题都不命中。
 - **结果**：通过 / 未通过 / 失败。失败原因：未配置 API key、API key 无法读取（保存过，但解不开，如换了主密钥）、API key 无效、超时、命令过长（替换敏感信息后超过 4,000 字节）、命令无法解析、服务不可用。
 - **缓存**：按"服务地址 + 模型 + 题目版本 + 资产类型 + 原始命令"的哈希存进 `command_reviews` 表，只存哈希和评分，7 天过期；审核失败不缓存。用原始命令而不是替换后的：替换后长得一样的两条命令（比如只有密码不同）各自审核，不共用结果。命中时按**当前阈值**重新判断，设置里改了阈值马上生效。桌面端和 opsctl 共用同一个数据库，互相命中。
-- **服务与模型**：Base URL 可填任何兼容 TypeSafe System One API 的服务（请求发到 `<Base URL>/v1/systemone`），默认 `https://api.typesafe.ai`；模型名不做限制，由用户填写并用"测试模型"确认可用，默认 `jev-1.13.0`。超时默认 5 秒，阈值默认 0.2。
+- **服务与模型**：Base URL 可填任何兼容 TypeSafe System One API 的服务（请求发到 `<Base URL>/v1/systemone`），默认 `https://api.typesafe.ai`；模型名不做限制，由用户填写并用"测试模型"确认可用，默认 `jev-1.13.0`。超时默认 5 秒，阈值默认 0.2。服务返回的答案要和题目对得上：缺题、题型不对、没有概率或概率不在 0~1 之间都按服务不可用处理，不当成评分。
 - **超时重试**：超时是单次请求的。超时或连接出错时自动再试一次：opsctl 每次都是新进程，第一次请求要重新解析域名、建立连接，偶尔会超时，第二次通常很快。服务端明确返回的错误（API key 无效、请求有误等）不重试，429 / 529 由客户端按退避重试。审核结果里记下请求次数，审计详情里显示重试过的。
 - **审核结果**记录模式、每道题的评分和判断用的阈值，审计里据此显示。
 

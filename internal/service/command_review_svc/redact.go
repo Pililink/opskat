@@ -58,41 +58,60 @@ type valueRule struct {
 const (
 	sensitiveName = `(?:password|passwd|passphrase|pwd|token|secret|credentials?|(?:api|access|account|private|auth|secret)[-_]?key)`
 	sensitiveFlag = `(?:password|passwd|pass|pwd|passphrase|token|secret|credentials?|(?:api|access|private|auth|secret)[-_]?key|keys?)`
-	// keyName 是名字里有完整一段叫 key 的变量、参数（ENCRYPTION_KEY、--encryption-key）：
-	// 按整段认，monkey、keyboard、KEYCLOAK_URL 不算。
-	keyName = `(?:[a-z0-9]+[-_])*keys?(?:[-_][a-z0-9]+)*`
-	// argValue 是跟在参数后面的一个值：引号括起来的，或到空白 / shell 分隔符 / 重定向为止、
-	// 不以 - 开头的裸值。重定向是命令结构，不算进值里。
-	argValue = `('[^']*'|"[^"]*"|[^\s\-;&|'"<>][^\s;&|'"<>]*)`
-	// attachedValue 是紧贴在 -p 后面的值。
-	attachedValue = `('[^']*'|"[^"]*"|[^\s;&|'"<>]+)`
+	// keyName 是名字最后一段叫 key 的变量、参数（ENCRYPTION_KEY、--encryption-key）：
+	// 按整段认，monkey、keyboard、KEYCLOAK_URL 不算；KEY_ID、KEY_DIR 这类后面还有一段的也不算。
+	keyName = `(?:[a-z0-9]+[-_])*keys?`
 )
 
-var textRules = append([]valueRule{
-	// 私钥：只换 BEGIN / END 之间的内容。
-	{re: regexp.MustCompile(`(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----(.+?)-----END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----`), group: 1},
-	// 网址里的 用户名:密码@。
-	{re: regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.\-]*://[^\s:/@'"]*:([^\s@/'"]+)@`), group: 1},
-	// 请求头。
-	{re: regexp.MustCompile(`(?i)\bauthorization:\s*(?:(?:bearer|basic|token|digest)\s+)?([^\s'"<>]+)`), group: 1, skip: isAuthScheme},
-	{re: regexp.MustCompile(`(?i)\b(?:x-api-key|x-auth-token|api-key|private-token):\s*([^\s'"<>]+)`), group: 1},
-	// JSON / JS 对象 / YAML 里的字段："password": "…"、pwd: '…'。
-	{re: regexp.MustCompile(`(?i)\b[a-z0-9_-]*` + sensitiveName + `[a-z0-9_-]*["']?\s*:\s*"([^"]*)"`), group: 1},
-	{re: regexp.MustCompile(`(?i)\b[a-z0-9_-]*` + sensitiveName + `[a-z0-9_-]*["']?\s*:\s*'([^']*)'`), group: 1},
-	// SQL 里设置密码。
-	{re: regexp.MustCompile(`(?i)\bIDENTIFIED\s+(?:WITH\s+\S+\s+)?BY\s+'([^']*)'`), group: 1},
-	{re: regexp.MustCompile(`(?i)\bIDENTIFIED\s+(?:WITH\s+\S+\s+)?BY\s+"([^"]*)"`), group: 1},
-	{re: regexp.MustCompile(`(?i)\bPASSWORD\s+'([^']*)'`), group: 1},
-	// 命令行参数。shell 命令本身按解析结果处理（见 argEdits），这几条管的是引号里的远端命令等
-	// 解析器看不进去的地方。
-	{re: regexp.MustCompile(`(?i)\b(?:mysql|mysqldump|mysqladmin|mariadb|mariadb-dump)\b[^;&|\n]*?\s-p` + attachedValue), group: 1},
-	{re: regexp.MustCompile(`\bsshpass\s+-p\s*` + attachedValue), group: 1},
-	{re: regexp.MustCompile(`\bredis-cli\b[^;&|\n]*?\s-a\s+` + argValue), group: 1},
-	{re: regexp.MustCompile(`\bcurl\b[^;&|\n]*?\s(?:-u|--user)\s+[^\s:'"/]+:([^\s'"@/<>]+)`), group: 1},
-	{re: regexp.MustCompile(`(?i)(?:^|\s)(--?(?:[a-z0-9]+[-_])*` + sensitiveFlag + `)\s+` + argValue), group: 2, skip: isNegatedFlag},
-	// NAME=值：变量名、参数名里带 password / token / secret / key 等，也覆盖 --password=值 和网址参数。
-	{re: regexp.MustCompile(`(?i)\b(?:[a-z0-9_-]*` + sensitiveName + `[a-z0-9_-]*|` + keyName + `)=('[^']*'|"[^"]*"|[^\s;&|'"<>]+)`), group: 1},
-}, knownFormats()...)
+// locationNameRe 认出表示文件位置的名字（MYSQL_PASSWORD_FILE、TOKEN_PATH、KEY_DIR）：值是路径，
+// 不是密钥。不换它——`KEY_DIR=/ rm -rf $KEY_DIR/*` 里换掉 / 就藏起了删的是哪里。
+var locationNameRe = regexp.MustCompile(`(?i)[-_](?:file|path|dir)s?$`)
+
+// leadingName 取出匹配开头的名字（字段名、变量名），给 skipLocationName 用。
+var leadingName = regexp.MustCompile(`^[A-Za-z0-9_-]+`)
+
+func skipLocationName(match, _ string) bool {
+	return locationNameRe.MatchString(leadingName.FindString(match))
+}
+
+// textRules 按值的格式和紧挨着的键名找敏感值。redirect 是裸值还要在哪些字符前结束：shell 命令里
+// 是 "<>"——重定向是命令结构，要留给模型看；SQL 等不经过 shell 的纯文本里为空，< > 可以是值的一部分。
+func textRules(redirect string) []valueRule {
+	// argValue 是跟在参数后面的一个值：引号括起来的，或到空白 / shell 分隔符为止、不以 - 开头的裸值。
+	argValue := `('[^']*'|"[^"]*"|[^\s\-;&|'"` + redirect + `][^\s;&|'"` + redirect + `]*)`
+	// attachedValue 是紧贴在 -p 后面的值。
+	attachedValue := `('[^']*'|"[^"]*"|[^\s;&|'"` + redirect + `]+)`
+	return append([]valueRule{
+		// 私钥：只换 BEGIN / END 之间的内容。
+		{re: regexp.MustCompile(`(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----(.+?)-----END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----`), group: 1},
+		// 网址里的 用户名:密码@。
+		{re: regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.\-]*://[^\s:/@'"]*:([^\s@/'"]+)@`), group: 1},
+		// 请求头。
+		{re: regexp.MustCompile(`(?i)\bauthorization:\s*(?:(?:bearer|basic|token|digest)\s+)?([^\s'"` + redirect + `]+)`), group: 1, skip: isAuthScheme},
+		{re: regexp.MustCompile(`(?i)\b(?:x-api-key|x-auth-token|api-key|private-token):\s*([^\s'"` + redirect + `]+)`), group: 1},
+		// JSON / JS 对象 / YAML 里的字段："password": "…"、pwd: '…'。
+		{re: regexp.MustCompile(`(?i)\b[a-z0-9_-]*` + sensitiveName + `[a-z0-9_-]*["']?\s*:\s*"([^"]*)"`), group: 1, skip: skipLocationName},
+		{re: regexp.MustCompile(`(?i)\b[a-z0-9_-]*` + sensitiveName + `[a-z0-9_-]*["']?\s*:\s*'([^']*)'`), group: 1, skip: skipLocationName},
+		// SQL 里设置密码。
+		{re: regexp.MustCompile(`(?i)\bIDENTIFIED\s+(?:WITH\s+\S+\s+)?BY\s+'([^']*)'`), group: 1},
+		{re: regexp.MustCompile(`(?i)\bIDENTIFIED\s+(?:WITH\s+\S+\s+)?BY\s+"([^"]*)"`), group: 1},
+		{re: regexp.MustCompile(`(?i)\bPASSWORD\s+'([^']*)'`), group: 1},
+		// 命令行参数。shell 命令本身按解析结果处理（见 argEdits），这几条管的是引号里的远端命令等
+		// 解析器看不进去的地方。
+		{re: regexp.MustCompile(`(?i)\b(?:mysql|mysqldump|mysqladmin|mariadb|mariadb-dump)\b[^;&|\n]*?\s-p` + attachedValue), group: 1},
+		{re: regexp.MustCompile(`\bsshpass\s+-p\s*` + attachedValue), group: 1},
+		{re: regexp.MustCompile(`\bredis-cli\b[^;&|\n]*?\s-a\s+` + argValue), group: 1},
+		{re: regexp.MustCompile(`\bcurl\b[^;&|\n]*?\s(?:-u|--user)\s+[^\s:'"/]+:([^\s'"@/` + redirect + `]+)`), group: 1},
+		{re: regexp.MustCompile(`(?i)(?:^|\s)(--?(?:[a-z0-9]+[-_])*` + sensitiveFlag + `)\s+` + argValue), group: 2, skip: isNegatedFlag},
+		// NAME=值：变量名、参数名里带 password / token / secret / key 等，也覆盖 --password=值 和网址参数。
+		{re: regexp.MustCompile(`(?i)\b(?:[a-z0-9_-]*` + sensitiveName + `[a-z0-9_-]*|` + keyName + `)=('[^']*'|"[^"]*"|[^\s;&|'"` + redirect + `]+)`), group: 1, skip: skipLocationName},
+	}, knownFormats()...)
+}
+
+var (
+	plainTextRules = textRules("")
+	shellTextRules = textRules("<>")
+)
 
 // knownFormats 是常见服务的密钥格式，取自 betterleaks（MIT，github.com/betterleaks/betterleaks）
 // v1.9.0 的 config/betterleaks.toml：只选带固定前缀、不需要上下文就能认出来的格式，
@@ -174,9 +193,12 @@ func (r valueRule) apply(s string) string {
 	return applyEdits(s, edits)
 }
 
-// redactText 按值的格式和紧挨着的键名找敏感值。规则按顺序执行，每条规则只换一个值。
-func redactText(s string) string {
-	for _, r := range textRules {
+// redactText 在不经过 shell 的纯文本里找敏感值（见 textRules）。
+func redactText(s string) string { return redactWith(plainTextRules, s) }
+
+// redactWith 按顺序执行规则，每条规则只换一个值。
+func redactWith(rules []valueRule, s string) string {
+	for _, r := range rules {
 		s = r.apply(s)
 	}
 	return s
@@ -199,13 +221,18 @@ var (
 	sensitiveNameRe = regexp.MustCompile(`(?i)^(?:[a-z0-9_]*` + sensitiveName + `[a-z0-9_]*|` + keyName + `)$`)
 )
 
-// sensitiveSettings 是作为单独参数出现、后面紧跟着值的设置名（aws configure set、redis CONFIG SET）。
+// isSensitiveName 判断变量名、设置名的值是不是敏感值；表示文件位置的名字不算（见 locationNameRe）。
+func isSensitiveName(name string) bool {
+	return sensitiveNameRe.MatchString(name) && !locationNameRe.MatchString(name)
+}
+
+// isSensitiveSetting 判断作为单独参数出现、后面紧跟着值的设置名（aws configure set、redis CONFIG SET）。
 func isSensitiveSetting(word string) bool {
 	switch strings.ToLower(word) {
 	case "requirepass", "masterauth":
 		return true
 	}
-	return strings.Contains(word, "_") && sensitiveNameRe.MatchString(word)
+	return strings.Contains(word, "_") && isSensitiveName(word)
 }
 
 func isSensitiveFlag(word string) bool {
@@ -223,7 +250,7 @@ func redactShell(command string) (string, error) {
 	syntax.Walk(file, func(n syntax.Node) bool {
 		switch x := n.(type) {
 		case *syntax.Assign:
-			if x.Name != nil && x.Value != nil && sensitiveNameRe.MatchString(x.Name.Value) {
+			if x.Name != nil && x.Value != nil && isSensitiveName(x.Name.Value) {
 				if _, ok := literalValue(x.Value); ok {
 					edits = append(edits, maskNode(x.Value))
 				}
@@ -241,7 +268,8 @@ func redactShell(command string) (string, error) {
 			if overlaps(edits, start, end) {
 				return true
 			}
-			if s := redactText(command[start:end]); s != command[start:end] {
+			// 引号里的内容可能是远端要执行的命令（ssh web '…'、bash -c "…"），按 shell 的写法找。
+			if s := redactWith(shellTextRules, command[start:end]); s != command[start:end] {
 				textEdits = append(textEdits, edit{start: start, end: end, text: s})
 			}
 		}

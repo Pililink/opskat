@@ -100,10 +100,16 @@ func TestRedactShellLeavesOrdinaryCommandsAlone(t *testing.T) {
 		"docker ps",
 		"systemctl list-timers",
 		"tailscale status",
-		// key 只按名字里完整的一段认
+		// key 只按名字里完整的最后一段认
 		"MONKEY=1 ./run.sh",
 		"KEYCLOAK_URL=https://sso.example.com ./run.sh",
 		"tool --keyboard us",
+		// 名字表示文件位置的，值是路径不是密钥：模型要看得到命令动的是哪里
+		"KEY_DIR=/ rm -rf $KEY_DIR/*",
+		"MYSQL_PASSWORD_FILE=/run/secrets/db docker-entrypoint.sh mysqld",
+		"TOKEN_PATH=/etc/app/token cat $TOKEN_PATH",
+		"ssh web 'KEY_DIR=/ rm -rf $KEY_DIR/*'",
+		"curl -d '{\"password_file\": \"/run/secrets/db\"}' http://x",
 	} {
 		got, err := RedactSensitive(SyntaxShell, in)
 		require.NoError(t, err, in)
@@ -145,6 +151,8 @@ func TestRedactTextReplacesSensitiveValues(t *testing.T) {
 		{"mongo createUser", `db.createUser({user: "app", pwd: "s3cr3t", roles: []})`, `db.createUser({user: "app", pwd: "***", roles: []})`},
 		{"connection string", "mongodb://root:rootpw@mongo:27017/admin", "mongodb://root:***@mongo:27017/admin"},
 		{"known format", "put /cfg/token sk-proj-abcdefghijklmnopqrstu", "put /cfg/token ***"},
+		// 纯文本不经过 shell，< > 不是重定向，是值的一部分
+		{"value with > in plain text", "put /app/cfg password=ab>cd", "put /app/cfg password=***"},
 	})
 	for _, in := range []string{
 		"SELECT id, name FROM users WHERE id = 1",

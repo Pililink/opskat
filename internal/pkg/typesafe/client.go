@@ -15,8 +15,10 @@ import (
 	"time"
 )
 
+// DefaultBaseURL 是 TypeSafe 官方 API 地址。
+const DefaultBaseURL = "https://api.typesafe.ai"
+
 const (
-	defaultBaseURL    = "https://api.typesafe.ai"
 	defaultMaxRetries = 3
 	// statusOverloaded 是 TypeSafe 过载时返回的非标准状态码。
 	statusOverloaded = 529
@@ -87,7 +89,7 @@ type Client struct {
 // Option 配置 Client。
 type Option func(*Client)
 
-// WithBaseURL 替换 API 地址（测试用）。
+// WithBaseURL 替换 API 地址，可指向兼容 System One API 的服务。
 func WithBaseURL(u string) Option { return func(c *Client) { c.baseURL = u } }
 
 // WithHTTPClient 替换底层 http.Client。
@@ -102,7 +104,7 @@ func WithBackoff(f func(attempt int) time.Duration) Option {
 func New(apiKey string, opts ...Option) *Client {
 	c := &Client{
 		apiKey:     apiKey,
-		baseURL:    defaultBaseURL,
+		baseURL:    DefaultBaseURL,
 		httpClient: &http.Client{Transport: http.DefaultTransport},
 		maxRetries: defaultMaxRetries,
 		backoff:    func(attempt int) time.Duration { return time.Duration(attempt) * 500 * time.Millisecond },

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -60,12 +61,12 @@ func (c *memCache) Put(_ context.Context, key string, r Result, _ time.Duration)
 
 func newTestService(ev *fakeEvaluator, cfg Config) (*service, *memCache) {
 	cache := &memCache{m: map[string]Result{}}
-	s := New(func() Config { return cfg }, cache, func(string) Evaluator { return ev }).(*service)
+	s := New(func() Config { return cfg }, cache, func(string, string) Evaluator { return ev }).(*service)
 	return s, cache
 }
 
 func enabledConfig() Config {
-	return Config{APIKey: "k", Model: "jev-1.13.0", Threshold: 0.2, Timeout: time.Second, MaxCommandLen: 4000}
+	return Config{APIKey: "k", BaseURL: "https://api.typesafe.ai", Model: "jev-1.13.0", Threshold: 0.2, Timeout: time.Second, MaxCommandLen: 4000}
 }
 
 func TestReviewPassesWhenEveryRiskIsBelowThreshold(t *testing.T) {
@@ -87,20 +88,24 @@ func TestReviewRejectsWhenAnyRiskReachesThreshold(t *testing.T) {
 
 	assert.Equal(t, OutcomeReject, r.Outcome)
 	assert.Equal(t, []string{QuestionDestructive}, r.Failed)
+	// 审计里要同时看到评分和当时的阈值，阈值以后改了也看得懂当初为什么没通过
+	assert.Equal(t, 0.2, r.Threshold)
 }
 
-func TestReviewAsksBeyondRequestOnlyWhenUserRequestIsKnown(t *testing.T) {
-	ev := &fakeEvaluator{nouls: map[string]float64{QuestionBeyondRequest: 0.9}}
+// 只拦明确的危险操作：只问三道危险题，不判断命令是否在用户要求的范围内——
+// 那道题在"安全巡检一下"这类宽泛要求下，把 docker ps、systemctl list-timers 这些只读命令也判成了超出。
+func TestReviewAsksOnlyRiskQuestions(t *testing.T) {
+	ev := &fakeEvaluator{}
 	s, _ := newTestService(ev, enabledConfig())
 
-	r := s.Review(context.Background(), Input{AssetType: "ssh", Command: "ls"})
-	assert.NotContains(t, ev.last.Questions, QuestionBeyondRequest)
-	assert.Equal(t, OutcomePass, r.Outcome)
+	r := s.Review(context.Background(), Input{AssetType: "ssh", Command: "docker ps"})
 
-	r = s.Review(context.Background(), Input{AssetType: "ssh", Command: "ls", UserRequest: "看一下磁盘空间"})
-	assert.Contains(t, ev.last.Questions, QuestionBeyondRequest)
-	assert.Equal(t, OutcomeReject, r.Outcome)
-	assert.Equal(t, []string{QuestionBeyondRequest}, r.Failed)
+	assert.Equal(t, OutcomePass, r.Outcome)
+	asked := make([]string, 0, len(ev.last.Questions))
+	for id := range ev.last.Questions {
+		asked = append(asked, id)
+	}
+	assert.ElementsMatch(t, []string{QuestionDestructive, QuestionDisruptive, QuestionRemoteCode}, asked)
 }
 
 func TestReviewSendsRedactedCommandWithAssetType(t *testing.T) {
@@ -177,35 +182,195 @@ func TestReviewUsesCacheForSameCommandAndSkipsCachingFailures(t *testing.T) {
 	assert.Empty(t, cache2.m)
 }
 
-func TestCacheKeyDependsOnModelAssetTypeCommandAndRequest(t *testing.T) {
-	base := cacheKey("jev-1.13.0", "ssh", "ls", "")
-	assert.NotEqual(t, base, cacheKey("jev-1.14.0", "ssh", "ls", ""))
-	assert.NotEqual(t, base, cacheKey("jev-1.13.0", "redis", "ls", ""))
-	assert.NotEqual(t, base, cacheKey("jev-1.13.0", "ssh", "ls -la", ""))
-	assert.NotEqual(t, base, cacheKey("jev-1.13.0", "ssh", "ls", "看磁盘"))
-	assert.Equal(t, base, cacheKey("jev-1.13.0", "ssh", "ls", ""))
+// 缓存的是评分，不是结论：在设置里调了阈值，已经审过的命令马上按新阈值判断。
+func TestCachedScoresAreJudgedWithCurrentThreshold(t *testing.T) {
+	ev := &fakeEvaluator{nouls: map[string]float64{QuestionDisruptive: 0.3}}
+	cfg := enabledConfig()
+	s := New(func() Config { return cfg }, &memCache{m: map[string]Result{}}, func(string, string) Evaluator { return ev })
+	in := Input{AssetType: "ssh", Command: "systemctl list-timers"}
+
+	first := s.Review(context.Background(), in)
+	assert.Equal(t, OutcomeReject, first.Outcome)
+
+	cfg.Threshold = 0.5
+	second := s.Review(context.Background(), in)
+	assert.Equal(t, 1, ev.calls)
+	assert.True(t, second.Cached)
+	assert.Equal(t, OutcomePass, second.Outcome)
+	assert.Empty(t, second.Failed)
+	assert.Equal(t, 0.5, second.Threshold)
+	assert.Equal(t, first.Scores, second.Scores)
+}
+
+// 同名模型换了服务地址，评分不一定一样，缓存要分开。
+func TestCacheKeyDependsOnServiceModelAssetTypeAndCommand(t *testing.T) {
+	const api = "https://api.typesafe.ai"
+	base := cacheKey(api, "jev-1.13.0", "ssh", "ls")
+	assert.NotEqual(t, base, cacheKey("http://10.0.0.5:8080", "jev-1.13.0", "ssh", "ls"))
+	assert.NotEqual(t, base, cacheKey(api, "jev-1.14.0", "ssh", "ls"))
+	assert.NotEqual(t, base, cacheKey(api, "jev-1.13.0", "redis", "ls"))
+	assert.NotEqual(t, base, cacheKey(api, "jev-1.13.0", "ssh", "ls -la"))
+	assert.Equal(t, base, cacheKey(api, "jev-1.13.0", "ssh", "ls"))
 }
 
 func TestNewConfigFillsDefaults(t *testing.T) {
-	cfg := NewConfig("k", "", 0, 0)
-	assert.Equal(t, Config{APIKey: "k", Model: DefaultModel, Threshold: DefaultThreshold, Timeout: DefaultTimeout, MaxCommandLen: MaxCommandLen}, cfg)
+	cfg := NewConfig("k", "", "", 0, 0)
+	assert.Equal(t, Config{APIKey: "k", BaseURL: DefaultBaseURL, Model: DefaultModel, Threshold: DefaultThreshold, Timeout: DefaultTimeout, MaxCommandLen: MaxCommandLen}, cfg)
+	assert.Equal(t, "https://api.typesafe.ai", DefaultBaseURL)
 
-	cfg = NewConfig("k", "jev-1.14.0", 3000, 0.5)
-	assert.Equal(t, "jev-1.14.0", cfg.Model)
+	cfg = NewConfig("k", "http://10.0.0.5:8080", "my-jev", 3000, 0.5)
+	assert.Equal(t, "http://10.0.0.5:8080", cfg.BaseURL)
+	assert.Equal(t, "my-jev", cfg.Model)
 	assert.Equal(t, 3*time.Second, cfg.Timeout)
 	assert.InDelta(t, 0.5, cfg.Threshold, 1e-9)
 }
 
-func TestTestConnection(t *testing.T) {
-	s, _ := newTestService(&fakeEvaluator{}, Config{})
-	assert.ErrorIs(t, s.TestConnection(context.Background()), ErrNotConfigured)
+// 测试模型用设置页上还没保存的值：发到填的地址、用填的模型名，返回服务端实际作答的版本。
+func TestTestModelUsesGivenConfig(t *testing.T) {
+	ev := &fakeEvaluator{}
+	var gotKey, gotURL string
+	saved := enabledConfig()
+	s := New(func() Config { return saved }, &memCache{m: map[string]Result{}}, func(key, baseURL string) Evaluator {
+		gotKey, gotURL = key, baseURL
+		return ev
+	})
 
-	ok := &fakeEvaluator{}
-	s, _ = newTestService(ok, enabledConfig())
-	assert.NoError(t, s.TestConnection(context.Background()))
-	assert.Equal(t, 1, ok.calls)
+	trial := NewConfig("new-key", "http://10.0.0.5:8080", "jev-latest", 3000, 0.2)
+	model, err := s.TestModel(context.Background(), trial)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "jev-1.13.0", model) // fakeEvaluator 作答的版本
+	assert.Equal(t, "new-key", gotKey)
+	assert.Equal(t, "http://10.0.0.5:8080", gotURL)
+	assert.Equal(t, "jev-latest", ev.last.Model)
+}
+
+func TestTestModelErrors(t *testing.T) {
+	s, _ := newTestService(&fakeEvaluator{}, enabledConfig())
+	_, err := s.TestModel(context.Background(), Config{})
+	assert.ErrorIs(t, err, ErrNotConfigured)
 
 	authErr := &typesafe.APIError{StatusCode: http.StatusUnauthorized}
 	s, _ = newTestService(&fakeEvaluator{err: authErr}, enabledConfig())
-	assert.ErrorIs(t, s.TestConnection(context.Background()), authErr)
+	_, err = s.TestModel(context.Background(), enabledConfig())
+	assert.ErrorIs(t, err, authErr)
+}
+
+// 审核请求发到设置里的服务地址。
+func TestReviewCallsConfiguredService(t *testing.T) {
+	var gotURL string
+	cfg := enabledConfig()
+	cfg.BaseURL = "http://10.0.0.5:8080"
+	s := New(func() Config { return cfg }, &memCache{m: map[string]Result{}}, func(_, baseURL string) Evaluator {
+		gotURL = baseURL
+		return &fakeEvaluator{}
+	})
+
+	s.Review(context.Background(), Input{AssetType: "ssh", Command: "ls"})
+	assert.Equal(t, "http://10.0.0.5:8080", gotURL)
+}
+
+func TestConfigErrorsNotifyOnceAndShowInStatus(t *testing.T) {
+	ev := &fakeEvaluator{err: &typesafe.APIError{StatusCode: http.StatusUnauthorized}}
+	s, _ := newTestService(ev, enabledConfig())
+	var notified []string
+	s.SetConfigErrorListener(func(reason string) { notified = append(notified, reason) })
+
+	s.Review(context.Background(), Input{AssetType: "ssh", Command: "ls"})
+	s.Review(context.Background(), Input{AssetType: "ssh", Command: "pwd"})
+	assert.Equal(t, []string{ReasonInvalidAPIKey}, notified, "同一种配置错误只提醒一次")
+	assert.Equal(t, ReasonInvalidAPIKey, s.Status().LastFailReason)
+	assert.False(t, s.Status().LastFailAt.IsZero())
+
+	ev.err = nil
+	s.Review(context.Background(), Input{AssetType: "ssh", Command: "uptime"})
+	assert.Empty(t, s.Status().LastFailReason, "审核成功后清掉失败状态")
+
+	ev.err = &typesafe.APIError{StatusCode: http.StatusUnauthorized}
+	s.Review(context.Background(), Input{AssetType: "ssh", Command: "df -h"})
+	assert.Equal(t, []string{ReasonInvalidAPIKey, ReasonInvalidAPIKey}, notified, "恢复之后再出错会重新提醒")
+}
+
+func TestNotConfiguredIsAConfigError(t *testing.T) {
+	s, _ := newTestService(&fakeEvaluator{}, Config{})
+	var notified []string
+	s.SetConfigErrorListener(func(reason string) { notified = append(notified, reason) })
+
+	s.Review(context.Background(), Input{AssetType: "ssh", Command: "ls"})
+	assert.Equal(t, []string{ReasonNotConfigured}, notified)
+}
+
+func TestTransientFailuresShowInStatusWithoutNotifying(t *testing.T) {
+	cfg := enabledConfig()
+	cfg.Timeout = 20 * time.Millisecond
+	s, _ := newTestService(&fakeEvaluator{delay: time.Second}, cfg)
+	var notified []string
+	s.SetConfigErrorListener(func(reason string) { notified = append(notified, reason) })
+
+	s.Review(context.Background(), Input{AssetType: "ssh", Command: "ls"})
+	assert.Empty(t, notified)
+	assert.Equal(t, ReasonTimeout, s.Status().LastFailReason)
+}
+
+// slowEvaluator 每次调用耗时固定，按命令返回预设的"是"概率，用来验证并行和顺序。
+type slowEvaluator struct {
+	delay  time.Duration
+	byCmd  map[string]float64
+	mu     sync.Mutex
+	active int
+	peak   int
+}
+
+func (e *slowEvaluator) Evaluate(ctx context.Context, req typesafe.Request) (*typesafe.Response, error) {
+	e.mu.Lock()
+	e.active++
+	if e.active > e.peak {
+		e.peak = e.active
+	}
+	e.mu.Unlock()
+	defer func() {
+		e.mu.Lock()
+		e.active--
+		e.mu.Unlock()
+	}()
+	time.Sleep(e.delay)
+	p := e.byCmd[req.State.(reviewState).Command]
+	answers := map[string]typesafe.Answer{}
+	for id := range req.Questions {
+		answers[id] = typesafe.Answer{Type: typesafe.QuestionNoul, Noul: p}
+	}
+	return &typesafe.Response{Model: "jev-1.13.0", Answers: answers}, nil
+}
+
+func TestReviewBatchRunsModelCallsInParallelAndKeepsOrder(t *testing.T) {
+	ev := &slowEvaluator{delay: 50 * time.Millisecond, byCmd: map[string]float64{"rm -rf /data": 0.99}}
+	cache := &memCache{m: map[string]Result{}}
+	s := New(func() Config { return enabledConfig() }, cache, func(string, string) Evaluator { return ev }).(*service)
+
+	ins := []Input{
+		{AssetType: "ssh", Command: "ls"},
+		{AssetType: "ssh", Command: "rm -rf /data"},
+		{AssetType: "ssh", Command: "df -h"},
+		{AssetType: "ssh", Command: "uptime"},
+		{AssetType: "ssh", Command: strings.Repeat("a", 4001)},
+	}
+	start := time.Now()
+	out := s.ReviewBatch(context.Background(), ins)
+	elapsed := time.Since(start)
+
+	assert.Len(t, out, 5)
+	assert.Equal(t, OutcomePass, out[0].Outcome)
+	assert.Equal(t, OutcomeReject, out[1].Outcome)
+	assert.Equal(t, OutcomePass, out[2].Outcome)
+	assert.Equal(t, OutcomePass, out[3].Outcome)
+	assert.Equal(t, OutcomeFail, out[4].Outcome)
+	assert.Equal(t, ReasonTooLong, out[4].Reason)
+	assert.Greater(t, ev.peak, 1, "模型调用应当并行")
+	assert.LessOrEqual(t, ev.peak, maxParallelReviews)
+	assert.Less(t, elapsed, 4*50*time.Millisecond, "4 条需要调用模型的命令不应串行等待")
+	assert.Len(t, cache.m, 4, "成功的结果都写进缓存")
+
+	again := s.ReviewBatch(context.Background(), ins[:2])
+	assert.True(t, again[0].Cached)
+	assert.True(t, again[1].Cached)
 }

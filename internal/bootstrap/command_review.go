@@ -23,8 +23,8 @@ func registerCommandReview() {
 	command_review_svc.Register(command_review_svc.New(
 		CommandReviewConfig,
 		command_review_svc.NewRepoCache(command_review_repo.CommandReview()),
-		func(apiKey string) command_review_svc.Evaluator {
-			return typesafe.New(apiKey, typesafe.WithHTTPClient(httpClient))
+		func(apiKey, baseURL string) command_review_svc.Evaluator {
+			return typesafe.New(apiKey, typesafe.WithBaseURL(baseURL), typesafe.WithHTTPClient(httpClient))
 		},
 	))
 }
@@ -33,14 +33,19 @@ func registerCommandReview() {
 // 解密失败时按未配置处理（审核失败，不会因此放行），并记录错误。
 func CommandReviewConfig() command_review_svc.Config {
 	cfg := GetConfig()
-	apiKey := ""
-	if cfg.CommandReviewAPIKey != "" {
-		key, err := credential_svc.Default().Decrypt(cfg.CommandReviewAPIKey)
-		if err != nil {
-			logger.Default().Error("decrypt command review api key", zap.Error(err))
-		} else {
-			apiKey = key
-		}
+	return command_review_svc.NewConfig(CommandReviewAPIKey(), cfg.CommandReviewBaseURL, cfg.CommandReviewModel, cfg.CommandReviewTimeoutMs, cfg.CommandReviewThreshold)
+}
+
+// CommandReviewAPIKey 返回解密后的审核 API key；没有配置或解密失败时为空。
+func CommandReviewAPIKey() string {
+	encrypted := GetConfig().CommandReviewAPIKey
+	if encrypted == "" {
+		return ""
 	}
-	return command_review_svc.NewConfig(apiKey, cfg.CommandReviewModel, cfg.CommandReviewTimeoutMs, cfg.CommandReviewThreshold)
+	key, err := credential_svc.Default().Decrypt(encrypted)
+	if err != nil {
+		logger.Default().Error("decrypt command review api key", zap.Error(err))
+		return ""
+	}
+	return key
 }

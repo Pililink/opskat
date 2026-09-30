@@ -92,6 +92,9 @@ func handleBatchCommand(ctx context.Context, args map[string]any) (string, error
 		checkResult  aictx.CheckResult // 每项独立审计的授权/拒绝语义
 	}
 	resolved := make([]resolvedCmd, 0, len(commands))
+	// permReqs 是通过前置检查、要做权限检查的命令；permIndices 是它们在 resolved 里的位置。
+	var permReqs []permission.PermissionRequest
+	var permIndices []int
 
 	for _, cmd := range commands {
 		asset, resolveErr := assetref.Resolve(ctx, cmd.Asset)
@@ -192,21 +195,26 @@ func handleBatchCommand(ctx context.Context, args map[string]any) (string, error
 			}
 		}
 
-		decision, denyMsg := "allow", ""
-		result := permission.CheckPermission(ctx, asset.Type, asset.ID, checkCommand)
-		switch result.Decision {
-		case aictx.Deny:
-			decision, denyMsg = "deny", result.Message
-		case aictx.NeedConfirm:
-			decision = "needConfirm"
-		case aictx.Allow:
-			decision = "allow"
-		}
-
+		// 权限检查放到循环之后一次做：需要模型审核的命令并行审核，不逐条等待。
+		permIndices = append(permIndices, len(resolved))
+		permReqs = append(permReqs, permission.PermissionRequest{AssetType: asset.Type, AssetID: asset.ID, Command: checkCommand})
 		resolved = append(resolved, resolvedCmd{
 			item: cmd, asset: asset, assetID: asset.ID, assetName: asset.Name,
-			checkCommand: checkCommand, decision: decision, denyMsg: denyMsg, checkResult: result,
+			checkCommand: checkCommand,
 		})
+	}
+
+	for k, result := range permission.CheckPermissions(ctx, permReqs) {
+		r := &resolved[permIndices[k]]
+		r.checkResult = result
+		switch result.Decision {
+		case aictx.Deny:
+			r.decision, r.denyMsg = "deny", result.Message
+		case aictx.NeedConfirm:
+			r.decision = "needConfirm"
+		case aictx.Allow:
+			r.decision = "allow"
+		}
 	}
 
 	// 聚合 needConfirm，一次性弹审批。

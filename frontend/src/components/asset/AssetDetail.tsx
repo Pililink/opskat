@@ -7,10 +7,13 @@ import remarkBreaks from "remark-breaks";
 import { markdownComponents, markdownUrlTransform } from "@/components/MarkdownLink";
 import { Button, Separator, ConfirmDialog, Tooltip, TooltipContent, TooltipTrigger } from "@opskat/ui";
 import { toast } from "sonner";
+import { notifySuccess } from "@/lib/notify";
+import type { PermissionMode } from "@/lib/commandReview";
 import { useAssetStore } from "@/stores/assetStore";
 import { useAssetTypeDef } from "@/lib/assetTypes";
 import { AssetIcon } from "@/components/asset/AssetIcon";
 import { CommandPolicyCard } from "@/components/asset/CommandPolicyCard";
+import { PermissionModeCard } from "@/components/asset/PermissionModeCard";
 import { asset_entity } from "../../../wailsjs/go/models";
 import { GetDefaultPolicy } from "../../../wailsjs/go/system/System";
 
@@ -27,6 +30,19 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
   const { assets, updateAsset } = useAssetStore();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [savingPolicy, setSavingPolicy] = useState(false);
+  const [savingMode, setSavingMode] = useState(false);
+
+  const savePermissionMode = async (mode: PermissionMode) => {
+    setSavingMode(true);
+    try {
+      await updateAsset(new asset_entity.Asset({ ...asset, permissionMode: mode }));
+      notifySuccess(t("commandReview.mode.saved"));
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setSavingMode(false);
+    }
+  };
 
   // 订阅注册表：扩展加载完成时它的资产类型才注册进来，这里要跟着重渲染。
   // 定义还没到位期间只是少一张类型卡，不是全屏 loading——通用信息照常可读。
@@ -159,6 +175,17 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
       <div className="flex-1 p-4 space-y-4 overflow-y-auto">
         {/* 类型详情卡：内置类型手写，扩展类型由它的 configSchema 生成（同一个槽位） */}
         {def && <def.DetailInfoCard asset={asset} sshTunnelName={sshTunnelName} />}
+
+        {/* 权限模式：只对有命令权限策略的类型有意义 */}
+        {def?.policy && (
+          <PermissionModeCard
+            value={asset.permissionMode ?? ""}
+            subject="asset"
+            parentGroupId={asset.GroupID}
+            saving={savingMode}
+            onChange={savePermissionMode}
+          />
+        )}
 
         {/* 策略卡：内置类型与扩展类型走同一段渲染，差别只在定义里 */}
         {(() => {

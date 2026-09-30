@@ -96,7 +96,7 @@ type Asset struct {
 	SSHTunnelID   int64  `gorm:"column:ssh_tunnel_id;default:0" json:"sshTunnelId"`
 	ExtensionName string `gorm:"column:extension_name;type:varchar(64);index" json:"extensionName,omitempty"`
 	// PermissionMode 见 policy.PermissionMode*；空表示沿用分组设置。
-	PermissionMode string `gorm:"column:permission_mode;type:varchar(20);default:''" json:"permissionMode"`
+	PermissionMode string `gorm:"column:permission_mode;type:varchar(20);default:''" json:"permissionMode,omitempty"`
 	Status         int    `gorm:"column:status;default:1"`
 	Createtime     int64  `gorm:"column:createtime"`
 	Updatetime     int64  `gorm:"column:updatetime"`

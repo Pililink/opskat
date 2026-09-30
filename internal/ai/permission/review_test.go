@@ -14,18 +14,32 @@ import (
 	"github.com/opskat/opskat/internal/service/command_review_svc"
 )
 
-// fakeReviewer 返回预设结果，并记录收到的输入。
+// fakeReviewer 返回预设结果，并记录收到的输入和批量调用次数。
 type fakeReviewer struct {
-	result command_review_svc.Result
-	calls  []command_review_svc.Input
+	result  command_review_svc.Result
+	calls   []command_review_svc.Input
+	batches int
 }
 
-func (f *fakeReviewer) Review(_ context.Context, in command_review_svc.Input) command_review_svc.Result {
-	f.calls = append(f.calls, in)
-	return f.result
+func (f *fakeReviewer) Review(ctx context.Context, in command_review_svc.Input) command_review_svc.Result {
+	return f.ReviewBatch(ctx, []command_review_svc.Input{in})[0]
 }
 
-func (f *fakeReviewer) TestConnection(context.Context) error { return nil }
+func (f *fakeReviewer) ReviewBatch(_ context.Context, ins []command_review_svc.Input) []command_review_svc.Result {
+	f.batches++
+	out := make([]command_review_svc.Result, len(ins))
+	for i, in := range ins {
+		f.calls = append(f.calls, in)
+		out[i] = f.result
+	}
+	return out
+}
+
+func (f *fakeReviewer) TestModel(context.Context, command_review_svc.Config) (string, error) {
+	return "", nil
+}
+func (f *fakeReviewer) Status() command_review_svc.Status          { return command_review_svc.Status{} }
+func (f *fakeReviewer) SetConfigErrorListener(func(reason string)) {}
 
 func registerFakeReviewer(t *testing.T, r command_review_svc.Result) *fakeReviewer {
 	f := &fakeReviewer{result: r}
@@ -96,6 +110,7 @@ func TestApplyReview(t *testing.T) {
 				So(r.HintRules, ShouldContain, "systemctl status *")
 				So(r.Review.Outcome, ShouldEqual, "reject")
 				So(r.Review.Failed, ShouldResemble, []string{"disruptive"})
+				So(r.Review.Mode, ShouldEqual, policyent.PermissionModeAssisted)
 			})
 
 			Convey("审核失败：仍然问人", func() {
@@ -125,6 +140,7 @@ func TestApplyReview(t *testing.T) {
 				So(r.Message, ShouldContainSubstring, "模型审核未通过")
 				So(r.Message, ShouldContainSubstring, "不要原样重试")
 				So(r.Review.Outcome, ShouldEqual, "reject")
+				So(r.Review.Mode, ShouldEqual, policyent.PermissionModeAutopilot)
 			})
 
 			Convey("审核失败：直接拒绝，并写明原因", func() {
@@ -173,16 +189,80 @@ func TestApplyReview(t *testing.T) {
 			So(r.Decision, ShouldEqual, aictx.Allow)
 			So(r.DecisionSource, ShouldEqual, aictx.SourceUserAllow)
 			So(r.Review.Outcome, ShouldEqual, "reject")
+			// 人批准的记录里只看得到 user_allow，模式要靠审核结果自己带着，审计才看得出是辅助审批转过来的
+			So(r.Review.Mode, ShouldEqual, policyent.PermissionModeAssisted)
 		})
 
-		Convey("AI 对话临时开启的 Autopilot 优先于资产设置，并把用户的要求交给审核", func() {
-			f := registerFakeReviewer(t, reviewReject)
-			mockRepo.EXPECT().Find(gomock.Any(), int64(1)).Return(sshAsset(policyent.PermissionModeDefault, 0), nil).AnyTimes()
+		Convey("批量检查：规则放行的原样返回，需要审核的一次交给 ReviewBatch，结果顺序不变", func() {
+			f := registerFakeReviewer(t, reviewPass)
+			mockRepo.EXPECT().Find(gomock.Any(), int64(1)).Return(sshAsset(policyent.PermissionModeAssisted, 0), nil).AnyTimes()
 
-			chatCtx := aictx.WithUserRequest(aictx.WithAutopilot(ctx), "重启 nginx")
-			r := CheckPermission(chatCtx, asset_entity.AssetTypeSSH, 1, cmd)
+			rs := CheckPermissions(ctx, []PermissionRequest{
+				{AssetType: asset_entity.AssetTypeSSH, AssetID: 1, Command: "ls -la"},
+				{AssetType: asset_entity.AssetTypeSSH, AssetID: 1, Command: cmd},
+				{AssetType: asset_entity.AssetTypeSSH, AssetID: 1, Command: "systemctl stop nginx"},
+			})
+			So(rs, ShouldHaveLength, 3)
+			So(rs[0].DecisionSource, ShouldEqual, aictx.SourcePolicyAllow)
+			So(rs[1].DecisionSource, ShouldEqual, aictx.SourceAssistedAllow)
+			So(rs[2].DecisionSource, ShouldEqual, aictx.SourceAssistedAllow)
+			So(f.batches, ShouldEqual, 1)
+			So(f.calls, ShouldHaveLength, 2)
+			So(f.calls[0].Command, ShouldEqual, cmd)
+			So(f.calls[1].Command, ShouldEqual, "systemctl stop nginx")
+		})
+	})
+}
+
+func TestAutopilotGrantRequests(t *testing.T) {
+	Convey("Autopilot 是无人值守：它的资产不走授权申请，不弹窗问人", t, func() {
+		ctx, mockRepo, _ := setupPolicyTest(t)
+		ctx = aictx.WithPolicyLang(ctx, "zh-CN")
+		asset := func(id int64, name, mode string) *asset_entity.Asset {
+			return &asset_entity.Asset{ID: id, Name: name, Type: asset_entity.AssetTypeSSH, PermissionMode: mode}
+		}
+		mockRepo.EXPECT().Find(gomock.Any(), int64(1)).Return(asset(1, "web-auto", policyent.PermissionModeAutopilot), nil).AnyTimes()
+		mockRepo.EXPECT().Find(gomock.Any(), int64(2)).Return(asset(2, "web-default", policyent.PermissionModeDefault), nil).AnyTimes()
+		mockRepo.EXPECT().Find(gomock.Any(), int64(3)).Return(asset(3, "web-assisted", policyent.PermissionModeAssisted), nil).AnyTimes()
+
+		var asked []ApprovalItem
+		checker := NewCommandPolicyChecker(nil)
+		checker.SetGrantRequestFunc(func(_ context.Context, items []ApprovalItem, _ string) (bool, []string) {
+			asked = append(asked, items...)
+			patterns := make([]string, 0, len(items))
+			for _, it := range items {
+				patterns = append(patterns, it.Command)
+			}
+			return true, patterns
+		})
+
+		Convey("全是 Autopilot 资产：不弹审批，告诉调用方直接执行、由模型逐条审核", func() {
+			r := checker.SubmitGrantMulti(ctx, []GrantItem{{AssetID: 1, Patterns: []string{"ufw --force delete *"}}}, "加固")
+			So(asked, ShouldBeEmpty)
+			So(r.Decision, ShouldEqual, aictx.Deny)
 			So(r.DecisionSource, ShouldEqual, aictx.SourceAutopilotDeny)
-			So(f.calls[0].UserRequest, ShouldEqual, "重启 nginx")
+			So(r.Message, ShouldContainSubstring, "web-auto")
+			So(r.Message, ShouldContainSubstring, "直接执行")
+			// 不是用户拒绝，不能让调用方停掉整个任务
+			So(r.Message, ShouldNotContainSubstring, "停止当前任务")
+		})
+
+		Convey("混有其他资产：只把非 Autopilot 的部分交给人，并说明跳过了哪些", func() {
+			r := checker.SubmitGrantMulti(ctx, []GrantItem{
+				{AssetID: 1, Patterns: []string{"ufw status*"}},
+				{AssetID: 2, Patterns: []string{"systemctl * nginx"}},
+			}, "加固")
+			So(asked, ShouldHaveLength, 1)
+			So(asked[0].AssetID, ShouldEqual, 2)
+			So(r.Decision, ShouldEqual, aictx.Allow)
+			So(r.MatchedPattern, ShouldEqual, "systemctl * nginx")
+			So(r.Message, ShouldContainSubstring, "web-auto")
+		})
+
+		Convey("辅助审批有人在场，照常申请授权", func() {
+			r := checker.SubmitGrantMulti(ctx, []GrantItem{{AssetID: 3, Patterns: []string{"systemctl * nginx"}}}, "加固")
+			So(asked, ShouldHaveLength, 1)
+			So(r.Decision, ShouldEqual, aictx.Allow)
 		})
 	})
 }

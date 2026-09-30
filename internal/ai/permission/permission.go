@@ -34,11 +34,28 @@ const (
 // assetType: "ssh" | "serial" | "database" | "redis" | "mongodb" | "kafka" | "k8s" |
 // "exec"（exec 等同于 ssh）| "sql"（sql 等同于 database）| "mongo"（mongo 等同于 mongodb）
 func CheckPermission(ctx context.Context, assetType string, assetID int64, command string) aictx.CheckResult {
-	result := aictx.CheckResult{Decision: aictx.NeedConfirm}
-	if handler, ok := permissionTypeFor(assetType); ok {
-		result = handler.check(ctx, assetID, command)
+	return CheckPermissions(ctx, []PermissionRequest{{AssetType: assetType, AssetID: assetID, Command: command}})[0]
+}
+
+// PermissionRequest 是一次权限检查的输入，字段含义同 CheckPermission 的参数。
+type PermissionRequest struct {
+	AssetType string
+	AssetID   int64
+	Command   string
+}
+
+// CheckPermissions 批量检查，结果与输入一一对应。规则判断逐条进行；需要模型审核的命令
+// 一次交给审核服务，调用模型这一步并行（批量执行不必逐条等待）。
+func CheckPermissions(ctx context.Context, reqs []PermissionRequest) []aictx.CheckResult {
+	results := make([]aictx.CheckResult, len(reqs))
+	for i, r := range reqs {
+		results[i] = aictx.CheckResult{Decision: aictx.NeedConfirm}
+		if handler, ok := permissionTypeFor(r.AssetType); ok {
+			results[i] = handler.check(ctx, r.AssetID, r.Command)
+		}
 	}
-	return applyReview(ctx, assetType, assetID, command, result)
+	applyReviews(ctx, reqs, results)
+	return results
 }
 
 // --- SSH / Serial（共用 shell 命令策略） ---

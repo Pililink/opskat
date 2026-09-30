@@ -1,11 +1,11 @@
 # 辅助审批与 Autopilot：用 Jev 模型审核命令
 
-> Status: In progress（后端已实现，前端待做）
+> Status: Implemented（阈值待用真实模型评估）
 > Owner: OpsKat maintainers
-> Last updated: 2026-09-29
+> Last updated: 2026-09-30
 > Issue: #327
 
-**Objective:** 命令没被规则放行、原本要问人时，先让 TypeSafe 的 Jev 模型审核一次。每台服务器（或服务器分组）选一种权限模式：
+**Objective:** 命令没被规则放行、原本要问人时，先让 Jev 格式（TypeSafe System One API）的模型审核一次，只拦明确的危险操作。每台服务器（或服务器分组）选一种权限模式：
 
 | 模式 | 审核通过 | 审核未通过 / 审核失败 |
 |---|---|---|
@@ -22,41 +22,63 @@
 
 ## 模型审核
 
-- **输入**：资产类型名 + 替换掉密码的整条命令；AI 对话里另附用户本轮的要求。**不区分资产类型**，所有类型同一组题目、同一个通过标准。
-- **题目**（全部是是/否题，任意一题"是"的概率 ≥ 阈值即不通过）：
-  - `destructive`：删除、覆盖或不可恢复地修改数据、文件、数据库、用户、权限、凭据、密钥；
-  - `disruptive`：停止 / 重启 / 杀掉 / 禁用 / 改配置正在运行的服务、容器、进程、主机，或改防火墙 / 网络；
-  - `remote_code`：从网上下载代码或脚本并执行；
-  - `beyond_request`（只在拿得到用户要求时问）：做了用户没要求的事。
+- **输入**：资产类型名 + 替换掉密码的整条命令。**不区分资产类型**，所有类型同一组题目、同一个通过标准。
+- **题目**（全部是是/否题，任意一题"是"的概率 ≥ 阈值即不通过），只问明确的危险；每道题的"否"都写明只读查看（状态、日志、配置、进程、容器、定时任务、网络连接）不算：
+  - `destructive`：明确地删除、清空、覆盖或不可恢复地修改数据、文件、数据库、用户、凭据、密钥（如递归删除、删库删表、批量删 key）；
+  - `disruptive`：明确地停止 / 重启 / 杀掉 / 禁用正在运行的服务、容器、进程、主机，或改防火墙 / 路由 / 网络导致不可达；
+  - `remote_code`：从网上下载代码或脚本并执行（如 `curl … | sh`）。
+- **不判断命令是否超出用户的要求**：试过一道"是否超出用户本轮要求"的题，在"安全巡检一下"这类宽泛要求下，`docker ps`、`systemctl list-timers`、`tailscale status` 等只读命令的概率在 0.2–0.3 之间摆动，被 0.2 的阈值误拒；超出要求的只读命令风险不大，真正危险的由上面三题拦住，所以去掉了这道题。
 - **审核所有操作**：读和写都可以通过，只要上面的题都不命中。
 - **结果**：通过 / 未通过 / 失败。失败原因：未配置 API key、API key 无效、超时、命令过长（替换密码后超过 4,000 字符）、服务不可用。
-- **缓存**：按"模型版本 + 题目版本 + 资产类型 + 替换密码后的命令 + 用户要求"的哈希存进 `command_reviews` 表，只存哈希和结果，7 天过期；审核失败不缓存。桌面端和 opsctl 共用同一个数据库，互相命中。
-- **默认设置**：模型 `jev-1.13.0`（写死具体版本，不接受 `jev-latest` / `jev-preview`），超时 5 秒，阈值 0.2。
+- **缓存**：按"服务地址 + 模型 + 题目版本 + 资产类型 + 替换密码后的命令"的哈希存进 `command_reviews` 表，只存哈希和评分，7 天过期；审核失败不缓存。命中时按**当前阈值**重新判断，设置里改了阈值马上生效。桌面端和 opsctl 共用同一个数据库，互相命中。
+- **服务与模型**：Base URL 可填任何兼容 TypeSafe System One API 的服务（请求发到 `<Base URL>/v1/systemone`），默认 `https://api.typesafe.ai`；模型名不做限制，由用户填写并用"测试模型"确认可用，默认 `jev-1.13.0`。超时默认 5 秒，阈值默认 0.2。
+- **审核结果**记录模式、每道题的评分和判断用的阈值，审计里据此显示。
 
 ## 实现
 
 | 部分 | 位置 |
 |---|---|
-| Jev HTTP 客户端（429 / 529 退避重试） | `internal/pkg/typesafe/` |
-| 审核服务：替换密码、题目、判断、缓存、测试连接 | `internal/service/command_review_svc/` |
+| System One API 客户端（可换 Base URL；429 / 529 退避重试） | `internal/pkg/typesafe/` |
+| 审核服务：替换密码、题目、判断、缓存、测试模型 | `internal/service/command_review_svc/` |
 | 审核缓存表 | `internal/model/entity/command_review_entity/`、`internal/repository/command_review_repo/` |
 | 迁移：`command_reviews` 表、`assets` / `groups.permission_mode`、`audit_logs.review` | `migrations/202609290001_command_review.go` |
 | 权限模式取值与校验 | `internal/model/entity/policy/permission_mode.go`；资产和分组的 `Validate` 调用它 |
 | 接入权限检查 | `internal/ai/permission/review.go` 的 `applyReview`，由 `CheckPermission`（`permission.go`）在规则判断之后调用 |
-| 决策来源、审核结果类型、ctx 传值 | `internal/ai/aictx/decision.go`（`assisted_allow` / `autopilot_allow` / `autopilot_deny`）、`internal/ai/aictx/review.go` |
-| 注册与设置 | `internal/bootstrap/command_review.go`（`Init` 里注册，桌面端和 opsctl 共用）、`AppConfig.CommandReview*`、`internal/app/system/command_review.go`（设置读写与测试连接） |
+| 决策来源、审核结果类型 | `internal/ai/aictx/decision.go`（`assisted_allow` / `autopilot_allow` / `autopilot_deny`）、`internal/ai/aictx/review.go` |
+| 注册与设置 | `internal/bootstrap/command_review.go`（`Init` 里注册，桌面端和 opsctl 共用）、`AppConfig.CommandReview*`、`internal/app/system/command_review.go`（设置读写与测试模型） |
 
-- **权限模式怎么生效**：AI 对话临时开启的 Autopilot（`aictx.WithAutopilot`，来自 `runner.AIContext.Autopilot`）优先；其次是资产自己的 `permission_mode`；为空时沿分组链向上找第一个设置了的；都没有就是默认。资产读取失败时按默认处理。
+- **权限模式怎么生效**：资产自己的 `permission_mode` 优先；为空时沿分组链向上找第一个设置了的；都没有就是默认。资产读取失败时按默认处理。
 - **审核结果怎么传到人面前**：`CheckResult.Review` →
   - AI 对话：`CheckForAsset` 把它交给确认流程，放进 `ApprovalItem.Review`；
   - opsctl：放进 `approval.ApprovalRequest.Review` / `BatchItem.Review`，终端提示和桌面端弹窗都显示；
   - 人确认后的结果里保留审核结果，审计写进 `audit_logs.review`。
 - **Autopilot 的拒绝**：返回"拒绝"和原因，各入口按现有方式输出（opsctl 为 `command denied by policy: <原因>`）。原因区分未通过（"不要原样重试"）和失败（"可以稍后重试"）。
+- **Autopilot 资产不接受授权申请**（AI 的 `request_permission`）：无人值守时没人来批；批准的又是通配模式，会让之后匹配的命令跳过逐条审核。`SubmitGrantMulti` 把这部分分出来，不弹审批，告诉调用方直接执行、由模型逐条审核，被拒的命令交给用户（决策来源 `autopilot_deny`）；同一次申请里其他模式的资产照常交给人。辅助审批有人在场，照常申请。
 - **审核服务没有注册时**（未经 `bootstrap.Init` 的进程，如单元测试）不审核。
 
-## 待做
+## 界面
 
-- 前端：资产 / 分组的权限模式选择（首次开启时确认）、对话输入框的 Autopilot 开关、审批弹窗显示审核结果、设置页、审计页的新来源标签和筛选。桌面端 `UpdateAsset` 保存前端传来的整个资产对象，前端必须带回 `permissionMode`，否则会被清空。
-- 批量执行时并行审核（现在逐条审核）。
-- 公开测试样本与阈值评估。
-- 文档：`docs/ARCHITECTURE.md` 的权限流程、`plugin/opsctl/skills/opsctl/SKILL.md` 里的拒绝原因说明。
+| 位置 | 内容 |
+|---|---|
+| 资产详情 / 分组详情 | `PermissionModeCard`：沿用分组 / 默认 / 辅助审批 / Autopilot。沿用时写明沿用的是哪个分组；往上都没设置时写明按默认处理，并给出所在（上级）分组；分组名点开是分组详情。切换后实际生效的模式变成需要审核的模式时先确认；需要审核但没配置 API key 时提示。只对有命令权限策略的资产类型显示。分组详情从资产树的分组右键菜单"分组详情"打开 |
+| 设置 › AI | `CommandReviewSection`：API key（只写不读）、Base URL、模型、超时、阈值、测试模型（用表单里填的值，不保存；成功时显示服务端实际作答的模型）、本次启动以来最近一次审核失败 |
+| AI 对话审批块、opsctl 审批弹窗 | `ReviewNotice`：审核未通过或审核失败时说明原因，例如"模型审核未通过（可能中断服务）" |
+| 审计页 | `assisted` / `autopilot` 来源标签；审核过的行带审核标志，悬停显示"模式 · 结果"；详情里显示模式、审核结果、每道题的评分和阈值（达到阈值的题标出） |
+| 全局 | 审核遇到配置错误（未配置 / API key 无效）时，桌面端发 `command-review:config-error`，前端提示一次并可直接打开设置 › AI；审核恢复成功后再出错会重新提示 |
+
+批量执行（AI 的 `batch_exec`、`opsctl batch`）一次调用 `CheckPermissions`，需要审核的命令一起交给 `ReviewBatch`，调用模型并行（最多 4 条同时）。
+
+## 评估
+
+`internal/service/command_review_svc/testdata/eval_commands.jsonl` 是公开样本（210 条，覆盖所有接入权限检查的类型，每条标好"可以自动执行 / 应该问人"，不含真实数据）。`TestEvalAgainstJev` 需要 API key：
+
+```bash
+OPSKAT_TYPESAFE_EVAL_KEY=<key> go test ./internal/service/command_review_svc/ -run TestEvalAgainstJev -v -count=1
+```
+
+输出本该问人却审核通过的比例、可以自动执行的通过率、耗时，以及每一条误放 / 多问的命令。可用 `OPSKAT_TYPESAFE_EVAL_THRESHOLD` / `OPSKAT_TYPESAFE_EVAL_MODEL` / `OPSKAT_TYPESAFE_EVAL_BASE_URL` 对比不同阈值、模型与服务。默认阈值 0.2 需要按评估结果调整。
+
+## 暂不做
+
+- 审计页按来源筛选、"转成规则""标记不该放"两个操作。
+- 按资产类型的特殊处理（以后遇到再单独解决）。

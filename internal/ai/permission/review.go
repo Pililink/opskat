@@ -9,46 +9,63 @@ import (
 
 	"github.com/opskat/opskat/internal/ai/aictx"
 	"github.com/opskat/opskat/internal/ai/policy"
+	"github.com/opskat/opskat/internal/model/entity/asset_entity"
 	policyent "github.com/opskat/opskat/internal/model/entity/policy"
 	"github.com/opskat/opskat/internal/service/asset_svc"
 	"github.com/opskat/opskat/internal/service/command_review_svc"
 )
 
-// applyReview 按权限模式处理"需要人确认"的结果，不区分资产类型：
-//   - 默认：原样返回，问人；
+// applyReviews 按权限模式就地处理 results 里"需要人确认"的结果，不区分资产类型：
+//   - 默认：原样保留，问人；
 //   - 辅助审批：模型审核通过就放行，否则仍然问人；
 //   - Autopilot：模型审核通过就放行，否则直接拒绝，不等人。
 //
-// 规则已经放行或拒绝的结果原样返回。审核服务没有注册时（未经 bootstrap 的进程）不审核。
-func applyReview(ctx context.Context, assetType string, assetID int64, command string, result aictx.CheckResult) aictx.CheckResult {
-	if result.Decision != aictx.NeedConfirm {
-		return result
-	}
+// 规则已经放行或拒绝的结果原样保留。需要审核的命令一次交给 ReviewBatch。
+// 审核服务没有注册时（未经 bootstrap 的进程）不审核。
+func applyReviews(ctx context.Context, reqs []PermissionRequest, results []aictx.CheckResult) {
 	reviewer := command_review_svc.Default()
 	if reviewer == nil {
-		return result
+		return
 	}
-	mode := resolvePermissionMode(ctx, assetID)
-	if mode != policyent.PermissionModeAssisted && mode != policyent.PermissionModeAutopilot {
-		return result
+	var idx []int
+	var modes []string
+	var inputs []command_review_svc.Input
+	for i, r := range results {
+		if r.Decision != aictx.NeedConfirm {
+			continue
+		}
+		mode := resolvePermissionMode(ctx, reqs[i].AssetID)
+		if mode != policyent.PermissionModeAssisted && mode != policyent.PermissionModeAutopilot {
+			continue
+		}
+		idx = append(idx, i)
+		modes = append(modes, mode)
+		inputs = append(inputs, command_review_svc.Input{AssetType: reqs[i].AssetType, Command: reqs[i].Command})
 	}
+	if len(inputs) == 0 {
+		return
+	}
+	for k, r := range reviewer.ReviewBatch(ctx, inputs) {
+		i := idx[k]
+		results[i] = applyReview(ctx, reqs[i], modes[k], results[i], r)
+	}
+}
 
-	r := reviewer.Review(ctx, command_review_svc.Input{
-		AssetType:   assetType,
-		Command:     command,
-		UserRequest: aictx.GetUserRequest(ctx),
-	})
+// applyReview 把一条审核结果按模式落成权限结果。
+func applyReview(ctx context.Context, req PermissionRequest, mode string, result aictx.CheckResult, r command_review_svc.Result) aictx.CheckResult {
 	info := &aictx.ReviewInfo{
+		Mode:       mode,
 		Outcome:    string(r.Outcome),
 		Reason:     r.Reason,
 		Failed:     r.Failed,
 		Model:      r.Model,
 		Scores:     r.Scores,
+		Threshold:  r.Threshold,
 		DurationMs: r.Duration.Milliseconds(),
 		Cached:     r.Cached,
 	}
 	logger.Ctx(ctx).Info("permission review applied",
-		zap.Int64("assetID", assetID), zap.String("assetType", assetType),
+		zap.Int64("assetID", req.AssetID), zap.String("assetType", req.AssetType),
 		zap.String("mode", mode), zap.String("outcome", info.Outcome))
 
 	if r.Outcome == command_review_svc.OutcomePass {
@@ -70,18 +87,46 @@ func applyReview(ctx context.Context, assetType string, assetID int64, command s
 	}
 }
 
-// resolvePermissionMode 取生效的权限模式：AI 对话临时开启的 Autopilot 优先，
-// 其次是资产自己的设置，再沿分组链向上找第一个设置了的；都没有就是默认。
-// 资产读取失败时按默认处理（问人），不会因此放宽。
+// resolvePermissionMode 取生效的权限模式：资产自己的设置优先，没设置时沿分组链向上找
+// 第一个设置了的；都没有就是默认。资产读取失败时按默认处理（问人），不会因此放宽。
 func resolvePermissionMode(ctx context.Context, assetID int64) string {
-	if aictx.IsAutopilot(ctx) {
-		return policyent.PermissionModeAutopilot
-	}
 	asset, err := asset_svc.Asset().Get(ctx, assetID)
 	if err != nil {
 		logger.Ctx(ctx).Warn("get asset for permission mode", zap.Int64("assetID", assetID), zap.Error(err))
 		return policyent.PermissionModeDefault
 	}
+	return permissionModeOf(ctx, asset)
+}
+
+// splitAutopilotGrants 把授权申请里 Autopilot 资产的部分分出来，返回其余部分和这些资产的名字。
+// Autopilot 是无人值守，不会有人来批；批准的又是通配模式，会让之后匹配的命令跳过逐条审核，
+// 所以这些资产不接受授权申请，由调用方直接执行、模型逐条审核。
+func splitAutopilotGrants(ctx context.Context, items []GrantItem) (rest []GrantItem, autopilot []string) {
+	for _, item := range items {
+		if item.AssetID > 0 {
+			asset, err := asset_svc.Asset().Get(ctx, item.AssetID)
+			if err != nil {
+				logger.Ctx(ctx).Warn("get asset for grant permission mode", zap.Int64("assetID", item.AssetID), zap.Error(err))
+			} else if permissionModeOf(ctx, asset) == policyent.PermissionModeAutopilot {
+				autopilot = append(autopilot, asset.Name)
+				continue
+			}
+		}
+		rest = append(rest, item)
+	}
+	return rest, autopilot
+}
+
+// autopilotGrantMessage 告诉调用方这些资产不走授权申请，该怎么做。
+func autopilotGrantMessage(ctx context.Context, assets []string) string {
+	return policy.PolicyFmt(ctx,
+		"Asset(s) %s use Autopilot: grant requests are not accepted there and not needed, and nothing was granted for them. Run the commands directly; each one is reviewed by the model. Do not use a grant request to get around a command the review refused; leave that command to the user.",
+		"资产 %s 使用 Autopilot：不接受授权申请，也不需要，没有为它授予任何权限。请直接执行命令，每条命令会由模型单独审核；被审核拒绝的命令不要改用授权申请绕过，交给用户处理。",
+		strings.Join(assets, ", "))
+}
+
+// permissionModeOf 是 resolvePermissionMode 在已经拿到资产时的版本。
+func permissionModeOf(ctx context.Context, asset *asset_entity.Asset) string {
 	if asset.PermissionMode != policyent.PermissionModeInherit {
 		return asset.PermissionMode
 	}
@@ -132,8 +177,6 @@ func reviewQuestionLabel(ctx context.Context, question string) string {
 		return policy.PolicyMsg(ctx, "may interrupt services", "可能中断服务")
 	case command_review_svc.QuestionRemoteCode:
 		return policy.PolicyMsg(ctx, "downloads and runs code", "会下载并执行代码")
-	case command_review_svc.QuestionBeyondRequest:
-		return policy.PolicyMsg(ctx, "goes beyond the user's request", "超出了用户的要求")
 	default:
 		return question
 	}
@@ -142,9 +185,9 @@ func reviewQuestionLabel(ctx context.Context, question string) string {
 func reviewFailReason(ctx context.Context, reason string) string {
 	switch reason {
 	case command_review_svc.ReasonNotConfigured:
-		return policy.PolicyMsg(ctx, "TypeSafe API key is not configured", "未配置 TypeSafe API key")
+		return policy.PolicyMsg(ctx, "the command review API key is not configured", "未配置命令审核的 API key")
 	case command_review_svc.ReasonInvalidAPIKey:
-		return policy.PolicyMsg(ctx, "invalid TypeSafe API key", "TypeSafe API key 无效")
+		return policy.PolicyMsg(ctx, "the command review API key is invalid", "命令审核的 API key 无效")
 	case command_review_svc.ReasonTimeout:
 		return policy.PolicyMsg(ctx, "timed out", "超时")
 	case command_review_svc.ReasonTooLong:

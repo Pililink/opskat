@@ -77,6 +77,15 @@ func (c *CommandPolicyChecker) SubmitGrantMulti(ctx context.Context, items []Gra
 		return aictx.CheckResult{Decision: aictx.Deny, Message: policy.PolicyMsg(ctx, "no grant approval mechanism", "无 Grant 审批机制")}
 	}
 
+	items, autopilot := splitAutopilotGrants(ctx, items)
+	autopilotNote := ""
+	if len(autopilot) > 0 {
+		autopilotNote = autopilotGrantMessage(ctx, autopilot)
+		if len(items) == 0 {
+			return aictx.CheckResult{Decision: aictx.Deny, DecisionSource: aictx.SourceAutopilotDeny, Message: autopilotNote}
+		}
+	}
+
 	approvalItems := make([]ApprovalItem, 0)
 	var allPatterns []string
 	for _, item := range items {
@@ -120,10 +129,18 @@ func (c *CommandPolicyChecker) SubmitGrantMulti(ctx context.Context, items []Gra
 
 	approved, finalPatterns := c.grantRequestFunc(ctx, approvalItems, reason)
 	if !approved {
-		return aictx.CheckResult{Decision: aictx.Deny, Message: policy.PolicyMsg(ctx, "USER DENIED: The user has denied the grant approval request. Stop the current task immediately.", "用户拒绝：用户已拒绝 Grant 审批请求。请立即停止当前任务。"), DecisionSource: aictx.SourceGrantDeny, MatchedPattern: strings.Join(allPatterns, "; ")}
+		return aictx.CheckResult{Decision: aictx.Deny, Message: joinNote(policy.PolicyMsg(ctx, "USER DENIED: The user has denied the grant approval request. Stop the current task immediately.", "用户拒绝：用户已拒绝 Grant 审批请求。请立即停止当前任务。"), autopilotNote), DecisionSource: aictx.SourceGrantDeny, MatchedPattern: strings.Join(allPatterns, "; ")}
 	}
 
-	return aictx.CheckResult{Decision: aictx.Allow, Message: policy.PolicyFmt(ctx, "grant approved, %d patterns", "Grant 已批准，共 %d 条模式", len(finalPatterns)), DecisionSource: aictx.SourceGrantAllow, MatchedPattern: strings.Join(finalPatterns, "; ")}
+	return aictx.CheckResult{Decision: aictx.Allow, Message: joinNote(policy.PolicyFmt(ctx, "grant approved, %d patterns", "Grant 已批准，共 %d 条模式", len(finalPatterns)), autopilotNote), DecisionSource: aictx.SourceGrantAllow, MatchedPattern: strings.Join(finalPatterns, "; ")}
+}
+
+// joinNote 在消息后附上一段说明；说明为空时原样返回。
+func joinNote(msg, note string) string {
+	if note == "" {
+		return msg
+	}
+	return msg + "\n" + note
 }
 
 // matchGrantPatterns 从 DB 中查找已批准 grant 的 items，用通配匹配命令

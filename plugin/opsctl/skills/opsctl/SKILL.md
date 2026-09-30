@@ -90,7 +90,9 @@ authentication reference only when an existing credential or Agent source is ref
 
 ## Approval Mechanism
 
-Most write operations require approval. Check order: permanent policy rules (the asset's own column, its group chain, and attached policy groups) → still-valid grants → human approval.
+Most write operations require approval. Check order: permanent policy rules (the asset's own column, its group chain, and attached policy groups) → still-valid grants → (if the asset's permission mode enables it) model review → human approval.
+
+**Model review**: a user can set an asset or group to *Assisted* or *Autopilot* in the desktop app. A command that no rule decides is then reviewed by a model first. When the review passes, the command runs without a prompt. Otherwise Assisted falls through to human approval as usual, and Autopilot refuses the command with an error whose reason starts with `Model review did not pass` (do not retry the same command; take a safer approach or leave it for the user to run) or `Model review failed` (the review itself could not run, e.g. it timed out; retrying later is fine) — under a Chinese locale the same reasons read `模型审核未通过` / `模型审核失败`. You cannot switch these modes from opsctl.
 
 **Approver selection**: an interactive terminal (stdin and stderr both TTYs) prompts right there; otherwise the running desktop app shows its dialog; with neither available opsctl refuses with exit code 3 and a fixed marker on the first stderr line.
 

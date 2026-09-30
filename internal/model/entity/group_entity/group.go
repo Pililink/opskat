@@ -26,7 +26,7 @@ type Group struct {
 	// 在运行期才出现，没法像内置类型一样一面一列，所以合在一列里按策略面名分开。
 	ExtPolicy string `gorm:"column:ext_policy;type:text"`
 	// PermissionMode 见 policy.PermissionMode*；空表示沿用上级分组设置。
-	PermissionMode string `gorm:"column:permission_mode;type:varchar(20);default:''" json:"permissionMode"`
+	PermissionMode string `gorm:"column:permission_mode;type:varchar(20);default:''" json:"permissionMode,omitempty"`
 	SortOrder      int    `gorm:"column:sort_order;default:0"`
 	Createtime     int64  `gorm:"column:createtime"`
 	Updatetime     int64  `gorm:"column:updatetime"`

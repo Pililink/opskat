@@ -471,7 +471,14 @@ func requireCpBatchApproval(ctx context.Context, subjects []cpSubject, detail st
 			Review:         allowed.Review,
 		}, nil
 	}
-	return cpBatchSendFn(items, session)
+	result, err := cpBatchSendFn(items, session)
+	// 这次确认只落一行审计：带上说明为什么问人的那个审核结果。
+	reviews := make([]*aictx.ReviewInfo, len(items))
+	for i, item := range items {
+		reviews[i] = item.Review
+	}
+	result.Review = aictx.BatchReview(reviews)
+	return result, err
 }
 
 // cpToolParams 是交给 cp 工具的参数，同时也是这次调用落进 audit_logs.request 的原文

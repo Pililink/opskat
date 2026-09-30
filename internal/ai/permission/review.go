@@ -37,7 +37,7 @@ func applyReviews(ctx context.Context, reqs []PermissionRequest, results []aictx
 			continue
 		}
 		mode := resolvePermissionMode(ctx, reqs[i].AssetID)
-		if mode != policyent.PermissionModeAssisted && mode != policyent.PermissionModeAutopilot {
+		if !reviewedMode(mode) {
 			continue
 		}
 		if r.Unreviewable {
@@ -68,21 +68,10 @@ func applyReviews(ctx context.Context, reqs []PermissionRequest, results []aictx
 
 // applyReview 把一条审核结果按模式落成权限结果。
 func applyReview(ctx context.Context, req PermissionRequest, mode string, result aictx.CheckResult, r command_review_svc.Result) aictx.CheckResult {
-	info := &aictx.ReviewInfo{
-		Mode:       mode,
-		Outcome:    string(r.Outcome),
-		Reason:     r.Reason,
-		Failed:     r.Failed,
-		Model:      r.Model,
-		Scores:     r.Scores,
-		Threshold:  r.Threshold,
-		DurationMs: r.Duration.Milliseconds(),
-		Cached:     r.Cached,
-		Attempts:   r.Attempts,
-	}
+	info := r.Info(mode)
 	logger.Ctx(ctx).Info("permission review applied",
 		zap.Int64("assetID", req.AssetID), zap.String("assetType", req.AssetType),
-		zap.String("mode", mode), zap.String("outcome", info.Outcome))
+		zap.String("mode", mode), zap.String("outcome", string(info.Outcome)))
 
 	if r.Outcome == command_review_svc.OutcomePass {
 		source := aictx.SourceAssistedAllow
@@ -101,6 +90,17 @@ func applyReview(ctx context.Context, req PermissionRequest, mode string, result
 		Message:        autopilotDenyMessage(ctx, info),
 		Review:         info,
 	}
+}
+
+// reviewedMode 判断这种权限模式下，原本要问人的命令会不会先交给模型审核。
+func reviewedMode(mode string) bool {
+	return mode == policyent.PermissionModeAssisted || mode == policyent.PermissionModeAutopilot
+}
+
+// ReviewsCommands 判断这台资产上原本要问人的命令会不会交给模型审核：生效的权限模式需要审核，
+// 并且审核服务已注册。opsctl exec 据此决定要不要先看一眼管道里有没有内容（见 PipedInput）。
+func ReviewsCommands(ctx context.Context, assetID int64) bool {
+	return command_review_svc.Default() != nil && reviewedMode(resolvePermissionMode(ctx, assetID))
 }
 
 // resolvePermissionMode 取生效的权限模式：资产自己的设置优先，没设置时沿分组链向上找
@@ -155,38 +155,18 @@ func permissionModeOf(ctx context.Context, asset *asset_entity.Asset) string {
 }
 
 // autopilotDenyMessage 是 Autopilot 拒绝时返回给调用方的原因，调用方的 agent 据此决定下一步。
-// 审核失败时只有临时性的原因（超时、服务不可用）才让它稍后重试；命令过长、无法解析和配置问题
-// 原样重试结果一样，要告诉它该怎么改，或者留给用户。
+// 审核失败时的下一步见 failReasons。
 func autopilotDenyMessage(ctx context.Context, info *aictx.ReviewInfo) string {
 	summary := ReviewSummary(ctx, info)
-	if info.Outcome == string(command_review_svc.OutcomeReject) {
+	if info.Outcome == aictx.ReviewReject {
 		return policy.PolicyFmt(ctx,
 			"%s; the command was not executed. Do not retry it as-is: take a safer approach, or leave it for the user to run manually.",
 			"%s，命令没有执行。不要原样重试，换一个更安全的做法，或者留给用户手动执行。",
 			summary)
 	}
-	switch info.Reason {
-	case command_review_svc.ReasonTooLong:
-		return policy.PolicyFmt(ctx,
-			"%s; the command was not executed. Retrying it as-is gives the same result: shorten it or split it into several commands.",
-			"%s，命令没有执行。原样重试结果一样，把命令缩短或拆成几条再执行。",
-			summary)
-	case command_review_svc.ReasonUnparseable:
-		return policy.PolicyFmt(ctx,
-			"%s; the command was not executed. Retrying it as-is gives the same result: fix the command syntax first.",
-			"%s，命令没有执行。原样重试结果一样，先修正命令语法。",
-			summary)
-	case command_review_svc.ReasonNotConfigured, command_review_svc.ReasonInvalidAPIKey:
-		return policy.PolicyFmt(ctx,
-			"%s; the command was not executed. Retrying will not help until the user fixes the command review settings; leave the command to the user.",
-			"%s，命令没有执行。用户修正命令审核的设置之前重试也不会成功，把命令留给用户处理。",
-			summary)
-	default:
-		return policy.PolicyFmt(ctx,
-			"%s; the command was not executed. You may retry later.",
-			"%s，命令没有执行，可以稍后重试。",
-			summary)
-	}
+	next := failReasonOf(info.Reason).next
+	return policy.PolicyFmt(ctx, "%s; the command was not executed. %s", "%s，命令没有执行。%s",
+		summary, policy.PolicyMsg(ctx, next.en, next.zh))
 }
 
 // unreviewableDenyMessage 是 Autopilot 拒绝一条只能由人判断的命令时返回给调用方的原因，
@@ -218,9 +198,9 @@ func reviewTypeFor(assetType string) (string, command_review_svc.Syntax) {
 // ReviewSummary 把审核结果写成一句话，给审批提示和拒绝信息用，例如"模型审核未通过（可能中断服务）"。
 func ReviewSummary(ctx context.Context, info *aictx.ReviewInfo) string {
 	switch info.Outcome {
-	case string(command_review_svc.OutcomePass):
+	case aictx.ReviewPass:
 		return policy.PolicyMsg(ctx, "Model review passed", "模型审核通过")
-	case string(command_review_svc.OutcomeReject):
+	case aictx.ReviewReject:
 		labels := make([]string, 0, len(info.Failed))
 		for _, q := range info.Failed {
 			labels = append(labels, reviewQuestionLabel(ctx, q))
@@ -246,18 +226,47 @@ func reviewQuestionLabel(ctx context.Context, question string) string {
 }
 
 func reviewFailReason(ctx context.Context, reason string) string {
-	switch reason {
-	case command_review_svc.ReasonNotConfigured:
-		return policy.PolicyMsg(ctx, "the command review API key is not configured", "未配置命令审核的 API key")
-	case command_review_svc.ReasonInvalidAPIKey:
-		return policy.PolicyMsg(ctx, "the command review API key is invalid", "命令审核的 API key 无效")
-	case command_review_svc.ReasonTimeout:
-		return policy.PolicyMsg(ctx, "timed out", "超时")
-	case command_review_svc.ReasonTooLong:
-		return policy.PolicyMsg(ctx, "command too long", "命令过长")
-	case command_review_svc.ReasonUnparseable:
-		return policy.PolicyMsg(ctx, "the command cannot be parsed", "命令无法解析")
-	default:
-		return policy.PolicyMsg(ctx, "service unavailable", "服务不可用")
+	label := failReasonOf(reason).label
+	return policy.PolicyMsg(ctx, label.en, label.zh)
+}
+
+// bilingual 是一句中英对照的话，按调用方的语言取（policy.PolicyMsg）。
+type bilingual struct{ en, zh string }
+
+// failReasonText 是一种审核失败原因的说明，以及 Autopilot 拒绝时告诉调用方的下一步。
+type failReasonText struct{ label, next bilingual }
+
+var (
+	retryLater = bilingual{"You may retry later.", "可以稍后重试。"}
+	// fixSettings 用在只有用户改设置才能恢复的原因上：原样重试结果一样。
+	fixSettings = bilingual{
+		"Retrying will not help until the user fixes the command review settings; leave the command to the user.",
+		"用户修正命令审核的设置之前重试也不会成功，把命令留给用户处理。",
 	}
+)
+
+// failReasons 是各种审核失败原因的说明和下一步。只有临时性的原因（超时、服务不可用）才让
+// 调用方稍后重试；命令过长、无法解析和设置问题原样重试结果一样，要告诉它该怎么改，或者留给用户。
+var failReasons = map[string]failReasonText{
+	command_review_svc.ReasonNotConfigured:    {bilingual{"the command review API key is not configured", "未配置命令审核的 API key"}, fixSettings},
+	command_review_svc.ReasonAPIKeyUnreadable: {bilingual{"the saved command review API key cannot be read", "已保存的命令审核 API key 无法读取"}, fixSettings},
+	command_review_svc.ReasonInvalidAPIKey:    {bilingual{"the command review API key is invalid", "命令审核的 API key 无效"}, fixSettings},
+	command_review_svc.ReasonTimeout:          {bilingual{"timed out", "超时"}, retryLater},
+	command_review_svc.ReasonUnavailable:      {bilingual{"service unavailable", "服务不可用"}, retryLater},
+	command_review_svc.ReasonTooLong: {bilingual{"command too long", "命令过长"}, bilingual{
+		"Retrying it as-is gives the same result: shorten it or split it into several commands.",
+		"原样重试结果一样，把命令缩短或拆成几条再执行。",
+	}},
+	command_review_svc.ReasonUnparseable: {bilingual{"the command cannot be parsed", "命令无法解析"}, bilingual{
+		"Retrying it as-is gives the same result: fix the command syntax first.",
+		"原样重试结果一样，先修正命令语法。",
+	}},
+}
+
+// failReasonOf 返回失败原因的说明；不认识的原因按服务不可用处理，和前端一致。
+func failReasonOf(reason string) failReasonText {
+	if t, ok := failReasons[reason]; ok {
+		return t
+	}
+	return failReasons[command_review_svc.ReasonUnavailable]
 }

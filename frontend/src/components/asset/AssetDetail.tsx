@@ -7,8 +7,6 @@ import remarkBreaks from "remark-breaks";
 import { markdownComponents, markdownUrlTransform } from "@/components/MarkdownLink";
 import { Button, Separator, ConfirmDialog, Tooltip, TooltipContent, TooltipTrigger } from "@opskat/ui";
 import { toast } from "sonner";
-import { notifySuccess } from "@/lib/notify";
-import type { PermissionMode } from "@/lib/commandReview";
 import { useAssetStore } from "@/stores/assetStore";
 import { useAssetTypeDef } from "@/lib/assetTypes";
 import { AssetIcon } from "@/components/asset/AssetIcon";
@@ -30,19 +28,6 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
   const { assets, updateAsset } = useAssetStore();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [savingPolicy, setSavingPolicy] = useState(false);
-  const [savingMode, setSavingMode] = useState(false);
-
-  const savePermissionMode = async (mode: PermissionMode) => {
-    setSavingMode(true);
-    try {
-      await updateAsset(new asset_entity.Asset({ ...asset, permissionMode: mode }));
-      notifySuccess(t("commandReview.mode.saved"));
-    } catch (e) {
-      toast.error(String(e));
-    } finally {
-      setSavingMode(false);
-    }
-  };
 
   // 订阅注册表：扩展加载完成时它的资产类型才注册进来，这里要跟着重渲染。
   // 定义还没到位期间只是少一张类型卡，不是全屏 loading——通用信息照常可读。
@@ -182,8 +167,7 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
             value={asset.permissionMode ?? ""}
             subject="asset"
             parentGroupId={asset.GroupID}
-            saving={savingMode}
-            onChange={savePermissionMode}
+            onChange={(mode) => updateAsset(new asset_entity.Asset({ ...asset, permissionMode: mode }))}
           />
         )}
 

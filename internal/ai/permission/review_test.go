@@ -99,7 +99,7 @@ func TestApplyReview(t *testing.T) {
 				r := CheckPermission(ctx, asset_entity.AssetTypeSSH, 1, cmd)
 				So(r.Decision, ShouldEqual, aictx.Allow)
 				So(r.DecisionSource, ShouldEqual, aictx.SourceAssistedAllow)
-				So(r.Review.Outcome, ShouldEqual, "pass")
+				So(r.Review.Outcome, ShouldEqual, aictx.ReviewPass)
 				// 按资产类型注册时声明的写法替换敏感信息
 				So(f.calls, ShouldResemble, []command_review_svc.Input{{AssetType: asset_entity.AssetTypeSSH, Command: cmd, Syntax: command_review_svc.SyntaxShell}})
 			})
@@ -124,7 +124,7 @@ func TestApplyReview(t *testing.T) {
 				r := CheckPermission(ctx, asset_entity.AssetTypeSSH, 1, cmd)
 				So(r.Decision, ShouldEqual, aictx.NeedConfirm)
 				So(r.HintRules, ShouldContain, "systemctl status *")
-				So(r.Review.Outcome, ShouldEqual, "reject")
+				So(r.Review.Outcome, ShouldEqual, aictx.ReviewReject)
 				So(r.Review.Failed, ShouldResemble, []string{"disruptive"})
 				So(r.Review.Mode, ShouldEqual, policyent.PermissionModeAssisted)
 			})
@@ -133,7 +133,7 @@ func TestApplyReview(t *testing.T) {
 				registerFakeReviewer(t, reviewFail)
 				r := CheckPermission(ctx, asset_entity.AssetTypeSSH, 1, cmd)
 				So(r.Decision, ShouldEqual, aictx.NeedConfirm)
-				So(r.Review.Outcome, ShouldEqual, "fail")
+				So(r.Review.Outcome, ShouldEqual, aictx.ReviewFail)
 				So(r.Review.Reason, ShouldEqual, command_review_svc.ReasonTimeout)
 			})
 		})
@@ -173,7 +173,7 @@ func TestApplyReview(t *testing.T) {
 				So(r.DecisionSource, ShouldEqual, aictx.SourceAutopilotDeny)
 				So(r.Message, ShouldContainSubstring, "模型审核未通过")
 				So(r.Message, ShouldContainSubstring, "不要原样重试")
-				So(r.Review.Outcome, ShouldEqual, "reject")
+				So(r.Review.Outcome, ShouldEqual, aictx.ReviewReject)
 				So(r.Review.Mode, ShouldEqual, policyent.PermissionModeAutopilot)
 			})
 
@@ -189,6 +189,7 @@ func TestApplyReview(t *testing.T) {
 					{command_review_svc.ReasonUnparseable, "修正命令语法", false},
 					// 配置问题只有用户能修
 					{command_review_svc.ReasonNotConfigured, "留给用户", false},
+					{command_review_svc.ReasonAPIKeyUnreadable, "API key 无法读取", false},
 					{command_review_svc.ReasonInvalidAPIKey, "留给用户", false},
 				}
 				for _, c := range cases {
@@ -269,10 +270,10 @@ func TestApplyReview(t *testing.T) {
 
 			So(shown, ShouldHaveLength, 1)
 			So(shown[0].Review, ShouldNotBeNil)
-			So(shown[0].Review.Outcome, ShouldEqual, "reject")
+			So(shown[0].Review.Outcome, ShouldEqual, aictx.ReviewReject)
 			So(r.Decision, ShouldEqual, aictx.Allow)
 			So(r.DecisionSource, ShouldEqual, aictx.SourceUserAllow)
-			So(r.Review.Outcome, ShouldEqual, "reject")
+			So(r.Review.Outcome, ShouldEqual, aictx.ReviewReject)
 			// 人批准的记录里只看得到 user_allow，模式要靠审核结果自己带着，审计才看得出是辅助审批转过来的
 			So(r.Review.Mode, ShouldEqual, policyent.PermissionModeAssisted)
 		})

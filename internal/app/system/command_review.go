@@ -19,7 +19,7 @@ import (
 const commandReviewConfigErrorEvent = "command-review:config-error"
 
 // CommandReviewSettings 是设置页读到的模型审核设置（已套上默认值）。API key 只回是否已设置。
-// LastFailReason / LastFailAt 是本次启动以来最近一次审核失败，之后审核成功过则为空。
+// LastFailReason / LastFailAt 是本次启动以来最近一次审核失败，没失败过则为空。
 type CommandReviewSettings struct {
 	APIKeySet      bool    `json:"apiKeySet"`
 	BaseURL        string  `json:"baseUrl"`
@@ -53,20 +53,21 @@ func (in CommandReviewSaveInput) validate() error {
 			return fmt.Errorf("服务地址（Base URL）需要是 http:// 或 https:// 开头的地址")
 		}
 	}
-	if in.TimeoutMs != 0 && (in.TimeoutMs < 1000 || in.TimeoutMs > 60000) {
+	if in.TimeoutMs < 1000 || in.TimeoutMs > 60000 {
 		return fmt.Errorf("超时需在 1000~60000 毫秒之间")
 	}
-	if in.Threshold < 0 || in.Threshold >= 1 {
-		return fmt.Errorf("阈值需在 0~1 之间")
+	if in.Threshold <= 0 || in.Threshold >= 1 {
+		return fmt.Errorf("阈值需大于 0、小于 1")
 	}
 	return nil
 }
 
 // GetCommandReviewSettings 读取模型审核设置。
 func (s *System) GetCommandReviewSettings() (*CommandReviewSettings, error) {
-	cfg := bootstrap.CommandReviewConfig()
+	cfg := command_review_svc.NewConfig(bootstrap.CommandReviewSettings())
 	out := &CommandReviewSettings{
-		APIKeySet: cfg.APIKey != "",
+		// 保存过就算已设置，解不开也一样：审核会报"API key 无法读取"，重新填一遍即可覆盖。
+		APIKeySet: bootstrap.GetConfig().CommandReviewAPIKey != "",
 		BaseURL:   cfg.BaseURL,
 		Model:     cfg.Model,
 		TimeoutMs: int(cfg.Timeout.Milliseconds()),
@@ -126,9 +127,20 @@ func (s *System) TestCommandReview(in CommandReviewSaveInput) (string, error) {
 	}
 	apiKey := strings.TrimSpace(in.APIKey)
 	if apiKey == "" && !in.ClearAPIKey {
-		apiKey = bootstrap.CommandReviewAPIKey()
+		saved, err := bootstrap.CommandReviewAPIKey()
+		if err != nil {
+			logger.Ctx(ctx).Error("read saved command review api key failed", zap.Error(err))
+			return "", fmt.Errorf("已保存的 API key 无法读取，请重新填写: %w", err)
+		}
+		apiKey = saved
 	}
-	cfg := command_review_svc.NewConfig(apiKey, in.baseURL(), strings.TrimSpace(in.Model), in.TimeoutMs, in.Threshold)
+	cfg := command_review_svc.NewConfig(command_review_svc.Settings{
+		APIKey:    apiKey,
+		BaseURL:   in.baseURL(),
+		Model:     strings.TrimSpace(in.Model),
+		TimeoutMs: in.TimeoutMs,
+		Threshold: in.Threshold,
+	})
 	logger.Ctx(ctx).Info("test command review model started", zap.String("baseURL", cfg.BaseURL), zap.String("model", cfg.Model))
 	model, err := command_review_svc.Default().TestModel(ctx, cfg)
 	if err != nil {

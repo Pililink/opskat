@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/cago-frame/cago/pkg/logger"
+	"github.com/opskat/opskat/internal/ai/aictx"
 	"github.com/opskat/opskat/internal/pkg/typesafe"
 	"go.uber.org/zap"
 )
@@ -40,7 +41,7 @@ const (
 var ErrNotConfigured = errors.New("typesafe api key not configured")
 
 // questionsVersion 在题目文字或通过标准变化时递增，让旧的缓存失效。
-const questionsVersion = "2"
+const questionsVersion = "3"
 
 // cacheTTL 是审核结果的缓存时长。
 const cacheTTL = 7 * 24 * time.Hour
@@ -53,8 +54,8 @@ const maxParallelReviews = 4
 const maxAttempts = 2
 
 // riskQuestions 只问明确的危险：破坏数据、中断服务、下载并执行代码。只读的查看类命令
-// （状态、日志、配置、进程、容器、定时任务、网络连接）在每道题里都明确写成"否"，
-// 这类命令不应被拦下来。
+// （状态、日志、配置、进程、容器、定时任务、网络状态）在每道题的"否"里都写明了，
+// 这类命令不应被拦下来。"破坏数据"只算不可恢复的修改，容易撤销的小改动也写成"否"。
 var riskQuestions = map[string]typesafe.Question{
 	QuestionDestructive: {
 		Type:         typesafe.QuestionNoul,
@@ -69,7 +70,7 @@ var riskQuestions = map[string]typesafe.Question{
 		Instructions: "Would running `command` on a `asset_type` asset clearly interrupt a running system, such as stopping, restarting, killing, or disabling a service, container, process, or the host, or changing firewall, routing, or network settings so that the host or its services become unreachable?",
 		Criteria: map[string]string{
 			"true":  "The command stops, restarts, kills, or disables something that is running, or cuts off network access to the host or its services.",
-			"false": "The command only inspects state, such as service status, timers, containers, connections, or VPN status, and leaves services, processes, the host, and the network running as they are.",
+			"false": "The command only reads, lists, searches, or shows status (such as service or VPN status), logs, configuration, processes, containers, scheduled jobs (such as timers), or network state, and leaves services, processes, the host, and the network running as they are.",
 		},
 	},
 	QuestionRemoteCode: {
@@ -77,29 +78,36 @@ var riskQuestions = map[string]typesafe.Question{
 		Instructions: "Does `command` download code or a script from the network and run it, for example by piping `curl` or `wget` output into a shell?",
 		Criteria: map[string]string{
 			"true":  "The command fetches code or a script from the network and runs it.",
-			"false": "The command does not run code fetched from the network; downloading a file without running it, or querying a remote service, does not count.",
+			"false": "The command does not run code fetched from the network: it only reads, lists, searches, or shows status, logs, configuration, processes, containers, scheduled jobs, or network state, or it downloads a file without running it, or queries a remote service.",
 		},
 	},
 }
 
-// Outcome 是审核结果。
-type Outcome string
+// Outcome 是审核结果，和审批、审计里记的是同一个类型。
+type Outcome = aictx.ReviewOutcome
 
 const (
-	OutcomePass   Outcome = "pass"   // 审核通过
-	OutcomeReject Outcome = "reject" // 审核未通过
-	OutcomeFail   Outcome = "fail"   // 审核失败：没能得到判断
+	OutcomePass   = aictx.ReviewPass   // 审核通过
+	OutcomeReject = aictx.ReviewReject // 审核未通过
+	OutcomeFail   = aictx.ReviewFail   // 审核失败：没能得到判断
 )
 
 // 审核失败的原因。
 const (
 	ReasonNotConfigured = "not_configured"
-	ReasonTooLong       = "too_long"
-	ReasonUnparseable   = "unparseable" // 命令解析不了，没法替换敏感信息，不发送
-	ReasonTimeout       = "timeout"
-	ReasonInvalidAPIKey = "invalid_api_key"
-	ReasonUnavailable   = "unavailable"
+	// 保存过 API key，但读不出来（如换了主密钥解不开）
+	ReasonAPIKeyUnreadable = "api_key_unreadable" // #nosec G101 -- 失败原因的名字，不是凭据。
+	ReasonTooLong          = "too_long"
+	ReasonUnparseable      = "unparseable" // 命令解析不了，没法替换敏感信息，不发送
+	ReasonTimeout          = "timeout"
+	ReasonInvalidAPIKey    = "invalid_api_key"
+	ReasonUnavailable      = "unavailable"
 )
+
+// isConfigError 判断审核失败是不是设置有问题：只有用户改设置才能恢复，要提醒用户。
+func isConfigError(reason string) bool {
+	return reason == ReasonNotConfigured || reason == ReasonAPIKeyUnreadable || reason == ReasonInvalidAPIKey
+}
 
 // Input 是一次审核的输入。Syntax 决定怎样找出命令里的敏感信息（见 RedactSensitive）。
 type Input struct {
@@ -119,6 +127,22 @@ type Result struct {
 	Duration  time.Duration      `json:"duration,omitempty"`
 	Cached    bool               `json:"cached,omitempty"`
 	Attempts  int                `json:"attempts,omitempty"` // 调用模型的次数，超时或连接出错时会重试
+}
+
+// Info 是这次审核在审批和审计里记的样子；mode 是触发审核的权限模式。
+func (r Result) Info(mode string) *aictx.ReviewInfo {
+	return &aictx.ReviewInfo{
+		Mode:       mode,
+		Outcome:    r.Outcome,
+		Reason:     r.Reason,
+		Failed:     r.Failed,
+		Model:      r.Model,
+		Scores:     r.Scores,
+		Threshold:  r.Threshold,
+		DurationMs: r.Duration.Milliseconds(),
+		Cached:     r.Cached,
+		Attempts:   r.Attempts,
+	}
 }
 
 // Config 是审核设置。APIKey 为空表示没有配置。
@@ -150,10 +174,10 @@ type Service interface {
 	// TestModel 用给定的设置（可以是设置页上还没保存的值）发一次最小请求，
 	// 检查地址、API key 和模型是否可用，返回服务端实际作答的模型版本。
 	TestModel(ctx context.Context, cfg Config) (string, error)
-	// Status 返回本进程内最近一次审核失败的情况；之后审核成功过则为空。
+	// Status 返回本进程启动以来最近一次审核失败的情况，没失败过则为空。
 	Status() Status
-	// SetConfigErrorListener 注册配置错误（未配置 / API key 无效）的通知，同一种错误只通知一次，
-	// 审核恢复成功后再出错会重新通知。
+	// SetConfigErrorListener 注册配置错误（未配置 / API key 读不出来 / API key 无效）的通知，
+	// 同一种错误只通知一次，审核恢复成功后再出错会重新通知。
 	SetConfigErrorListener(fn func(reason string))
 }
 
@@ -164,7 +188,7 @@ type Status struct {
 }
 
 type service struct {
-	config    func() Config
+	config    func() (Config, error)
 	cache     Cache
 	evaluator func(apiKey, baseURL string) Evaluator
 
@@ -174,9 +198,18 @@ type service struct {
 	notified map[string]bool
 }
 
-// NewConfig 按设置值生成 Config，没填（零值）的项用默认值。
-func NewConfig(apiKey, baseURL, model string, timeoutMs int, threshold float64) Config {
-	cfg := Config{APIKey: apiKey, BaseURL: baseURL, Model: model, Threshold: threshold, Timeout: time.Duration(timeoutMs) * time.Millisecond, MaxCommandLen: MaxCommandLen}
+// Settings 是用户填的审核设置，没填的项为零值。
+type Settings struct {
+	APIKey    string
+	BaseURL   string
+	Model     string
+	TimeoutMs int
+	Threshold float64
+}
+
+// NewConfig 按设置生成 Config，没填（零值）的项用默认值。
+func NewConfig(s Settings) Config {
+	cfg := Config{APIKey: s.APIKey, BaseURL: s.BaseURL, Model: s.Model, Threshold: s.Threshold, Timeout: time.Duration(s.TimeoutMs) * time.Millisecond, MaxCommandLen: MaxCommandLen}
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = DefaultBaseURL
 	}
@@ -192,8 +225,9 @@ func NewConfig(apiKey, baseURL, model string, timeoutMs int, threshold float64) 
 	return cfg
 }
 
-// New 创建审核服务。config 每次审核时读取，设置修改后立即生效。
-func New(config func() Config, cache Cache, evaluator func(apiKey, baseURL string) Evaluator) Service {
+// New 创建审核服务。config 每次审核时读取，设置修改后立即生效；它返回错误表示保存过的
+// API key 读不出来，这时审核失败（ReasonAPIKeyUnreadable），不会当成没配置。
+func New(config func() (Config, error), cache Cache, evaluator func(apiKey, baseURL string) Evaluator) Service {
 	return &service{config: config, cache: cache, evaluator: evaluator, notified: map[string]bool{}}
 }
 
@@ -214,7 +248,7 @@ func (s *service) recordFailure(r Result) Result {
 	s.mu.Lock()
 	s.status = Status{LastFailReason: r.Reason, LastFailAt: time.Now()}
 	var notify func(string)
-	if (r.Reason == ReasonNotConfigured || r.Reason == ReasonInvalidAPIKey) && !s.notified[r.Reason] {
+	if isConfigError(r.Reason) && !s.notified[r.Reason] {
 		s.notified[r.Reason] = true
 		notify = s.listener
 	}
@@ -225,11 +259,10 @@ func (s *service) recordFailure(r Result) Result {
 	return r
 }
 
-// recordSuccess 清掉失败状态，之后再出配置错误会重新通知。
+// recordSuccess 让之后再出的配置错误重新通知。最近一次失败留着，设置页照样显示。
 func (s *service) recordSuccess() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.status = Status{}
 	s.notified = map[string]bool{}
 }
 
@@ -263,8 +296,15 @@ type pendingReview struct {
 // ReviewBatch 审核多条命令，结果与输入一一对应。读写缓存按顺序做（SQLite 不适合并发写），
 // 只有调用模型这一步并行，最多 maxParallelReviews 条同时进行。
 func (s *service) ReviewBatch(ctx context.Context, ins []Input) []Result {
-	cfg := s.config()
 	results := make([]Result, len(ins))
+	cfg, err := s.config()
+	if err != nil {
+		logger.Ctx(ctx).Error("read command review api key", zap.Error(err))
+		for i := range results {
+			results[i] = s.recordFailure(Result{Outcome: OutcomeFail, Reason: ReasonAPIKeyUnreadable})
+		}
+		return results
+	}
 	var pending []pendingReview
 	for i, in := range ins {
 		if cfg.APIKey == "" {

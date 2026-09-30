@@ -1,10 +1,8 @@
 package bootstrap
 
 import (
+	"fmt"
 	"net/http"
-
-	"github.com/cago-frame/cago/pkg/logger"
-	"go.uber.org/zap"
 
 	"github.com/opskat/opskat/internal/pkg/netdial"
 	"github.com/opskat/opskat/internal/pkg/typesafe"
@@ -29,23 +27,38 @@ func registerCommandReview() {
 	))
 }
 
-// CommandReviewConfig 从 config.json 读取审核设置，并解密 API key。
-// 解密失败时按未配置处理（审核失败，不会因此放行），并记录错误。
-func CommandReviewConfig() command_review_svc.Config {
+// CommandReviewSettings 是 config.json 里的审核设置，不含 API key。
+func CommandReviewSettings() command_review_svc.Settings {
 	cfg := GetConfig()
-	return command_review_svc.NewConfig(CommandReviewAPIKey(), cfg.CommandReviewBaseURL, cfg.CommandReviewModel, cfg.CommandReviewTimeoutMs, cfg.CommandReviewThreshold)
+	return command_review_svc.Settings{
+		BaseURL:   cfg.CommandReviewBaseURL,
+		Model:     cfg.CommandReviewModel,
+		TimeoutMs: cfg.CommandReviewTimeoutMs,
+		Threshold: cfg.CommandReviewThreshold,
+	}
 }
 
-// CommandReviewAPIKey 返回解密后的审核 API key；没有配置或解密失败时为空。
-func CommandReviewAPIKey() string {
+// CommandReviewConfig 是审核服务用的设置：config.json 里的设置加上解密后的 API key。
+// 保存过的 API key 解不开时返回错误，审核按失败处理，不会因此放行。
+func CommandReviewConfig() (command_review_svc.Config, error) {
+	key, err := CommandReviewAPIKey()
+	if err != nil {
+		return command_review_svc.Config{}, err
+	}
+	s := CommandReviewSettings()
+	s.APIKey = key
+	return command_review_svc.NewConfig(s), nil
+}
+
+// CommandReviewAPIKey 返回解密后的审核 API key；没有配置时为空。
+func CommandReviewAPIKey() (string, error) {
 	encrypted := GetConfig().CommandReviewAPIKey
 	if encrypted == "" {
-		return ""
+		return "", nil
 	}
 	key, err := credential_svc.Default().Decrypt(encrypted)
 	if err != nil {
-		logger.Default().Error("decrypt command review api key", zap.Error(err))
-		return ""
+		return "", fmt.Errorf("decrypt command review api key: %w", err)
 	}
-	return key
+	return key, nil
 }

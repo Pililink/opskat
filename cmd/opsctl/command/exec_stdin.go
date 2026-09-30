@@ -17,7 +17,8 @@ const stdinPeekWait = 200 * time.Millisecond
 //   - 重定向的普通文件：按大小判断；
 //   - 管道：先读第一块。读到内容算有；立刻读到 EOF（调用方关掉了 stdin）算没有。等了 wait
 //     还没有结论的（调用方开着管道却不写，或者上游还没开始输出）按有处理：之后才写进来的
-//     内容同样会被转发，不能让它绕过模型审核。
+//     内容同样会被转发，不能让它绕过模型审核。wait 为 0 表示不预读（资产没开模型审核，
+//     用不到这个判断），管道直接转发，和没有模型审核时一样。
 //
 // 预读出来的内容拼回 reader 的开头，转发时一个字节不少。
 func inspectStdin(f *os.File, wait time.Duration) (io.Reader, bool) {
@@ -29,6 +30,9 @@ func inspectStdin(f *os.File, wait time.Duration) (io.Reader, bool) {
 		if stat.Size() == 0 {
 			return nil, false
 		}
+		return f, true
+	}
+	if wait == 0 {
 		return f, true
 	}
 

@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/opskat/opskat/internal/ai/aictx"
 	"github.com/opskat/opskat/internal/ai/audit"
@@ -31,8 +32,9 @@ var execApprovalFn = requireApproval
 // "ssh 资产走了这条路径"，不需要真的起一个 SSH 会话。
 var execSSHStreamFn = execSSHStreaming
 
-// execStdinFn 判断 stdin 有没有要转发给 ssh 命令的内容，同上一套路：测试替换它来模拟管道输入。
-var execStdinFn = func() (io.Reader, bool) { return inspectStdin(os.Stdin, stdinPeekWait) }
+// execStdinFn 判断 stdin 有没有要转发给 ssh 命令的内容（预读最多等 wait，见 inspectStdin），
+// 同上一套路：测试替换它来模拟管道输入。
+var execStdinFn = func(wait time.Duration) (io.Reader, bool) { return inspectStdin(os.Stdin, wait) }
 
 // cmdExec 按资产真实类型分派命令执行：ssh 走 execSSHStreaming 这条已文档化的流式
 // 通道（stdin 管道转发、stdout/stderr 直写、远端 exit code 透传——SKILL.md 里
@@ -124,11 +126,15 @@ func cmdExec(ctx context.Context, handlers map[string]tool.ToolHandlerFunc, args
 	approvalType := permission.ApprovalTypeFor(asset.Type)
 	argsJSON := fmt.Sprintf(`{"asset_id":%d,"command":%q,"scope":%q}`, asset.ID, command, scope)
 	// 只有 ssh 资产会把 stdin 转发给远端命令。在审批之前判断：管道里的内容模型审核看不到，
-	// 有的话不能靠审核放行（PipedInput）。
+	// 有的话不能靠审核放行（PipedInput）。资产没开模型审核时不预读，和原来一样直接转发。
 	var stdin io.Reader
 	var pipedInput bool
 	if asset.IsSSH() {
-		stdin, pipedInput = execStdinFn()
+		var wait time.Duration
+		if permission.ReviewsCommands(ctx, asset.ID) {
+			wait = stdinPeekWait
+		}
+		stdin, pipedInput = execStdinFn(wait)
 	}
 	approvalResult, err := execApprovalFn(ctx, approval.ApprovalRequest{
 		Type:      approvalType,

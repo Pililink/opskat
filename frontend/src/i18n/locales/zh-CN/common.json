@@ -3220,6 +3220,7 @@
     },
     "reason": {
       "not_configured": "未配置命令审核的 API key",
+      "api_key_unreadable": "已保存的命令审核 API key 无法读取",
       "invalid_api_key": "命令审核的 API key 无效",
       "timeout": "超时",
       "too_long": "命令过长",
@@ -3284,6 +3285,7 @@
     },
     "configError": {
       "not_configured": "有服务器开启了辅助审批或 Autopilot，但还没配置命令审核的 API key，需要审核的命令都会审核失败。",
+      "api_key_unreadable": "已保存的命令审核 API key 无法读取（可能换了主密钥），需要审核的命令都会审核失败。请重新填写 API key。",
       "invalid_api_key": "命令审核的 API key 无效，需要审核的命令都会审核失败。",
       "openSettings": "打开设置"
     },

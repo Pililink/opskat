@@ -36,6 +36,16 @@ describe("CommandReviewConfigErrorListener", () => {
     expect(useTabStore.getState().tabs.some((tab) => tab.id === "settings")).toBe(true);
   });
 
+  it("已保存的 API key 读不出来也是配置错误，要提醒", () => {
+    const handlers = captureHandlers();
+    render(<CommandReviewConfigErrorListener />);
+
+    act(() => handlers.get("command-review:config-error")?.("api_key_unreadable"));
+
+    expect(warning).toHaveBeenCalledTimes(1);
+    expect(warning.mock.calls[0][0]).toBe("commandReview.configError.api_key_unreadable");
+  });
+
   it("不认识的原因不提醒", () => {
     const handlers = captureHandlers();
     render(<CommandReviewConfigErrorListener />);

@@ -276,14 +276,10 @@ func (c *CommandPolicyChecker) HandleConfirm(ctx context.Context, assetID int64,
 }
 
 // handleConfirm 同 HandleConfirm，review 是这条命令的模型审核结果（辅助审批下审核未通过或失败时才有）：
-// 放进审批项给人看，人确认后的结果里也带上它，审计据此记下"模型没通过、人批准了"。
-func (c *CommandPolicyChecker) handleConfirm(ctx context.Context, assetID int64, assetType, command string, review *aictx.ReviewInfo, detail ...string) aictx.CheckResult {
-	result := c.confirm(ctx, assetID, assetType, command, review, detail...)
-	result.Review = review
-	return result
-}
-
-func (c *CommandPolicyChecker) confirm(ctx context.Context, assetID int64, assetType, command string, review *aictx.ReviewInfo, detail ...string) aictx.CheckResult {
+// 放进审批项给人看，每一种结局（确认、拒绝、无从确认）的结果里也带上它，审计据此记下
+// "模型没通过、人批准了"。
+func (c *CommandPolicyChecker) handleConfirm(ctx context.Context, assetID int64, assetType, command string, review *aictx.ReviewInfo, detail ...string) (result aictx.CheckResult) {
+	defer func() { result.Review = review }()
 	if c.confirmFunc == nil {
 		return aictx.CheckResult{Decision: aictx.Deny, Message: policy.PolicyMsg(ctx, "command not authorized and no confirmation mechanism", "命令未授权且无确认机制"), DecisionSource: aictx.SourcePolicyDeny}
 	}

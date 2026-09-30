@@ -333,6 +333,12 @@ func checkAccessBatch(
 	}
 	resp := confirm(ctx, permission.ApprovalKindBatch, items)
 	parsed, parseErr := permission.ParseApprovalResponse(permission.ApprovalKindBatch, resp, items)
+	// 这次确认只落一行审计：带上说明为什么问人的那个审核结果。
+	reviews := make([]*aictx.ReviewInfo, len(items))
+	for i, item := range items {
+		reviews[i] = item.Review
+	}
+	review := aictx.BatchReview(reviews)
 	if parseErr != nil || parsed.Decision != permission.ApprovalAllow {
 		// 响应解析失败与用户点拒绝合成同一条出路，与 HandleConfirm 同一裁定：两者都不是
 		// 授权，而模型该做的事（立刻停下）也是同一件。
@@ -340,11 +346,11 @@ func checkAccessBatch(
 			"USER DENIED: The user has denied this transfer (%d paths). Stop the current task immediately.",
 			len(items))
 		aictx.RecordDecision(ctx, aictx.CheckResult{
-			Decision: aictx.Deny, DecisionSource: aictx.SourceUserDeny, Message: msg,
+			Decision: aictx.Deny, DecisionSource: aictx.SourceUserDeny, Message: msg, Review: review,
 		})
 		return false, fmt.Errorf("%s", msg)
 	}
-	aictx.RecordDecision(ctx, aictx.CheckResult{Decision: aictx.Allow, DecisionSource: aictx.SourceUserAllow})
+	aictx.RecordDecision(ctx, aictx.CheckResult{Decision: aictx.Allow, DecisionSource: aictx.SourceUserAllow, Review: review})
 	return true, nil
 }
 

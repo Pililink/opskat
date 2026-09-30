@@ -3220,6 +3220,7 @@
     },
     "reason": {
       "not_configured": "the command review API key is not configured",
+      "api_key_unreadable": "the saved command review API key cannot be read",
       "invalid_api_key": "the command review API key is invalid",
       "timeout": "timed out",
       "too_long": "command too long",
@@ -3284,6 +3285,7 @@
     },
     "configError": {
       "not_configured": "A server uses Assisted or Autopilot, but no command review API key is configured, so every command that needs review fails review.",
+      "api_key_unreadable": "The saved command review API key cannot be read (the master key may have changed), so every command that needs review fails review. Enter the API key again.",
       "invalid_api_key": "The command review API key is invalid, so every command that needs review fails review.",
       "openSettings": "Open settings"
     },

@@ -47,7 +47,8 @@ func applyReviews(ctx context.Context, reqs []PermissionRequest, results []aictx
 		}
 		idx = append(idx, i)
 		modes = append(modes, mode)
-		inputs = append(inputs, command_review_svc.Input{AssetType: reqs[i].AssetType, Command: reqs[i].Command, Syntax: reviewSyntaxFor(reqs[i].AssetType)})
+		assetType, syntax := reviewTypeFor(reqs[i].AssetType)
+		inputs = append(inputs, command_review_svc.Input{AssetType: assetType, Command: reqs[i].Command, Syntax: syntax})
 	}
 	if len(inputs) == 0 {
 		return
@@ -169,12 +170,14 @@ func unreviewableDenyMessage(ctx context.Context, reason string) string {
 		reason)
 }
 
-// reviewSyntaxFor 返回资产类型注册时声明的命令写法；没有注册的类型（扩展类型）按纯文本处理。
-func reviewSyntaxFor(assetType string) command_review_svc.Syntax {
+// reviewTypeFor 返回交给模型审核的资产类型和命令写法。调用方可能传别名（opsctl exec 传的是
+// 审批类型 exec、sql），这里统一换成注册时的规范类型：模型看到的是真实的资产类型，缓存键也
+// 不会因入口不同而分成几份。没有注册的类型（扩展类型）原样使用，按纯文本处理。
+func reviewTypeFor(assetType string) (string, command_review_svc.Syntax) {
 	if handler, ok := permissionTypeFor(assetType); ok {
-		return handler.reviewSyntax
+		return handler.canonical, handler.reviewSyntax
 	}
-	return command_review_svc.SyntaxText
+	return assetType, command_review_svc.SyntaxText
 }
 
 // ReviewSummary 把审核结果写成一句话，给审批提示和拒绝信息用，例如"模型审核未通过（可能中断服务）"。

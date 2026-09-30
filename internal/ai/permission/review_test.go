@@ -104,6 +104,13 @@ func TestApplyReview(t *testing.T) {
 				So(f.calls, ShouldResemble, []command_review_svc.Input{{AssetType: asset_entity.AssetTypeSSH, Command: cmd, Syntax: command_review_svc.SyntaxShell}})
 			})
 
+			Convey("按别名检查（opsctl exec 传审批类型 exec）时，交给模型和缓存的是规范资产类型", func() {
+				f := registerFakeReviewer(t, reviewPass)
+				r := CheckPermission(ctx, "exec", 1, cmd)
+				So(r.DecisionSource, ShouldEqual, aictx.SourceAssistedAllow)
+				So(f.calls, ShouldResemble, []command_review_svc.Input{{AssetType: asset_entity.AssetTypeSSH, Command: cmd, Syntax: command_review_svc.SyntaxShell}})
+			})
+
 			Convey("审核未通过：仍然问人，保留规则提示并带上审核结果", func() {
 				registerFakeReviewer(t, reviewReject)
 				r := CheckPermission(ctx, asset_entity.AssetTypeSSH, 1, cmd)

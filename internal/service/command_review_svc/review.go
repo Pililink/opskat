@@ -32,7 +32,7 @@ const (
 	DefaultBaseURL   = typesafe.DefaultBaseURL
 	DefaultModel     = "jev-1.13.0"
 	DefaultTimeout   = 5 * time.Second
-	DefaultThreshold = 0.2
+	DefaultThreshold = 0.5
 	// MaxCommandLen 是能审核的最长命令（替换敏感信息后）；更长的按审核失败处理，不截断后硬判。
 	MaxCommandLen = 4000
 )

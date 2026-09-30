@@ -100,7 +100,8 @@ func TestApplyReview(t *testing.T) {
 				So(r.Decision, ShouldEqual, aictx.Allow)
 				So(r.DecisionSource, ShouldEqual, aictx.SourceAssistedAllow)
 				So(r.Review.Outcome, ShouldEqual, "pass")
-				So(f.calls, ShouldResemble, []command_review_svc.Input{{AssetType: asset_entity.AssetTypeSSH, Command: cmd}})
+				// 按资产类型注册时声明的写法替换敏感信息
+				So(f.calls, ShouldResemble, []command_review_svc.Input{{AssetType: asset_entity.AssetTypeSSH, Command: cmd, Syntax: command_review_svc.SyntaxShell}})
 			})
 
 			Convey("审核未通过：仍然问人，保留规则提示并带上审核结果", func() {
@@ -151,6 +152,36 @@ func TestApplyReview(t *testing.T) {
 				So(r.Message, ShouldContainSubstring, "模型审核失败")
 				So(r.Message, ShouldContainSubstring, "超时")
 			})
+		})
+
+		// 拆不开的 shell 命令，禁止规则没法逐条检查，只能由人判断：不交给模型，
+		// 否则 Autopilot 会让模型放行一条本该被禁止规则拦下的命令。
+		Convey("拆不开的 shell 命令不交给模型审核", func() {
+			withDeny := func(mode string) *asset_entity.Asset {
+				a := sshAsset(mode, 0)
+				a.CmdPolicy = mustJSON(asset_entity.CommandPolicy{AllowList: []string{"ls *"}, DenyList: []string{"docker compose down"}})
+				return a
+			}
+			for _, unenumerable := range []string{"docker compose down 'unterminated", "FOO=bar"} {
+				Convey("Autopilot 直接拒绝："+unenumerable, func() {
+					f := registerFakeReviewer(t, reviewPass)
+					mockRepo.EXPECT().Find(gomock.Any(), int64(1)).Return(withDeny(policyent.PermissionModeAutopilot), nil).AnyTimes()
+					r := CheckPermission(aictx.WithPolicyLang(ctx, "zh-CN"), asset_entity.AssetTypeSSH, 1, unenumerable)
+					So(f.calls, ShouldBeEmpty)
+					So(r.Decision, ShouldEqual, aictx.Deny)
+					So(r.DecisionSource, ShouldEqual, aictx.SourceAutopilotDeny)
+					So(r.Message, ShouldContainSubstring, "不会把无法逐条检查的命令交给模型审核")
+					So(r.Review, ShouldBeNil)
+				})
+				Convey("辅助审批仍然问人："+unenumerable, func() {
+					f := registerFakeReviewer(t, reviewPass)
+					mockRepo.EXPECT().Find(gomock.Any(), int64(1)).Return(withDeny(policyent.PermissionModeAssisted), nil).AnyTimes()
+					r := CheckPermission(ctx, asset_entity.AssetTypeSSH, 1, unenumerable)
+					So(f.calls, ShouldBeEmpty)
+					So(r.Decision, ShouldEqual, aictx.NeedConfirm)
+					So(r.Review, ShouldBeNil)
+				})
+			}
 		})
 
 		Convey("资产没有设置时沿用分组链上最近的设置", func() {

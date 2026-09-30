@@ -112,12 +112,13 @@ func TestReviewSendsRedactedCommandWithAssetType(t *testing.T) {
 	ev := &fakeEvaluator{}
 	s, _ := newTestService(ev, enabledConfig())
 
-	s.Review(context.Background(), Input{AssetType: "database", Command: "mysql -uroot -pS3cret -e 'select 1'"})
+	s.Review(context.Background(), Input{AssetType: "ssh", Syntax: SyntaxShell, Command: "AUTH x; mysql -uroot -pS3cret -e 'DROP DATABASE shop'"})
 
 	state, ok := ev.last.State.(reviewState)
 	require.True(t, ok)
-	assert.Equal(t, "database", state.AssetType)
-	assert.Equal(t, "mysql -uroot -p*** -e 'select 1'", state.Command)
+	assert.Equal(t, "ssh", state.AssetType)
+	// 只换密码本身，要执行的命令原样发给模型
+	assert.Equal(t, "AUTH x; mysql -uroot -p*** -e 'DROP DATABASE shop'", state.Command)
 	assert.Equal(t, "jev-1.13.0", ev.last.Model)
 }
 
@@ -130,12 +131,13 @@ func TestReviewFailsWithoutCallingModel(t *testing.T) {
 	}{
 		{"not configured", Config{}, "ls", ReasonNotConfigured},
 		{"too long", enabledConfig(), strings.Repeat("a", 4001), ReasonTooLong},
+		{"unparseable", enabledConfig(), "echo 'unterminated", ReasonUnparseable},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			ev := &fakeEvaluator{}
 			s, _ := newTestService(ev, c.cfg)
-			r := s.Review(context.Background(), Input{AssetType: "ssh", Command: c.cmd})
+			r := s.Review(context.Background(), Input{AssetType: "ssh", Syntax: SyntaxShell, Command: c.cmd})
 			assert.Equal(t, OutcomeFail, r.Outcome)
 			assert.Equal(t, c.reason, r.Reason)
 			assert.Zero(t, ev.calls)
@@ -180,6 +182,19 @@ func TestReviewUsesCacheForSameCommandAndSkipsCachingFailures(t *testing.T) {
 	s2, cache2 := newTestService(failing, enabledConfig())
 	s2.Review(context.Background(), Input{AssetType: "ssh", Command: "ls"})
 	assert.Empty(t, cache2.m)
+}
+
+// 缓存按原始命令区分：替换后长得一样的两条命令（这里只有密码不同）不共用审核结果。
+func TestCacheDoesNotMixCommandsThatOnlyDifferInSecrets(t *testing.T) {
+	ev := &fakeEvaluator{}
+	s, cache := newTestService(ev, enabledConfig())
+
+	s.Review(context.Background(), Input{AssetType: "ssh", Syntax: SyntaxShell, Command: "mysql -pA -e 'select 1'"})
+	r := s.Review(context.Background(), Input{AssetType: "ssh", Syntax: SyntaxShell, Command: "mysql -pB -e 'select 1'"})
+
+	assert.Equal(t, 2, ev.calls)
+	assert.False(t, r.Cached)
+	assert.Len(t, cache.m, 2)
 }
 
 // 缓存的是评分，不是结论：在设置里调了阈值，已经审过的命令马上按新阈值判断。

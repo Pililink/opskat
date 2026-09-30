@@ -21,6 +21,7 @@ import (
 //   - Autopilot：模型审核通过就放行，否则直接拒绝，不等人。
 //
 // 规则已经放行或拒绝的结果原样保留。需要审核的命令一次交给 ReviewBatch。
+// 标为 Unreviewable 的结果只能由人判断，不交给模型：辅助审批照常问人，Autopilot 直接拒绝。
 // 审核服务没有注册时（未经 bootstrap 的进程）不审核。
 func applyReviews(ctx context.Context, reqs []PermissionRequest, results []aictx.CheckResult) {
 	reviewer := command_review_svc.Default()
@@ -38,9 +39,15 @@ func applyReviews(ctx context.Context, reqs []PermissionRequest, results []aictx
 		if mode != policyent.PermissionModeAssisted && mode != policyent.PermissionModeAutopilot {
 			continue
 		}
+		if r.Unreviewable {
+			if mode == policyent.PermissionModeAutopilot {
+				results[i] = aictx.CheckResult{Decision: aictx.Deny, DecisionSource: aictx.SourceAutopilotDeny, Message: unreviewableDenyMessage(ctx, r.Message)}
+			}
+			continue
+		}
 		idx = append(idx, i)
 		modes = append(modes, mode)
-		inputs = append(inputs, command_review_svc.Input{AssetType: reqs[i].AssetType, Command: reqs[i].Command})
+		inputs = append(inputs, command_review_svc.Input{AssetType: reqs[i].AssetType, Command: reqs[i].Command, Syntax: reviewSyntaxFor(reqs[i].AssetType)})
 	}
 	if len(inputs) == 0 {
 		return
@@ -152,6 +159,23 @@ func autopilotDenyMessage(ctx context.Context, info *aictx.ReviewInfo) string {
 		ReviewSummary(ctx, info))
 }
 
+// unreviewableDenyMessage 是 Autopilot 拒绝一条只能由人判断的命令时返回给调用方的原因，
+// reason 是规则层给出的说明（如"策略无法逐条校验其中的子命令，请修正命令语法后重试"）。
+func unreviewableDenyMessage(ctx context.Context, reason string) string {
+	return policy.PolicyFmt(ctx,
+		"%s. Autopilot does not send a command the policy cannot check one sub-command at a time to the model review; the command was not executed.",
+		"%s。Autopilot 不会把无法逐条检查的命令交给模型审核，命令没有执行。",
+		reason)
+}
+
+// reviewSyntaxFor 返回资产类型注册时声明的命令写法；没有注册的类型（扩展类型）按纯文本处理。
+func reviewSyntaxFor(assetType string) command_review_svc.Syntax {
+	if handler, ok := permissionTypeFor(assetType); ok {
+		return handler.reviewSyntax
+	}
+	return command_review_svc.SyntaxText
+}
+
 // ReviewSummary 把审核结果写成一句话，给审批提示和拒绝信息用，例如"模型审核未通过（可能中断服务）"。
 func ReviewSummary(ctx context.Context, info *aictx.ReviewInfo) string {
 	switch info.Outcome {
@@ -192,6 +216,8 @@ func reviewFailReason(ctx context.Context, reason string) string {
 		return policy.PolicyMsg(ctx, "timed out", "超时")
 	case command_review_svc.ReasonTooLong:
 		return policy.PolicyMsg(ctx, "command too long", "命令过长")
+	case command_review_svc.ReasonUnparseable:
+		return policy.PolicyMsg(ctx, "the command cannot be parsed", "命令无法解析")
 	default:
 		return policy.PolicyMsg(ctx, "service unavailable", "服务不可用")
 	}

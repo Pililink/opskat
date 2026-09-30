@@ -3223,6 +3223,7 @@
       "invalid_api_key": "命令审核的 API key 无效",
       "timeout": "超时",
       "too_long": "命令过长",
+      "unparseable": "命令无法解析",
       "unavailable": "服务不可用"
     },
     "settings": {

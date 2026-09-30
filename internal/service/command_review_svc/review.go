@@ -32,7 +32,7 @@ const (
 	DefaultModel     = "jev-1.13.0"
 	DefaultTimeout   = 5 * time.Second
 	DefaultThreshold = 0.2
-	// MaxCommandLen 是能审核的最长命令（替换密码后）；更长的按审核失败处理，不截断后硬判。
+	// MaxCommandLen 是能审核的最长命令（替换敏感信息后）；更长的按审核失败处理，不截断后硬判。
 	MaxCommandLen = 4000
 )
 
@@ -91,15 +91,17 @@ const (
 const (
 	ReasonNotConfigured = "not_configured"
 	ReasonTooLong       = "too_long"
+	ReasonUnparseable   = "unparseable" // 命令解析不了，没法替换敏感信息，不发送
 	ReasonTimeout       = "timeout"
 	ReasonInvalidAPIKey = "invalid_api_key"
 	ReasonUnavailable   = "unavailable"
 )
 
-// Input 是一次审核的输入。
+// Input 是一次审核的输入。Syntax 决定怎样找出命令里的敏感信息（见 RedactSensitive）。
 type Input struct {
 	AssetType string
 	Command   string
+	Syntax    Syntax
 }
 
 // Result 是一次审核的结果。
@@ -264,12 +266,17 @@ func (s *service) ReviewBatch(ctx context.Context, ins []Input) []Result {
 			results[i] = s.recordFailure(Result{Outcome: OutcomeFail, Reason: ReasonNotConfigured})
 			continue
 		}
-		command := RedactSecrets(in.Command)
+		command, err := RedactSensitive(in.Syntax, in.Command)
+		if err != nil {
+			logger.Ctx(ctx).Warn("redact command for review", zap.String("assetType", in.AssetType), zap.Error(err))
+			results[i] = s.recordFailure(Result{Outcome: OutcomeFail, Reason: ReasonUnparseable})
+			continue
+		}
 		if len(command) > cfg.MaxCommandLen {
 			results[i] = s.recordFailure(Result{Outcome: OutcomeFail, Reason: ReasonTooLong})
 			continue
 		}
-		key := cacheKey(cfg.BaseURL, cfg.Model, in.AssetType, command)
+		key := cacheKey(cfg.BaseURL, cfg.Model, in.AssetType, in.Command)
 		log := logger.Ctx(ctx).With(zap.String("assetType", in.AssetType), zap.String("reviewKey", key[:12]))
 		if cached, err := s.cache.Get(ctx, key); err != nil {
 			log.Warn("read command review cache", zap.Error(err))
@@ -385,7 +392,8 @@ func failReason(err error) string {
 	}
 }
 
-// cacheKey 由模型版本、题目版本、资产类型、替换密码后的命令和用户要求算出。
+// cacheKey 由服务地址、模型、题目版本、资产类型和原始命令算出。用原始命令而不是替换后的：
+// 替换后长得一样的两条命令（比如只有密码不同）各自审核，不共用结果。表里只存哈希，不存命令。
 func cacheKey(baseURL, model, assetType, command string) string {
 	h := sha256.Sum256([]byte(strings.Join([]string{baseURL, model, questionsVersion, assetType, command}, "\x00")))
 	return hex.EncodeToString(h[:])

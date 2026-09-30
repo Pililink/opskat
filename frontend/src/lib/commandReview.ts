@@ -28,6 +28,7 @@ const REVIEW_FAIL_REASONS: readonly string[] = [
   "invalid_api_key",
   "timeout",
   "too_long",
+  "unparseable",
   "unavailable",
 ];
 

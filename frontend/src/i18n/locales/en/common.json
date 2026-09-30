@@ -3223,6 +3223,7 @@
       "invalid_api_key": "the command review API key is invalid",
       "timeout": "timed out",
       "too_long": "command too long",
+      "unparseable": "the command cannot be parsed",
       "unavailable": "service unavailable"
     },
     "settings": {

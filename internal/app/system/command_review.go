@@ -50,7 +50,7 @@ func (in CommandReviewSaveInput) validate() error {
 	if u := in.baseURL(); u != "" {
 		parsed, err := url.Parse(u)
 		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-			return fmt.Errorf("Base URL 需要是 http:// 或 https:// 开头的地址")
+			return fmt.Errorf("服务地址（Base URL）需要是 http:// 或 https:// 开头的地址")
 		}
 	}
 	if in.TimeoutMs != 0 && (in.TimeoutMs < 1000 || in.TimeoutMs > 60000) {

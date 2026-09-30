@@ -3228,7 +3228,7 @@
     },
     "settings": {
       "title": "Command review",
-      "desc": "When a server's permission mode is Assisted or Autopilot, commands that no rule decides (the ones that would ask you) are first reviewed by a Jev-format model (TypeSafe System One API), which only stops clearly dangerous operations: destroying data, interrupting services, or downloading and running code. Passwords in commands are replaced before sending.",
+      "desc": "When a server's permission mode is Assisted or Autopilot, commands that no rule decides (the ones that would ask you) are first reviewed by a Jev-format model (TypeSafe System One API), which only stops clearly dangerous operations: destroying data, interrupting services, or downloading and running code. Passwords, tokens, keys and other sensitive values in commands are replaced before sending.",
       "apiKey": "API key",
       "apiKeySet": "Set. Leave empty to keep it",
       "apiKeyNotSet": "Not set",
@@ -3275,8 +3275,8 @@
       "assistedDesc": "Run automatically when model review passes; otherwise ask you",
       "autopilotDesc": "Run automatically when model review passes; otherwise reject and tell the caller why, without waiting",
       "confirmTitle": "Turn on {{mode}}?",
-      "confirmAssisted": "Commands that no rule decides will first be reviewed by the review model and run without asking you when the review passes. If the review does not pass or fails, you are still asked. Commands (with passwords replaced) are sent to the review service in Settings.",
-      "confirmAutopilot": "Commands that no rule decides will first be reviewed by the review model. They run when the review passes and are rejected without waiting for you when judged clearly dangerous or when the review fails. Meant for unattended use. Commands (with passwords replaced) are sent to the review service in Settings.",
+      "confirmAssisted": "Commands that no rule decides will first be reviewed by the review model and run without asking you when the review passes. If the review does not pass or fails, you are still asked. Commands (with sensitive values replaced) are sent to the review service in Settings.",
+      "confirmAutopilot": "Commands that no rule decides will first be reviewed by the review model. They run when the review passes and are rejected without waiting for you when judged clearly dangerous or when the review fails. Meant for unattended use. Commands (with sensitive values replaced) are sent to the review service in Settings.",
       "confirm": "Turn on",
       "noApiKey": "No command review API key is configured: every command that needs review will fail review (Assisted asks you, Autopilot rejects). Configure it in Settings › AI.",
       "saved": "Permission mode saved"

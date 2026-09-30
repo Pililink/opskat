@@ -11,4 +11,5 @@ type ReviewInfo struct {
 	Threshold  float64            `json:"threshold,omitempty"` // 判断用的阈值
 	DurationMs int64              `json:"duration_ms,omitempty"`
 	Cached     bool               `json:"cached,omitempty"`
+	Attempts   int                `json:"attempts,omitempty"` // 调用模型的次数，超时或连接出错时会重试
 }

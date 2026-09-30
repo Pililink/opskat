@@ -186,6 +186,7 @@ export function CommandReviewSection() {
             </div>
             <div className="space-y-1 text-xs text-muted-foreground">
               <p>{t("commandReview.settings.modelHint")}</p>
+              <p>{t("commandReview.settings.timeoutHint")}</p>
               <p>{t("commandReview.settings.thresholdHint")}</p>
             </div>
 

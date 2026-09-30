@@ -19,6 +19,7 @@ export interface ReviewInfo {
   threshold?: number; // 判断用的阈值；和 scores 一起出现
   duration_ms?: number;
   cached?: boolean;
+  attempts?: number; // 调用模型的次数，超时或连接出错时会重试
 }
 
 /** 审核题目，顺序即界面上的显示顺序。与后端 command_review_svc 的题目 ID 一致。 */

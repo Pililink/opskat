@@ -108,7 +108,7 @@ describe("AuditLogPage result status", () => {
           MatchedPattern: "",
           Review:
             '{"mode":"autopilot","outcome":"reject","failed":["disruptive"],"model":"jev-1.13.0",' +
-            '"scores":{"destructive":0.02,"disruptive":0.91,"remote_code":0.01},"threshold":0.2}',
+            '"scores":{"destructive":0.02,"disruptive":0.91,"remote_code":0.01},"threshold":0.2,"attempts":2}',
           Createtime: 1,
         },
       ],
@@ -134,6 +134,9 @@ describe("AuditLogPage result status", () => {
     const destructive = within(scores).getByText("commandReview.scoreName.destructive").closest("li") as HTMLElement;
     expect(destructive).toHaveTextContent("0.02");
     expect(destructive).toHaveAttribute("data-failed", "false");
+
+    // 第一次请求超时、自动重试过的，详情里写明请求了几次
+    expect(screen.getByTestId("review-attempts")).toHaveTextContent("commandReview.retried");
   });
 
   // 辅助审批审核没通过、转人工的记录，决策来源是 user_allow，列表里要靠审核标志看出它被模型审过。

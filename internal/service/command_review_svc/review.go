@@ -48,6 +48,10 @@ const cacheTTL = 7 * 24 * time.Hour
 // maxParallelReviews 是批量审核时同时调用模型的上限。
 const maxParallelReviews = 4
 
+// maxAttempts 是一次审核最多调用模型的次数：超时或连接出错时再试一次。opsctl 每次都是新进程，
+// 第一次请求要重新解析域名、建立连接，偶尔会超时；第二次通常很快。
+const maxAttempts = 2
+
 // riskQuestions 只问明确的危险：破坏数据、中断服务、下载并执行代码。只读的查看类命令
 // （状态、日志、配置、进程、容器、定时任务、网络连接）在每道题里都明确写成"否"，
 // 这类命令不应被拦下来。
@@ -114,6 +118,7 @@ type Result struct {
 	Threshold float64            `json:"threshold,omitempty"` // 判断用的阈值
 	Duration  time.Duration      `json:"duration,omitempty"`
 	Cached    bool               `json:"cached,omitempty"`
+	Attempts  int                `json:"attempts,omitempty"` // 调用模型的次数，超时或连接出错时会重试
 }
 
 // Config 是审核设置。APIKey 为空表示没有配置。
@@ -121,8 +126,8 @@ type Config struct {
 	APIKey        string
 	BaseURL       string // 兼容 TypeSafe System One API 的服务地址
 	Model         string
-	Threshold     float64 // 任意一题"是"的概率达到它就不通过
-	Timeout       time.Duration
+	Threshold     float64       // 任意一题"是"的概率达到它就不通过
+	Timeout       time.Duration // 每次调用模型的超时；超时后会重试（见 maxAttempts）
 	MaxCommandLen int
 }
 
@@ -292,9 +297,10 @@ func (s *service) ReviewBatch(ctx context.Context, ins []Input) []Result {
 	}
 
 	type evaluation struct {
-		resp    *typesafe.Response
-		err     error
-		elapsed time.Duration
+		resp     *typesafe.Response
+		err      error
+		elapsed  time.Duration
+		attempts int
 	}
 	evals := make([]evaluation, len(pending))
 	sem := make(chan struct{}, maxParallelReviews)
@@ -307,8 +313,8 @@ func (s *service) ReviewBatch(ctx context.Context, ins []Input) []Result {
 			defer func() { <-sem }()
 			p.log.Info("command review start", zap.String("model", cfg.Model))
 			start := time.Now()
-			resp, err := s.evaluate(ctx, cfg, p)
-			evals[j] = evaluation{resp: resp, err: err, elapsed: time.Since(start)}
+			resp, attempts, err := s.evaluate(ctx, cfg, p)
+			evals[j] = evaluation{resp: resp, err: err, elapsed: time.Since(start), attempts: attempts}
 		}(j, p)
 	}
 	wg.Wait()
@@ -317,8 +323,8 @@ func (s *service) ReviewBatch(ctx context.Context, ins []Input) []Result {
 		e := evals[j]
 		if e.err != nil {
 			reason := failReason(e.err)
-			p.log.Warn("command review failed", zap.String("reason", reason), zap.Duration("duration", e.elapsed), zap.Error(e.err))
-			results[p.idx] = s.recordFailure(Result{Outcome: OutcomeFail, Reason: reason, Model: cfg.Model, Duration: e.elapsed})
+			p.log.Warn("command review failed", zap.String("reason", reason), zap.Int("attempts", e.attempts), zap.Duration("duration", e.elapsed), zap.Error(e.err))
+			results[p.idx] = s.recordFailure(Result{Outcome: OutcomeFail, Reason: reason, Model: cfg.Model, Duration: e.elapsed, Attempts: e.attempts})
 			continue
 		}
 		s.recordSuccess()
@@ -328,7 +334,8 @@ func (s *service) ReviewBatch(ctx context.Context, ins []Input) []Result {
 		}
 		r := decide(e.resp.Model, scores, cfg.Threshold)
 		r.Duration = e.elapsed
-		p.log.Info("command review done", zap.String("outcome", string(r.Outcome)), zap.Strings("failed", r.Failed), zap.String("model", r.Model), zap.Duration("duration", e.elapsed))
+		r.Attempts = e.attempts
+		p.log.Info("command review done", zap.String("outcome", string(r.Outcome)), zap.Strings("failed", r.Failed), zap.String("model", r.Model), zap.Int("attempts", e.attempts), zap.Duration("duration", e.elapsed))
 		if err := s.cache.Put(ctx, p.key, r, cacheTTL); err != nil {
 			p.log.Warn("write command review cache", zap.Error(err))
 		}
@@ -337,15 +344,32 @@ func (s *service) ReviewBatch(ctx context.Context, ins []Input) []Result {
 	return results
 }
 
-// evaluate 为一条命令调用模型，超时由设置控制。
-func (s *service) evaluate(ctx context.Context, cfg Config, p pendingReview) (*typesafe.Response, error) {
-	reqCtx, cancel := context.WithTimeout(ctx, cfg.Timeout)
-	defer cancel()
-	return s.evaluator(cfg.APIKey, cfg.BaseURL).Evaluate(reqCtx, typesafe.Request{
+// evaluate 为一条命令调用模型，返回结果和调用次数。每次调用的超时由设置控制，
+// 失败时按 retryable 决定是否再试，最多 maxAttempts 次。
+func (s *service) evaluate(ctx context.Context, cfg Config, p pendingReview) (*typesafe.Response, int, error) {
+	ev := s.evaluator(cfg.APIKey, cfg.BaseURL)
+	req := typesafe.Request{
 		Model:     cfg.Model,
 		State:     reviewState{AssetType: p.in.AssetType, Command: p.command},
 		Questions: riskQuestions,
-	})
+	}
+	for attempt := 1; ; attempt++ {
+		reqCtx, cancel := context.WithTimeout(ctx, cfg.Timeout)
+		resp, err := ev.Evaluate(reqCtx, req)
+		cancel()
+		if err == nil || attempt == maxAttempts || !retryable(ctx, err) {
+			return resp, attempt, err
+		}
+		p.log.Warn("command review attempt failed, retrying", zap.Int("attempt", attempt), zap.Error(err))
+	}
+}
+
+// retryable 判断一次调用失败后值不值得再试：这次调用超时或网络出错时重试。服务端明确返回的
+// 错误（API key 无效、请求有误等）重试也不会成功，429 / 529 已经在客户端里退避重试过；
+// 调用方已经取消时也不再试。
+func retryable(ctx context.Context, err error) bool {
+	var apiErr *typesafe.APIError
+	return ctx.Err() == nil && !errors.As(err, &apiErr)
 }
 
 func (s *service) TestModel(ctx context.Context, cfg Config) (string, error) {

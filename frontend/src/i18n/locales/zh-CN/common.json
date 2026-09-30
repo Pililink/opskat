@@ -3240,6 +3240,7 @@
       "modelHint": "填写服务端提供的模型名，点「测试模型」确认可用",
       "timeout": "超时（毫秒）",
       "threshold": "阈值",
+      "timeoutHint": "超时指单次请求；超时或连接出错时会自动重试一次",
       "thresholdHint": "任意一项风险的概率达到阈值就不通过，数值越小越严格",
       "timeoutRange": "超时需在 {{min}}~{{max}} 毫秒之间",
       "thresholdRange": "阈值需大于 0、小于 1",
@@ -3288,6 +3289,7 @@
     },
     "scores": "评分",
     "scoreThreshold": "阈值 {{threshold}}",
+    "retried": "自动重试过：共请求 {{attempts}} 次",
     "scoreName": {
       "destructive": "破坏数据",
       "disruptive": "中断服务",

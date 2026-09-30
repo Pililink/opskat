@@ -389,3 +389,58 @@ func TestReviewBatchRunsModelCallsInParallelAndKeepsOrder(t *testing.T) {
 	assert.True(t, again[0].Cached)
 	assert.True(t, again[1].Cached)
 }
+
+// flakyEvaluator 前 fails 次调用失败（delay 大于超时时是超时，否则返回 err），之后正常作答。
+type flakyEvaluator struct {
+	fails int
+	delay time.Duration
+	err   error
+	calls int
+}
+
+func (f *flakyEvaluator) Evaluate(ctx context.Context, req typesafe.Request) (*typesafe.Response, error) {
+	f.calls++
+	if f.calls <= f.fails {
+		if f.err != nil {
+			return nil, f.err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(f.delay):
+		}
+	}
+	return (&fakeEvaluator{}).Evaluate(ctx, req)
+}
+
+// opsctl 每次都是新进程，第一次请求要重新建立连接，偶尔会超时。超时或连接出错时再试一次，
+// 第二次通常很快；服务端明确返回的错误（如 API key 无效）重试也没用，不重试。
+func TestReviewRetriesOnceOnTimeoutOrNetworkError(t *testing.T) {
+	cases := []struct {
+		name    string
+		ev      *flakyEvaluator
+		outcome Outcome
+		reason  string
+		calls   int
+	}{
+		{"timeout then answered", &flakyEvaluator{fails: 1, delay: time.Second}, OutcomePass, "", 2},
+		{"network error then answered", &flakyEvaluator{fails: 1, err: errors.New("read tcp: connection reset by peer")}, OutcomePass, "", 2},
+		{"times out twice", &flakyEvaluator{fails: 2, delay: time.Second}, OutcomeFail, ReasonTimeout, 2},
+		{"invalid api key is not retried", &flakyEvaluator{fails: 2, err: &typesafe.APIError{StatusCode: http.StatusUnauthorized}}, OutcomeFail, ReasonInvalidAPIKey, 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg := enabledConfig()
+			cfg.Timeout = 20 * time.Millisecond
+			s := New(func() Config { return cfg }, &memCache{m: map[string]Result{}}, func(string, string) Evaluator { return c.ev })
+
+			r := s.Review(context.Background(), Input{AssetType: "ssh", Command: "ls"})
+
+			assert.Equal(t, c.outcome, r.Outcome)
+			assert.Equal(t, c.reason, r.Reason)
+			assert.Equal(t, c.calls, c.ev.calls)
+			// 审计里记下这次审核请求了几次，看得出重试有没有起作用
+			assert.Equal(t, c.calls, r.Attempts)
+		})
+	}
+}

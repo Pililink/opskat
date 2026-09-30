@@ -41,12 +41,18 @@ const TIME_PRESETS = [
 
 // 审计记录里的模型审核结果（后端存的 JSON）；解析不了就原样显示，不隐藏。
 function AuditReview({ raw }: { raw: string }) {
+  const { t } = useTranslation();
   const review = parseReviewInfo(raw);
   if (!review) return <code className="font-mono text-xs break-all">{raw}</code>;
   return (
     <div className="space-y-1.5">
       <ReviewNotice review={review} withMode className="text-sm" />
       <ReviewScores review={review} />
+      {review.attempts !== undefined && review.attempts > 1 && (
+        <p data-testid="review-attempts" className="text-xs text-muted-foreground">
+          {t("commandReview.retried", { attempts: review.attempts })}
+        </p>
+      )}
     </div>
   );
 }

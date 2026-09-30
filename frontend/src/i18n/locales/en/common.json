@@ -3240,6 +3240,7 @@
       "modelHint": "Enter a model name the service provides, then use Test model to confirm it works",
       "timeout": "Timeout (ms)",
       "threshold": "Threshold",
+      "timeoutHint": "The timeout applies to each request; a request that times out or fails to connect is retried once",
       "thresholdHint": "A command fails review when any risk's probability reaches the threshold; lower is stricter",
       "timeoutRange": "Timeout must be between {{min}} and {{max}} ms",
       "thresholdRange": "Threshold must be greater than 0 and less than 1",
@@ -3288,6 +3289,7 @@
     },
     "scores": "Scores",
     "scoreThreshold": "threshold {{threshold}}",
+    "retried": "Retried automatically: {{attempts}} requests in total",
     "scoreName": {
       "destructive": "Destroys data",
       "disruptive": "Interrupts services",

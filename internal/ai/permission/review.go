@@ -70,6 +70,7 @@ func applyReview(ctx context.Context, req PermissionRequest, mode string, result
 		Threshold:  r.Threshold,
 		DurationMs: r.Duration.Milliseconds(),
 		Cached:     r.Cached,
+		Attempts:   r.Attempts,
 	}
 	logger.Ctx(ctx).Info("permission review applied",
 		zap.Int64("assetID", req.AssetID), zap.String("assetType", req.AssetType),

@@ -111,6 +111,14 @@ func TestApplyReview(t *testing.T) {
 				So(f.calls, ShouldResemble, []command_review_svc.Input{{AssetType: asset_entity.AssetTypeSSH, Command: cmd, Syntax: command_review_svc.SyntaxShell}})
 			})
 
+			Convey("还会从管道读入内容：模型看不到那部分，不送审，照常问人", func() {
+				f := registerFakeReviewer(t, reviewPass)
+				r := CheckPermissions(ctx, []PermissionRequest{{AssetType: asset_entity.AssetTypeSSH, AssetID: 1, Command: cmd, PipedInput: true}})[0]
+				So(r.Decision, ShouldEqual, aictx.NeedConfirm)
+				So(r.Review, ShouldBeNil)
+				So(f.calls, ShouldBeEmpty)
+			})
+
 			Convey("审核未通过：仍然问人，保留规则提示并带上审核结果", func() {
 				registerFakeReviewer(t, reviewReject)
 				r := CheckPermission(ctx, asset_entity.AssetTypeSSH, 1, cmd)
@@ -138,6 +146,24 @@ func TestApplyReview(t *testing.T) {
 				r := CheckPermission(ctx, asset_entity.AssetTypeSSH, 1, cmd)
 				So(r.Decision, ShouldEqual, aictx.Allow)
 				So(r.DecisionSource, ShouldEqual, aictx.SourceAutopilotAllow)
+			})
+
+			Convey("还会从管道读入内容：不送审，直接拒绝，告诉调用方怎么改", func() {
+				f := registerFakeReviewer(t, reviewPass)
+				r := CheckPermissions(aictx.WithPolicyLang(ctx, "zh-CN"), []PermissionRequest{{AssetType: asset_entity.AssetTypeSSH, AssetID: 1, Command: cmd, PipedInput: true}})[0]
+				So(r.Decision, ShouldEqual, aictx.Deny)
+				So(r.DecisionSource, ShouldEqual, aictx.SourceAutopilotDeny)
+				So(r.Message, ShouldContainSubstring, "管道")
+				So(r.Message, ShouldContainSubstring, "/dev/null")
+				So(f.calls, ShouldBeEmpty)
+			})
+
+			Convey("还会从管道读入内容，但规则已经放行：和原来一样放行", func() {
+				f := registerFakeReviewer(t, reviewReject)
+				r := CheckPermissions(ctx, []PermissionRequest{{AssetType: asset_entity.AssetTypeSSH, AssetID: 1, Command: "ls -la", PipedInput: true}})[0]
+				So(r.Decision, ShouldEqual, aictx.Allow)
+				So(r.DecisionSource, ShouldEqual, aictx.SourcePolicyAllow)
+				So(f.calls, ShouldBeEmpty)
 			})
 
 			Convey("审核未通过：直接拒绝，告诉调用方不要原样重试", func() {

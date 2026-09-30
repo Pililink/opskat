@@ -55,6 +55,7 @@
 
 - **权限模式怎么生效**：资产自己的 `permission_mode` 优先；为空时沿分组链向上找第一个设置了的；都没有就是默认。资产读取失败时按默认处理。
 - **拆不开的 shell 命令不交给模型**：`DecideUnenumerableShell` 判为"需要人确认"的结果标 `Unreviewable`。禁止规则没法逐条检查这类命令，模型放行它就等于绕过了禁止规则。辅助审批照常问人；Autopilot 直接拒绝（`autopilot_deny`），原因里带上规则层"请修正命令语法后重试"的说明。
+- **有管道输入的命令不交给模型**：`opsctl exec` 会把 stdin 转发给 ssh 命令（`cat x.sh | opsctl exec host -- bash`），模型只看得到命令本身，看不到管道里的内容，放行它就等于放行了没审过的内容。opsctl 在审批前判断 stdin（`cmd/opsctl/command/exec_stdin.go` 的 `inspectStdin`）：终端和空设备没有；重定向的文件按大小；管道先读第一块，读到内容算有、立刻 EOF 算没有，等 200ms 还没结论的按有处理，预读的内容拼回去照常转发。有管道输入时 `PermissionRequest.PipedInput` 为真，辅助审批照常问人，Autopilot 直接拒绝，告诉调用方没有要传的内容就 `< /dev/null`、上传文件用 `opsctl cp`。规则放行和人工确认的命令不受影响。
 - **审核结果怎么传到人面前**：`CheckResult.Review` →
   - AI 对话：`CheckForAsset` 把它交给确认流程，放进 `ApprovalItem.Review`；
   - opsctl：放进 `approval.ApprovalRequest.Review` / `BatchItem.Review`，终端提示和桌面端弹窗都显示；

@@ -21,7 +21,8 @@ import (
 //   - Autopilot：模型审核通过就放行，否则直接拒绝，不等人。
 //
 // 规则已经放行或拒绝的结果原样保留。需要审核的命令一次交给 ReviewBatch。
-// 标为 Unreviewable 的结果只能由人判断，不交给模型：辅助审批照常问人，Autopilot 直接拒绝。
+// 标为 Unreviewable 的结果和还会从管道读入内容（PipedInput）的命令只能由人判断，不交给
+// 模型：辅助审批照常问人，Autopilot 直接拒绝。
 // 审核服务没有注册时（未经 bootstrap 的进程）不审核。
 func applyReviews(ctx context.Context, reqs []PermissionRequest, results []aictx.CheckResult) {
 	reviewer := command_review_svc.Default()
@@ -42,6 +43,12 @@ func applyReviews(ctx context.Context, reqs []PermissionRequest, results []aictx
 		if r.Unreviewable {
 			if mode == policyent.PermissionModeAutopilot {
 				results[i] = aictx.CheckResult{Decision: aictx.Deny, DecisionSource: aictx.SourceAutopilotDeny, Message: unreviewableDenyMessage(ctx, r.Message)}
+			}
+			continue
+		}
+		if reqs[i].PipedInput {
+			if mode == policyent.PermissionModeAutopilot {
+				results[i] = aictx.CheckResult{Decision: aictx.Deny, DecisionSource: aictx.SourceAutopilotDeny, Message: pipedInputDenyMessage(ctx)}
 			}
 			continue
 		}
@@ -189,6 +196,13 @@ func unreviewableDenyMessage(ctx context.Context, reason string) string {
 		"%s. Autopilot does not send a command the policy cannot check one sub-command at a time to the model review; the command was not executed.",
 		"%s。Autopilot 不会把无法逐条检查的命令交给模型审核，命令没有执行。",
 		reason)
+}
+
+// pipedInputDenyMessage 是 Autopilot 拒绝一条还会从管道读入内容的命令时返回给调用方的原因。
+func pipedInputDenyMessage(ctx context.Context) string {
+	return policy.PolicyMsg(ctx,
+		"The command also reads piped input, which the model review cannot see, so Autopilot does not run it; the command was not executed. If nothing needs to be piped in, redirect stdin from /dev/null (< /dev/null); to upload a file, use opsctl cp; otherwise leave the command to the user.",
+		"命令还会从管道读入内容，模型审核看不到这部分，Autopilot 不会执行，命令没有执行。没有要传的内容就把 stdin 重定向到 /dev/null（< /dev/null）；要上传文件用 opsctl cp；否则把命令留给用户处理。")
 }
 
 // reviewTypeFor 返回交给模型审核的资产类型和命令写法。调用方可能传别名（opsctl exec 传的是

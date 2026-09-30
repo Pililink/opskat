@@ -42,6 +42,9 @@ type PermissionRequest struct {
 	AssetType string
 	AssetID   int64
 	Command   string
+	// PipedInput 表示命令执行时还会从管道读入内容（opsctl exec 把 stdin 转发给 ssh 命令）。
+	// 模型审核只看得到命令本身，看不到这部分，不能据审核结果放行，见 applyReviews。
+	PipedInput bool
 }
 
 // CheckPermissions 批量检查，结果与输入一一对应。规则判断逐条进行；需要模型审核的命令

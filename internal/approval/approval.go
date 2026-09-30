@@ -50,6 +50,9 @@ type ApprovalRequest struct {
 	MFA         *MFAChallenge   `json:"mfa,omitempty"`         // type="mfa": SSH keyboard-interactive challenge
 	// Review 是模型审核结果（辅助审批下审核未通过或失败时才有），审批提示据此说明为什么要确认。
 	Review *aictx.ReviewInfo `json:"review,omitempty"`
+	// PipedInput 表示命令执行时还会从管道读入内容（opsctl exec 转发 stdin），只在 opsctl
+	// 本地做权限检查时用（见 permission.PermissionRequest.PipedInput），不发给桌面端。
+	PipedInput bool `json:"-"`
 }
 
 // MFACanceledReason 是桌面端在用户取消 / 关闭 MFA 对话框时回给 opsctl 的

@@ -148,17 +148,38 @@ func permissionModeOf(ctx context.Context, asset *asset_entity.Asset) string {
 }
 
 // autopilotDenyMessage 是 Autopilot 拒绝时返回给调用方的原因，调用方的 agent 据此决定下一步。
+// 审核失败时只有临时性的原因（超时、服务不可用）才让它稍后重试；命令过长、无法解析和配置问题
+// 原样重试结果一样，要告诉它该怎么改，或者留给用户。
 func autopilotDenyMessage(ctx context.Context, info *aictx.ReviewInfo) string {
+	summary := ReviewSummary(ctx, info)
 	if info.Outcome == string(command_review_svc.OutcomeReject) {
 		return policy.PolicyFmt(ctx,
 			"%s; the command was not executed. Do not retry it as-is: take a safer approach, or leave it for the user to run manually.",
 			"%s，命令没有执行。不要原样重试，换一个更安全的做法，或者留给用户手动执行。",
-			ReviewSummary(ctx, info))
+			summary)
 	}
-	return policy.PolicyFmt(ctx,
-		"%s; the command was not executed. You may retry later.",
-		"%s，命令没有执行，可以稍后重试。",
-		ReviewSummary(ctx, info))
+	switch info.Reason {
+	case command_review_svc.ReasonTooLong:
+		return policy.PolicyFmt(ctx,
+			"%s; the command was not executed. Retrying it as-is gives the same result: shorten it or split it into several commands.",
+			"%s，命令没有执行。原样重试结果一样，把命令缩短或拆成几条再执行。",
+			summary)
+	case command_review_svc.ReasonUnparseable:
+		return policy.PolicyFmt(ctx,
+			"%s; the command was not executed. Retrying it as-is gives the same result: fix the command syntax first.",
+			"%s，命令没有执行。原样重试结果一样，先修正命令语法。",
+			summary)
+	case command_review_svc.ReasonNotConfigured, command_review_svc.ReasonInvalidAPIKey:
+		return policy.PolicyFmt(ctx,
+			"%s; the command was not executed. Retrying will not help until the user fixes the command review settings; leave the command to the user.",
+			"%s，命令没有执行。用户修正命令审核的设置之前重试也不会成功，把命令留给用户处理。",
+			summary)
+	default:
+		return policy.PolicyFmt(ctx,
+			"%s; the command was not executed. You may retry later.",
+			"%s，命令没有执行，可以稍后重试。",
+			summary)
+	}
 }
 
 // unreviewableDenyMessage 是 Autopilot 拒绝一条只能由人判断的命令时返回给调用方的原因，

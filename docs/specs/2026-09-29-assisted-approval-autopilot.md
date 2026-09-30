@@ -59,7 +59,7 @@
   - AI 对话：`CheckForAsset` 把它交给确认流程，放进 `ApprovalItem.Review`；
   - opsctl：放进 `approval.ApprovalRequest.Review` / `BatchItem.Review`，终端提示和桌面端弹窗都显示；
   - 人确认后的结果里保留审核结果，审计写进 `audit_logs.review`。
-- **Autopilot 的拒绝**：返回"拒绝"和原因，各入口按现有方式输出（opsctl 为 `command denied by policy: <原因>`）。原因区分未通过（"不要原样重试"）和失败（"可以稍后重试"）。
+- **Autopilot 的拒绝**：返回"拒绝"和原因，各入口按现有方式输出（opsctl 为 `command denied by policy: <原因>`）。原因区分未通过（"不要原样重试"）和失败；失败再按原因给出下一步：超时、服务不可用"可以稍后重试"，命令过长"缩短或拆成几条"，命令无法解析"先修正命令语法"，未配置 / API key 无效"留给用户处理"——后三种原样重试结果一样，不能让调用方的 agent 反复重试。
 - **Autopilot 资产不接受授权申请**（AI 的 `request_permission`）：无人值守时没人来批；批准的又是通配模式，会让之后匹配的命令跳过逐条审核。`SubmitGrantMulti` 把这部分分出来，不弹审批，告诉调用方直接执行、由模型逐条审核，被拒的命令交给用户（决策来源 `autopilot_deny`）；同一次申请里其他模式的资产照常交给人。辅助审批有人在场，照常申请。
 - **审核服务没有注册时**（未经 `bootstrap.Init` 的进程，如单元测试）不审核。
 

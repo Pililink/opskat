@@ -151,13 +151,33 @@ func TestApplyReview(t *testing.T) {
 				So(r.Review.Mode, ShouldEqual, policyent.PermissionModeAutopilot)
 			})
 
-			Convey("审核失败：直接拒绝，并写明原因", func() {
-				registerFakeReviewer(t, reviewFail)
-				r := CheckPermission(aictx.WithPolicyLang(ctx, "zh-CN"), asset_entity.AssetTypeSSH, 1, cmd)
-				So(r.Decision, ShouldEqual, aictx.Deny)
-				So(r.DecisionSource, ShouldEqual, aictx.SourceAutopilotDeny)
-				So(r.Message, ShouldContainSubstring, "模型审核失败")
-				So(r.Message, ShouldContainSubstring, "超时")
+			Convey("审核失败：直接拒绝，写明原因；只有临时性的失败才让调用方稍后重试", func() {
+				cases := []struct {
+					reason, want string
+					retryLater   bool
+				}{
+					{command_review_svc.ReasonTimeout, "超时", true},
+					{command_review_svc.ReasonUnavailable, "服务不可用", true},
+					// 原样重试结果一样，告诉调用方该怎么改
+					{command_review_svc.ReasonTooLong, "缩短或拆成几条", false},
+					{command_review_svc.ReasonUnparseable, "修正命令语法", false},
+					// 配置问题只有用户能修
+					{command_review_svc.ReasonNotConfigured, "留给用户", false},
+					{command_review_svc.ReasonInvalidAPIKey, "留给用户", false},
+				}
+				for _, c := range cases {
+					registerFakeReviewer(t, command_review_svc.Result{Outcome: command_review_svc.OutcomeFail, Reason: c.reason})
+					r := CheckPermission(aictx.WithPolicyLang(ctx, "zh-CN"), asset_entity.AssetTypeSSH, 1, cmd)
+					So(r.Decision, ShouldEqual, aictx.Deny)
+					So(r.DecisionSource, ShouldEqual, aictx.SourceAutopilotDeny)
+					So(r.Message, ShouldContainSubstring, "模型审核失败")
+					So(r.Message, ShouldContainSubstring, c.want)
+					if c.retryLater {
+						So(r.Message, ShouldContainSubstring, "稍后重试")
+					} else {
+						So(r.Message, ShouldNotContainSubstring, "稍后重试")
+					}
+				}
 			})
 		})
 

@@ -57,11 +57,15 @@ type valueRule struct {
 // 名字里带这些词的变量、字段、参数，它的值当作敏感值。
 const (
 	sensitiveName = `(?:password|passwd|passphrase|pwd|token|secret|credentials?|(?:api|access|account|private|auth|secret)[-_]?key)`
-	sensitiveFlag = `(?:password|passwd|pass|pwd|passphrase|token|secret|credentials?|(?:api|access|private|auth|secret)[-_]?key)`
-	// argValue 是跟在参数后面的一个值：引号括起来的，或到空白 / shell 分隔符为止、不以 - 开头的裸值。
-	argValue = `('[^']*'|"[^"]*"|[^\s\-;&|'"][^\s;&|'"]*)`
+	sensitiveFlag = `(?:password|passwd|pass|pwd|passphrase|token|secret|credentials?|(?:api|access|private|auth|secret)[-_]?key|keys?)`
+	// keyName 是名字里有完整一段叫 key 的变量、参数（ENCRYPTION_KEY、--encryption-key）：
+	// 按整段认，monkey、keyboard、KEYCLOAK_URL 不算。
+	keyName = `(?:[a-z0-9]+[-_])*keys?(?:[-_][a-z0-9]+)*`
+	// argValue 是跟在参数后面的一个值：引号括起来的，或到空白 / shell 分隔符 / 重定向为止、
+	// 不以 - 开头的裸值。重定向是命令结构，不算进值里。
+	argValue = `('[^']*'|"[^"]*"|[^\s\-;&|'"<>][^\s;&|'"<>]*)`
 	// attachedValue 是紧贴在 -p 后面的值。
-	attachedValue = `('[^']*'|"[^"]*"|[^\s;&|'"]+)`
+	attachedValue = `('[^']*'|"[^"]*"|[^\s;&|'"<>]+)`
 )
 
 var textRules = append([]valueRule{
@@ -70,8 +74,8 @@ var textRules = append([]valueRule{
 	// 网址里的 用户名:密码@。
 	{re: regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.\-]*://[^\s:/@'"]*:([^\s@/'"]+)@`), group: 1},
 	// 请求头。
-	{re: regexp.MustCompile(`(?i)\bauthorization:\s*(?:(?:bearer|basic|token|digest)\s+)?([^\s'"]+)`), group: 1, skip: isAuthScheme},
-	{re: regexp.MustCompile(`(?i)\b(?:x-api-key|x-auth-token|api-key|private-token):\s*([^\s'"]+)`), group: 1},
+	{re: regexp.MustCompile(`(?i)\bauthorization:\s*(?:(?:bearer|basic|token|digest)\s+)?([^\s'"<>]+)`), group: 1, skip: isAuthScheme},
+	{re: regexp.MustCompile(`(?i)\b(?:x-api-key|x-auth-token|api-key|private-token):\s*([^\s'"<>]+)`), group: 1},
 	// JSON / JS 对象 / YAML 里的字段："password": "…"、pwd: '…'。
 	{re: regexp.MustCompile(`(?i)\b[a-z0-9_-]*` + sensitiveName + `[a-z0-9_-]*["']?\s*:\s*"([^"]*)"`), group: 1},
 	{re: regexp.MustCompile(`(?i)\b[a-z0-9_-]*` + sensitiveName + `[a-z0-9_-]*["']?\s*:\s*'([^']*)'`), group: 1},
@@ -84,10 +88,10 @@ var textRules = append([]valueRule{
 	{re: regexp.MustCompile(`(?i)\b(?:mysql|mysqldump|mysqladmin|mariadb|mariadb-dump)\b[^;&|\n]*?\s-p` + attachedValue), group: 1},
 	{re: regexp.MustCompile(`\bsshpass\s+-p\s*` + attachedValue), group: 1},
 	{re: regexp.MustCompile(`\bredis-cli\b[^;&|\n]*?\s-a\s+` + argValue), group: 1},
-	{re: regexp.MustCompile(`\bcurl\b[^;&|\n]*?\s(?:-u|--user)\s+[^\s:'"/]+:([^\s'"@/]+)`), group: 1},
+	{re: regexp.MustCompile(`\bcurl\b[^;&|\n]*?\s(?:-u|--user)\s+[^\s:'"/]+:([^\s'"@/<>]+)`), group: 1},
 	{re: regexp.MustCompile(`(?i)(?:^|\s)(--?(?:[a-z0-9]+[-_])*` + sensitiveFlag + `)\s+` + argValue), group: 2, skip: isNegatedFlag},
-	// NAME=值：变量名、参数名里带 password / token / secret 等，也覆盖 --password=值 和网址参数。
-	{re: regexp.MustCompile(`(?i)\b[a-z0-9_-]*` + sensitiveName + `[a-z0-9_-]*=('[^']*'|"[^"]*"|[^\s;&|'"]+)`), group: 1},
+	// NAME=值：变量名、参数名里带 password / token / secret / key 等，也覆盖 --password=值 和网址参数。
+	{re: regexp.MustCompile(`(?i)\b(?:[a-z0-9_-]*` + sensitiveName + `[a-z0-9_-]*|` + keyName + `)=('[^']*'|"[^"]*"|[^\s;&|'"<>]+)`), group: 1},
 }, knownFormats()...)
 
 // knownFormats 是常见服务的密钥格式，取自 betterleaks（MIT，github.com/betterleaks/betterleaks）
@@ -192,7 +196,7 @@ var mysqlPrograms = map[string]bool{"mysql": true, "mysqldump": true, "mysqladmi
 
 var (
 	sensitiveFlagRe = regexp.MustCompile(`(?i)^--?(?:[a-z0-9]+[-_])*` + sensitiveFlag + `$`)
-	sensitiveNameRe = regexp.MustCompile(`(?i)^[a-z0-9_]*` + sensitiveName + `[a-z0-9_]*$`)
+	sensitiveNameRe = regexp.MustCompile(`(?i)^(?:[a-z0-9_]*` + sensitiveName + `[a-z0-9_]*|` + keyName + `)$`)
 )
 
 // sensitiveSettings 是作为单独参数出现、后面紧跟着值的设置名（aws configure set、redis CONFIG SET）。

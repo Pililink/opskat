@@ -78,7 +78,7 @@ export function PermissionModeCard({ value, subject, parentGroupId, saving, onCh
         <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           {t("commandReview.mode.title")}
         </h3>
-        {saving && <span className="ml-auto text-[10px] text-muted-foreground">{t("settings.saved")}...</span>}
+        {saving && <span className="ml-auto text-[10px] text-muted-foreground">{t("action.saving")}</span>}
       </div>
       <p className="mb-2 text-xs text-muted-foreground">{t("commandReview.mode.desc")}</p>
       <Segmented

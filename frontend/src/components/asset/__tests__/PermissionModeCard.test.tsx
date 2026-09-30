@@ -40,6 +40,12 @@ describe("PermissionModeCard", () => {
     useTabStore.setState({ tabs: [], activeTabId: null });
   });
 
+  it("保存过程中显示“保存中”，不是“已保存”", async () => {
+    await renderCard({ saving: true });
+    expect(screen.getByText("action.saving")).toBeInTheDocument();
+    expect(screen.queryByText(/settings\.saved/)).toBeNull();
+  });
+
   it("切回默认不需要确认，直接保存", async () => {
     const onChange = await renderCard({ value: "autopilot" });
     fireEvent.click(option("default"));

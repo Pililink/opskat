@@ -99,6 +99,7 @@ const (
 	ReasonAPIKeyUnreadable = "api_key_unreadable" // #nosec G101 -- 失败原因的名字，不是凭据。
 	ReasonTooLong          = "too_long"
 	ReasonUnparseable      = "unparseable" // 命令解析不了，没法替换敏感信息，不发送
+	ReasonUndecodable      = "undecodable" // 认得出解码后执行，但解不开要执行的内容，不发送
 	ReasonTimeout          = "timeout"
 	ReasonInvalidAPIKey    = "invalid_api_key"
 	ReasonUnavailable      = "unavailable"
@@ -311,7 +312,17 @@ func (s *service) ReviewBatch(ctx context.Context, ins []Input) []Result {
 			results[i] = s.recordFailure(Result{Outcome: OutcomeFail, Reason: ReasonNotConfigured})
 			continue
 		}
-		command, err := RedactSensitive(in.Syntax, in.Command)
+		reviewed, err := commandForReview(in)
+		if err != nil {
+			reason := ReasonUnparseable
+			if errors.Is(err, ErrUndecodable) {
+				reason = ReasonUndecodable
+			}
+			logger.Ctx(ctx).Warn("prepare command for review", zap.String("assetType", in.AssetType), zap.String("reason", reason), zap.Error(err))
+			results[i] = s.recordFailure(Result{Outcome: OutcomeFail, Reason: reason})
+			continue
+		}
+		command, err := RedactSensitive(in.Syntax, reviewed)
 		if err != nil {
 			logger.Ctx(ctx).Warn("redact command for review", zap.String("assetType", in.AssetType), zap.Error(err))
 			results[i] = s.recordFailure(Result{Outcome: OutcomeFail, Reason: ReasonUnparseable})
@@ -321,7 +332,7 @@ func (s *service) ReviewBatch(ctx context.Context, ins []Input) []Result {
 			results[i] = s.recordFailure(Result{Outcome: OutcomeFail, Reason: ReasonTooLong})
 			continue
 		}
-		key := cacheKey(cfg.BaseURL, cfg.Model, in.AssetType, in.Command)
+		key := cacheKey(cfg.BaseURL, cfg.Model, in.AssetType, cacheKeyCommand(in.Command, reviewed))
 		log := logger.Ctx(ctx).With(zap.String("assetType", in.AssetType), zap.String("reviewKey", key[:12]))
 		if cached, err := s.cache.Get(ctx, key); err != nil {
 			log.Warn("read command review cache", zap.Error(err))
@@ -456,8 +467,9 @@ func failReason(err error) string {
 	}
 }
 
-// cacheKey 由服务地址、模型、题目版本、资产类型和原始命令算出。用原始命令而不是替换后的：
-// 替换后长得一样的两条命令（比如只有密码不同）各自审核，不共用结果。表里只存哈希，不存命令。
+// cacheKey 由服务地址、模型、题目版本、资产类型和命令算出。命令用原始命令而不是替换敏感信息后的：
+// 替换后长得一样的两条命令（比如只有密码不同）各自审核，不共用结果。解码展开过的命令还带上
+// 展开后的文本，避免展开前的评分被当成展开后的结果。表里只存哈希，不存命令。
 func cacheKey(baseURL, model, assetType, command string) string {
 	h := sha256.Sum256([]byte(strings.Join([]string{baseURL, model, questionsVersion, assetType, command}, "\x00")))
 	return hex.EncodeToString(h[:])

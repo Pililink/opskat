@@ -3225,6 +3225,7 @@
       "timeout": "超时",
       "too_long": "命令过长",
       "unparseable": "命令无法解析",
+      "undecodable": "命令把要执行的内容藏在解码后面",
       "unavailable": "服务不可用"
     },
     "settings": {

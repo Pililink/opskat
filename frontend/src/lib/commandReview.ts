@@ -31,6 +31,7 @@ const REVIEW_FAIL_REASONS: readonly string[] = [
   "timeout",
   "too_long",
   "unparseable",
+  "undecodable",
   "unavailable",
 ];
 

@@ -261,6 +261,10 @@ var failReasons = map[string]failReasonText{
 		"Retrying it as-is gives the same result: fix the command syntax first.",
 		"原样重试结果一样，先修正命令语法。",
 	}},
+	command_review_svc.ReasonUndecodable: {bilingual{"the command hides the code it runs behind decoding", "命令把要执行的内容藏在解码后面"}, bilingual{
+		"Retrying it as-is gives the same result: send the script itself instead of wrapping it so it can be reviewed, or leave the command to the user.",
+		"原样重试结果一样，把要执行的脚本直接写出来再送审，或者把命令留给用户处理。",
+	}},
 }
 
 // failReasonOf 返回失败原因的说明；不认识的原因按服务不可用处理，和前端一致。

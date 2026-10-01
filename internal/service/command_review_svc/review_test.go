@@ -2,6 +2,7 @@ package command_review_svc
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"net/http"
 	"strings"
@@ -445,4 +446,166 @@ func TestReviewRetriesOnceOnTimeoutOrNetworkError(t *testing.T) {
 			assert.Equal(t, c.calls, r.Attempts)
 		})
 	}
+}
+
+// pipeDecodeExec 是「把脚本 base64 之后交给 shell 执行」的写法。模型必须看到脚本本身，
+// 不能只看到编码后的外壳。
+func pipeDecodeExec(script, shell string) string {
+	return "echo '" + base64.StdEncoding.EncodeToString([]byte(script)) + "' | base64 -d | " + shell
+}
+
+func sentCommand(t *testing.T, ev *fakeEvaluator) string {
+	t.Helper()
+	state, ok := ev.last.State.(reviewState)
+	require.True(t, ok)
+	return state.Command
+}
+
+func TestReviewSendsDecodedScriptInsteadOfBase64(t *testing.T) {
+	script := "cd /root/docker/vaalhub-web\ndocker compose up -d"
+	ev := &fakeEvaluator{}
+	s, _ := newTestService(ev, enabledConfig())
+
+	r := s.Review(context.Background(), Input{AssetType: "ssh", Syntax: SyntaxShell, Command: pipeDecodeExec(script, "bash")})
+
+	assert.Equal(t, OutcomePass, r.Outcome)
+	assert.Equal(t, script, sentCommand(t, ev))
+	assert.NotContains(t, sentCommand(t, ev), "base64")
+}
+
+func TestReviewDecodesCommonShellWrappers(t *testing.T) {
+	script := "docker compose up -d"
+	payload := base64.StdEncoding.EncodeToString([]byte(script))
+	cases := []string{
+		pipeDecodeExec(script, "/bin/bash"),
+		"printf '%s' '" + payload + "' | base64 --decode | sh",
+		"echo '" + payload + "' | base64 -d | sudo bash",
+		`bash -c "echo '` + payload + `' | base64 -d | bash"`,
+		"echo '" + payload + "' | base64 -d > /tmp/x.sh && bash /tmp/x.sh",
+		"bash -c \"$(echo '" + payload + "' | base64 -d)\"",
+		"eval \"$(echo '" + payload + "' | base64 -d)\"",
+	}
+	for _, cmd := range cases {
+		t.Run(cmd, func(t *testing.T) {
+			ev := &fakeEvaluator{}
+			s, _ := newTestService(ev, enabledConfig())
+			s.Review(context.Background(), Input{AssetType: "ssh", Syntax: SyntaxShell, Command: cmd})
+			got := sentCommand(t, ev)
+			assert.Contains(t, got, script)
+			assert.NotContains(t, got, payload)
+		})
+	}
+}
+
+func TestReviewKeepsSiblingCommandsWhenDecoding(t *testing.T) {
+	script := "docker inspect vaalhub-web"
+	cmd := pipeDecodeExec(script, "bash") + " && rm -rf /var/lib/gone"
+	ev := &fakeEvaluator{}
+	s, _ := newTestService(ev, enabledConfig())
+
+	s.Review(context.Background(), Input{AssetType: "ssh", Syntax: SyntaxShell, Command: cmd})
+
+	got := sentCommand(t, ev)
+	assert.Contains(t, got, script)
+	assert.Contains(t, got, "rm -rf /var/lib/gone")
+	assert.NotContains(t, got, "base64")
+}
+
+func TestReviewRedactsSecretsInsideDecodedScript(t *testing.T) {
+	script := "mysql -uroot -pS3cret -e 'DROP DATABASE shop'"
+	ev := &fakeEvaluator{}
+	s, _ := newTestService(ev, enabledConfig())
+
+	s.Review(context.Background(), Input{AssetType: "ssh", Syntax: SyntaxShell, Command: pipeDecodeExec(script, "bash")})
+
+	got := sentCommand(t, ev)
+	assert.Contains(t, got, "DROP DATABASE shop")
+	assert.Contains(t, got, "-p***")
+	assert.NotContains(t, got, "S3cret")
+}
+
+func TestUndecodableExecIsNotSentToTheModel(t *testing.T) {
+	cases := []string{
+		"echo '!!!' | base64 -d | bash",
+		"base64 -d /tmp/payload | bash",
+		"echo \"$payload\" | base64 -d | bash",
+	}
+	for _, cmd := range cases {
+		t.Run(cmd, func(t *testing.T) {
+			ev := &fakeEvaluator{}
+			s, _ := newTestService(ev, enabledConfig())
+			r := s.Review(context.Background(), Input{AssetType: "ssh", Syntax: SyntaxShell, Command: cmd})
+			assert.Equal(t, OutcomeFail, r.Outcome)
+			assert.Equal(t, ReasonUndecodable, r.Reason)
+			assert.Zero(t, ev.calls)
+		})
+	}
+}
+
+func TestBase64WriteWithoutExecutionIsReviewedAsWritten(t *testing.T) {
+	payload := base64.StdEncoding.EncodeToString([]byte("/root/docker/nginx/logs/*.log {\n}"))
+	cmd := "echo '" + payload + "' | base64 -d > /etc/logrotate.d/nginx-docker"
+	ev := &fakeEvaluator{}
+	s, _ := newTestService(ev, enabledConfig())
+
+	r := s.Review(context.Background(), Input{AssetType: "ssh", Syntax: SyntaxShell, Command: cmd})
+
+	assert.Equal(t, OutcomePass, r.Outcome)
+	assert.Contains(t, sentCommand(t, ev), payload)
+}
+
+func TestExpandedCommandDoesNotReuseWrapperCache(t *testing.T) {
+	cmd := pipeDecodeExec("docker compose up -d", "bash")
+	ev := &fakeEvaluator{nouls: map[string]float64{QuestionDisruptive: 0.9}}
+	s, cache := newTestService(ev, enabledConfig())
+	cfg := enabledConfig()
+	cache.m[cacheKey(cfg.BaseURL, cfg.Model, "ssh", cmd)] = Result{
+		Outcome: OutcomePass, Model: "jev-1.13.0", Scores: map[string]float64{QuestionDisruptive: 0.01},
+	}
+
+	r := s.Review(context.Background(), Input{AssetType: "ssh", Syntax: SyntaxShell, Command: cmd})
+
+	assert.Equal(t, 1, ev.calls)
+	assert.False(t, r.Cached)
+	assert.Equal(t, OutcomeReject, r.Outcome)
+	assert.Contains(t, sentCommand(t, ev), "docker compose up -d")
+}
+
+func TestOrdinaryEvalIsStillReviewed(t *testing.T) {
+	ev := &fakeEvaluator{}
+	s, _ := newTestService(ev, enabledConfig())
+
+	r := s.Review(context.Background(), Input{AssetType: "ssh", Syntax: SyntaxShell, Command: `eval "$cmd"`})
+
+	assert.Equal(t, OutcomePass, r.Outcome)
+	assert.Equal(t, 1, ev.calls)
+	assert.Contains(t, sentCommand(t, ev), `eval`)
+}
+
+func TestDecodeExecHiddenInAConditionalIsNotSent(t *testing.T) {
+	payload := base64.StdEncoding.EncodeToString([]byte("docker compose up -d"))
+	cases := []string{
+		"if true; then " + pipeDecodeExec("docker compose up -d", "bash") + "; fi",
+		"if true; then echo '" + payload + "' | base64 -d > /tmp/x.sh && bash /tmp/x.sh; fi",
+	}
+	for _, cmd := range cases {
+		t.Run(cmd, func(t *testing.T) {
+			ev := &fakeEvaluator{}
+			s, _ := newTestService(ev, enabledConfig())
+			r := s.Review(context.Background(), Input{AssetType: "ssh", Syntax: SyntaxShell, Command: cmd})
+			assert.Equal(t, OutcomeFail, r.Outcome)
+			assert.Equal(t, ReasonUndecodable, r.Reason)
+			assert.Zero(t, ev.calls)
+		})
+	}
+}
+
+func TestNonShellCommandIsNotDecoded(t *testing.T) {
+	cmd := pipeDecodeExec("docker compose up -d", "bash")
+	ev := &fakeEvaluator{}
+	s, _ := newTestService(ev, enabledConfig())
+
+	s.Review(context.Background(), Input{AssetType: "mysql", Syntax: SyntaxText, Command: cmd})
+
+	assert.Contains(t, sentCommand(t, ev), "base64")
 }

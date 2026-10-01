@@ -3225,6 +3225,7 @@
       "timeout": "timed out",
       "too_long": "command too long",
       "unparseable": "the command cannot be parsed",
+      "undecodable": "the command hides the code it runs behind decoding",
       "unavailable": "service unavailable"
     },
     "settings": {

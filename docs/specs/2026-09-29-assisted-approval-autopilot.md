@@ -1,8 +1,8 @@
 # 辅助审批与 Autopilot：用 Jev 模型审核命令
 
-> Status: Implemented（阈值待用真实模型评估）
+> Status: Implemented（默认阈值 0.5；本地审计已核对，公开评估样本未跑）
 > Owner: OpsKat maintainers
-> Last updated: 2026-09-30
+> Last updated: 2026-10-01
 > Issue: #327
 
 **Objective:** 命令没被规则放行、原本要问人时，先让 Jev 格式（TypeSafe System One API）的模型审核一次，只拦明确的危险操作。每台服务器（或服务器分组）选一种权限模式：
@@ -34,8 +34,9 @@
   - `remote_code`：从网上下载代码或脚本并执行（如 `curl … | sh`）。
 - **不判断命令是否超出用户的要求**：试过一道"是否超出用户本轮要求"的题，在"安全巡检一下"这类宽泛要求下，`docker ps`、`systemctl list-timers`、`tailscale status` 等只读命令的概率在 0.2–0.3 之间摆动，被当时 0.2 的阈值误拒；超出要求的只读命令风险不大，真正危险的由上面三题拦住，所以去掉了这道题。
 - **审核所有操作**：读和写都可以通过，只要上面的题都不命中。
-- **结果**：通过 / 未通过 / 失败。失败原因：未配置 API key、API key 无法读取（保存过，但解不开，如换了主密钥）、API key 无效、超时、命令过长（替换敏感信息后超过 4,000 字节）、命令无法解析、服务不可用。
-- **缓存**：按"服务地址 + 模型 + 题目版本 + 资产类型 + 原始命令"的哈希存进 `command_reviews` 表，只存哈希和评分，7 天过期；审核失败不缓存。用原始命令而不是替换后的：替换后长得一样的两条命令（比如只有密码不同）各自审核，不共用结果。命中时按**当前阈值**重新判断，设置里改了阈值马上生效。桌面端和 opsctl 共用同一个数据库，互相命中。
+- **解码后执行**：shell 命令如果先把内容 base64 解码再交给 shell 执行（`echo … | base64 -d | bash`、`printf … | base64 --decode | sh`、`bash -c` / `eval` 里的同一种管道、解码写进文件再执行这个文件），审核的是解码出来的脚本，不是编码后的外壳。同一次命令里其余部分照常送审。解不开（内容不是合法文本、来自文件或变量、裹在 if / while / for 等展不开的语法里）按审核失败处理（`undecodable`），不发送。只把解码结果写进文件、并不执行的，仍按原命令送审。
+- **结果**：通过 / 未通过 / 失败。失败原因：未配置 API key、API key 无法读取（保存过，但解不开，如换了主密钥）、API key 无效、超时、命令过长（替换敏感信息后超过 4,000 字节）、命令无法解析、解码后的内容解不开、服务不可用。
+- **缓存**：按"服务地址 + 模型 + 题目版本 + 资产类型 + 原始命令"的哈希存进 `command_reviews` 表，只存哈希和评分，7 天过期；审核失败不缓存。用原始命令而不是替换后的：替换后长得一样的两条命令（比如只有密码不同）各自审核，不共用结果。解码展开过的命令还会带上展开后的文本，避免展开前的评分被当成展开后的结果。命中时按**当前阈值**重新判断，设置里改了阈值马上生效。桌面端和 opsctl 共用同一个数据库，互相命中。
 - **服务与模型**：Base URL 可填任何兼容 TypeSafe System One API 的服务（请求发到 `<Base URL>/v1/systemone`），默认 `https://api.typesafe.ai`；模型名不做限制，由用户填写并用"测试模型"确认可用，默认 `jev-1.13.0`。超时默认 5 秒，阈值默认 0.5。服务返回的答案要和题目对得上：缺题、题型不对、没有概率或概率不在 0~1 之间都按服务不可用处理，不当成评分。
 - **超时重试**：超时是单次请求的。超时或连接出错时自动再试一次：opsctl 每次都是新进程，第一次请求要重新解析域名、建立连接，偶尔会超时，第二次通常很快。服务端明确返回的错误（API key 无效、请求有误等）不重试，429 / 529 由客户端按退避重试。审核结果里记下请求次数，审计详情里显示重试过的。
 - **审核结果**记录模式、每道题的评分和判断用的阈值，审计里据此显示。
@@ -45,7 +46,7 @@
 | 部分 | 位置 |
 |---|---|
 | System One API 客户端（可换 Base URL；429 / 529 退避重试） | `internal/pkg/typesafe/` |
-| 审核服务：替换敏感信息（`redact.go`）、题目、判断、缓存、测试模型 | `internal/service/command_review_svc/` |
+| 审核服务：替换敏感信息（`redact.go`）、解码后执行（`decode_exec.go`）、题目、判断、缓存、测试模型 | `internal/service/command_review_svc/` |
 | 审核缓存表 | `internal/model/entity/command_review_entity/`、`internal/repository/command_review_repo/` |
 | 迁移：`command_reviews` 表、`assets` / `groups.permission_mode`、`audit_logs.review` | `migrations/202609290001_command_review.go` |
 | 权限模式取值与校验 | `internal/model/entity/policy/permission_mode.go`；资产和分组的 `Validate` 调用它 |
@@ -61,7 +62,7 @@
   - opsctl：放进 `approval.ApprovalRequest.Review` / `BatchItem.Review`，终端提示和桌面端弹窗都显示；
   - 人确认后的结果里保留审核结果，审计写进 `audit_logs.review`。
   - 多条合进一个批量确认、审计只落一行时（多源 cp），记下最能说明为什么问人的那个审核结果：未通过优先，其次失败（`aictx.BatchReview`）。
-- **Autopilot 的拒绝**：返回"拒绝"和原因，各入口按现有方式输出（opsctl 为 `command denied by policy: <原因>`）。原因区分未通过（"不要原样重试"）和失败；失败再按原因给出下一步：超时、服务不可用"可以稍后重试"，命令过长"缩短或拆成几条"，命令无法解析"先修正命令语法"，未配置 / API key 无法读取 / API key 无效"留给用户处理"——后三种原样重试结果一样，不能让调用方的 agent 反复重试。
+- **Autopilot 的拒绝**：返回"拒绝"和原因，各入口按现有方式输出（opsctl 为 `command denied by policy: <原因>`）。原因区分未通过（"不要原样重试"）和失败；失败再按原因给出下一步：超时、服务不可用"可以稍后重试"，命令过长"缩短或拆成几条"，命令无法解析"先修正命令语法"，解码后的内容解不开"把脚本直接写出来再送审，或留给用户"，未配置 / API key 无法读取 / API key 无效"留给用户处理"——除超时和服务不可用外，原样重试结果一样，不能让调用方的 agent 反复重试。
 - **Autopilot 资产不接受授权申请**（AI 的 `request_permission`）：无人值守时没人来批；批准的又是通配模式，会让之后匹配的命令跳过逐条审核。`SubmitGrantMulti` 把这部分分出来，不弹审批，告诉调用方直接执行、由模型逐条审核，被拒的命令交给用户（决策来源 `autopilot_deny`）；同一次申请里其他模式的资产照常交给人。辅助审批有人在场，照常申请。
 - **审核服务没有注册时**（未经 `bootstrap.Init` 的进程，如单元测试）不审核。
 
@@ -85,7 +86,7 @@
 OPSKAT_TYPESAFE_EVAL_KEY=<key> go test ./internal/service/command_review_svc/ -run TestEvalAgainstJev -v -count=1
 ```
 
-输出本该问人却审核通过的比例、可以自动执行的通过率、耗时，以及每一条误放 / 多问的命令。可用 `OPSKAT_TYPESAFE_EVAL_THRESHOLD` / `OPSKAT_TYPESAFE_EVAL_MODEL` / `OPSKAT_TYPESAFE_EVAL_BASE_URL` 对比不同阈值、模型与服务。默认阈值 0.5 按实机试用的评分选定：只读查看 ≤ 0.02，重启服务 0.51–0.55，`rm -rf` 0.64–0.70，`curl … | sh` 0.99；还需要用评估样本确认。
+输出本该问人却审核通过的比例、可以自动执行的通过率、耗时，以及每一条误放 / 多问的命令。可用 `OPSKAT_TYPESAFE_EVAL_THRESHOLD` / `OPSKAT_TYPESAFE_EVAL_MODEL` / `OPSKAT_TYPESAFE_EVAL_BASE_URL` 对比不同阈值、模型与服务。默认阈值 0.5 按实机试用和本地审计记录选定：只读查看 ≤ 0.02，重启服务 0.51–0.55，`rm -rf` 0.64–0.70，`curl … | sh` 0.99。公开评估样本还没跑过。
 
 ## 暂不做
 

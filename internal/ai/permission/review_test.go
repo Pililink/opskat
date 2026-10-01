@@ -187,6 +187,7 @@ func TestApplyReview(t *testing.T) {
 					// 原样重试结果一样，告诉调用方该怎么改
 					{command_review_svc.ReasonTooLong, "缩短或拆成几条", false},
 					{command_review_svc.ReasonUnparseable, "修正命令语法", false},
+					{command_review_svc.ReasonUndecodable, "直接写出来", false},
 					// 配置问题只有用户能修
 					{command_review_svc.ReasonNotConfigured, "留给用户", false},
 					{command_review_svc.ReasonAPIKeyUnreadable, "API key 无法读取", false},

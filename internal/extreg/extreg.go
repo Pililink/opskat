@@ -15,6 +15,7 @@ package extreg
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -44,7 +45,7 @@ const helpLang = "en"
 // 没有 wazero 运行时的情况下被测试驱动——它们承载的是行为契约，不是 WASM 加载。
 type pluginCaller interface {
 	CallTool(ctx context.Context, toolName string, args json.RawMessage, asset *extension.AssetRef) (json.RawMessage, error)
-	CheckPolicy(ctx context.Context, toolName string, args json.RawMessage) (action, resource string, err error)
+	CheckPolicy(ctx context.Context, toolName string, args json.RawMessage) (action string, resources []string, err error)
 	ValidateConfig(ctx context.Context, config json.RawMessage) ([]extension.ValidationError, error)
 	TestConnectionCaller
 }
@@ -86,7 +87,8 @@ type loaded struct {
 
 var (
 	mu         sync.Mutex
-	registered = make(map[string][]string) // extension name → registered asset types
+	registered = make(map[string][]string)            // extension name → registered asset types
+	manifests  = make(map[string]*extension.Manifest) // extension name → its manifest, for ExpandFileFlags
 	// policyTypeOwner 记录每个策略面（manifest 的 policies.type）归哪个扩展。策略面是
 	// 权限组 ID（ext:<policyType>:<name>）的命名空间段、组上扩展永久规则的落点键，也是
 	// CheckExtensionPolicy 筛权限组的键：两个扩展共用一个策略面，一方的组与规则就会被
@@ -150,6 +152,7 @@ func register(l loaded, help, description string) error {
 	}
 
 	registered[l.name] = done
+	manifests[l.name] = m
 	logger.Default().Info("extension registered",
 		zap.String("extension", l.name), zap.Strings("assetTypes", done))
 	return nil
@@ -173,6 +176,7 @@ func Unregister(name string) {
 		}
 	}
 	delete(registered, name)
+	delete(manifests, name)
 	logger.Default().Info("extension unregistered",
 		zap.String("extension", name), zap.Strings("assetTypes", types))
 }
@@ -343,23 +347,35 @@ func execTool(l loaded) permission.ExecFunc {
 // 类型策略（deny → allow）→ grant → NeedConfirm。
 //
 // 与内置类型的差别只在中间那一步的语言：内置类型把命令文本拿去撞规则模式，扩展则先问
-// guest 的 check_policy 这条调用按参数分类成哪个 (action, resource)，再拿它去撞 holder
+// guest 的 check_policy 这条调用按参数分类成哪个 (action, resources)，再拿它去撞 holder
 // 自身那一列与它引用的权限组里的 `<action>[:<resource-glob>]` 规则
 // （policy.CheckExtensionPolicy）。两套引擎不合并，是因为它们判定的根本不是同一种东西。
+//
+// 判定逐个资源进行：任一资源命中 deny 即拒；allow 规则没覆盖到的资源再逐个查 grant，
+// 每个资源都被某条规则或某个 grant 覆盖才放行（不同资源可由不同规则 / grant 覆盖）。
 //
 // guest 给出的 action 必须属于被调用工具在 describe() 里声明的动作（ToolDef.Actions，
 // 不是整个扩展的 policies.actions 并集）。集合外的 action——包括空串、带 ':' 想冒充 "动作:资源" 的串——
 // 是 guest 的缺陷：记一条错误，直接 NeedConfirm，既不撞规则也不查 grant，让用户看见
 // 这次调用本身。
 //
+// 工具拒绝这次调用的参数（SDK 的 RejectArgs，guest 答 {"reject"}）则不是缺陷而是结论：
+// 这条调用在任何规则 / grant 下都不会执行，问用户只会让他批准一条随后必然失败的调用。
+// 于是它先于 deny → allow → grant 直接 Deny，Message 带上工具给出的原因——调用方与
+// 审计行（decision=deny，原因落 error 列）看到的都是它。
+//
 // 返回 NeedConfirm 之后发生什么，则与内置类型完全一致：CheckForAsset 弹审批框，
 // "全部允许"落 grant，下一条同样的调用由这里的 MatchExtensionGrant 直接放行。
 func policyCheck(l loaded, assetType string) permission.PolicyCheckFunc {
 	return func(ctx context.Context, assetID int64, command string) aictx.CheckResult {
-		action, resource, _, _, ok := classifyCommand(ctx, l, command)
-		if !ok {
+		call, err := classifyCommand(ctx, l, command)
+		if rejected, ok := errors.AsType[*extension.ArgsRejectedError](err); ok {
+			return argsRejected(ctx, call.tool, rejected)
+		}
+		if err != nil {
 			return aictx.CheckResult{Decision: aictx.NeedConfirm}
 		}
+		action, resources := call.action, call.resources
 		policyType := l.manifest.Policies.Type
 		groups, own := permission.ExtensionPolicyForAsset(ctx, assetID, policyType)
 		if len(groups) == 0 {
@@ -370,20 +386,32 @@ func policyCheck(l loaded, assetType string) permission.PolicyCheckFunc {
 			GroupIDs:   groups,
 			Own:        own,
 			Action:     action,
-			Resource:   resource,
+			Resources:  resources,
 		})
 		if result.Decision != aictx.NeedConfirm {
-			return result
+			return result.CheckResult
 		}
 		// Matched by classification (action, resource), not by re-parsing command:
 		// two calls that spell the same request differently — different flag order,
 		// an equivalent literal — must hit the same grant (spec 参数级策略 › 审批展示).
-		if granted, ok := permission.MatchExtensionGrant(ctx, assetID, assetType, policyType, action, resource); ok {
-			return granted
+		if grants, ok := permission.MatchExtensionGrant(ctx, assetID, assetType, policyType, action, result.Uncovered); ok {
+			return result.AllowedByGrants(grants)
 		}
 		return aictx.CheckResult{Decision: aictx.NeedConfirm}
 	}
 }
+
+// classifiedCall is a command classifyCommand parsed and the guest classified.
+type classifiedCall struct {
+	action    string
+	resources []string
+	tool      string
+	args      json.RawMessage
+}
+
+// errClassifyFailed is classifyCommand failing on a defect — a command the parser
+// refuses, a guest that errs or answers an undeclared action — already logged.
+var errClassifyFailed = errors.New("extension policy classification failed")
 
 // classifyCommand parses a command and runs the guest's check_policy classification,
 // validating the action against the actions the called tool declares
@@ -392,44 +420,66 @@ func policyCheck(l loaded, assetType string) permission.PolicyCheckFunc {
 // It is the single place policyCheck and classifyForApproval both call, so "undeclared
 // action never classifies" can't drift between the check path and the approval/grant
 // path — both must see the same failure the same way.
-func classifyCommand(ctx context.Context, l loaded, command string) (action, resource, toolName string, argsJSON json.RawMessage, ok bool) {
+//
+// The error is either the tool refusing the arguments — an
+// *extension.ArgsRejectedError, with call.tool set — or errClassifyFailed.
+func classifyCommand(ctx context.Context, l loaded, command string) (classifiedCall, error) {
 	toolName, argsJSON, err := parseCommand(l.manifest, command)
 	if err != nil {
 		// 到不了这里：canonicalize 已经用同一个解析器跑过一遍。真发生了就是
 		// fail-closed 的"分类失败"，而不是放行或落 grant。
-		return "", "", "", nil, false
+		return classifiedCall{}, errClassifyFailed
 	}
-	action, resource, err = l.plugin.CheckPolicy(ctx, toolName, argsJSON)
+	call := classifiedCall{tool: toolName, args: argsJSON}
+	call.action, call.resources, err = l.plugin.CheckPolicy(ctx, toolName, argsJSON)
+	if rejected, ok := errors.AsType[*extension.ArgsRejectedError](err); ok {
+		// 不记原因：它常常原样带着用户 / 模型写的参数。
+		logger.Ctx(ctx).Info("extension tool rejected its arguments",
+			zap.String("extension", l.name), zap.String("tool", toolName))
+		return classifiedCall{tool: toolName}, rejected
+	}
 	if err != nil {
 		logger.Ctx(ctx).Warn("extension policy check failed",
-			zap.String("extension", l.name), zap.String("tool", toolName))
-		return "", "", "", nil, false
+			zap.String("extension", l.name), zap.String("tool", toolName), zap.Error(err))
+		return classifiedCall{}, errClassifyFailed
 	}
 	def, _ := toolDef(l.manifest, toolName)
-	if !slices.Contains(def.Actions(), action) {
+	if !slices.Contains(def.Actions(), call.action) {
 		logger.Ctx(ctx).Error("extension policy returned an undeclared action",
-			zap.String("extension", l.name), zap.String("tool", toolName), zap.String("action", action))
-		return "", "", "", nil, false
+			zap.String("extension", l.name), zap.String("tool", toolName), zap.String("action", call.action))
+		return classifiedCall{}, errClassifyFailed
 	}
-	return action, resource, toolName, argsJSON, true
+	return call, nil
+}
+
+// argsRejected is the deny for a call whose tool refused its arguments. No rule
+// decided it, so MatchedPattern stays empty; the tool's reason is the message.
+func argsRejected(ctx context.Context, tool string, rejected *extension.ArgsRejectedError) aictx.CheckResult {
+	return aictx.CheckResult{
+		Decision:       aictx.Deny,
+		DecisionSource: aictx.SourcePolicyDeny,
+		Message: aipolicy.PolicyFmt(ctx, "extension tool %q rejected its arguments: %s", "扩展工具 %q 拒绝了这次调用的参数：%s",
+			tool, rejected.Reason),
+	}
 }
 
 // classifyForApproval adapts classifyCommand to permission.ClassifyFunc: it is the
 // grant-pattern producer HandleConfirm calls to show an approval item's Action/
-// Resource/Detail and to build the "always allow" grant key (spec 参数级策略 ›
-// 审批展示 — grant persisted as ext:<type>:<action>:<resource>).
+// Resource(s)/Detail and to build the "always allow" grant (spec 参数级策略 ›
+// 审批展示 — persisted as ext:<type>:<action>:<resource> for one resource, the
+// common-prefix rule for several).
 func classifyForApproval(l loaded) permission.ClassifyFunc {
 	return func(ctx context.Context, command string) (permission.ExtensionClassification, bool) {
-		action, resource, toolName, argsJSON, ok := classifyCommand(ctx, l, command)
-		if !ok {
+		call, err := classifyCommand(ctx, l, command)
+		if err != nil {
 			return permission.ExtensionClassification{}, false
 		}
 		return permission.ExtensionClassification{
 			PolicyType: l.manifest.Policies.Type,
-			Action:     action,
-			Resource:   resource,
-			Tool:       toolName,
-			Args:       argsJSON,
+			Action:     call.action,
+			Resources:  call.resources,
+			Tool:       call.tool,
+			Args:       call.args,
 		}, true
 	}
 }

@@ -48,10 +48,13 @@ Everything else — tools, asset types, policies, pages, display strings — is 
 ```
 
 `hostABI` is checked as an exact-set membership, not a minimum: `pkg/extension.SupportedHostABIs`
-currently accepts `2.0` and `2.1`, so an already-built `2.0` extension keeps loading
+currently accepts `2.0`, `2.1` and `2.2`, so an already-built `2.0` extension keeps loading
 unchanged (it just doesn't get `@opskat/host-ui` — see below), while one declaring
-anything not in that set (`2.2`, `3.0`, …) is refused at load with the list of what is
-supported.
+anything not in that set (`2.3`, `3.0`, …) is refused at load with the list of what is
+supported. Declare `2.2` when a tool classifies with `.PolicyResources` or refuses
+arguments with `.RejectArgs` (see [The policy face](#the-policy-face)): an older app
+would read either reply as a call on no resource at all, so it must refuse the extension
+instead.
 
 `capabilities` defaults to deny-all, and the notebook needs nothing: the host KV, the
 asset config and logging are available without a grant. Declare only what you use:
@@ -107,6 +110,12 @@ opskat.PolicyGroup("ext:notebook:read").
 opskat.Tool("note_list", listNotes).Policy("read").Doc("tools.note_list.description")
 ```
 
+The validator runs when the asset form saves and whenever the asset is written. Each
+`ValidationError.Field` that names a config field is shown under that field in the form
+and the save is refused; an error with an empty or unknown `Field` is shown as the save
+error instead. A stored secret the user leaves untouched reaches the validator as its
+ciphertext, so "is it filled" checks work when editing.
+
 **An extension must declare at least one asset type**, and `Meta.PolicyType` must be
 set. Extension tools are reached through `exec` on an asset, so an extension without
 one has no reachable entry point and is refused at load.
@@ -132,8 +141,42 @@ type putArgs struct {
 - `desc` on a **tool** argument is shown to the model as written — plain text, not an
   i18n key. On an **asset config** field, `title` / `placeholder` / `desc` are i18n
   keys, and `format:"password"` marks a secret the host encrypts, `enum:"a,b"` renders
-  a select. Declare a secret as an `opskat.Credential` field, which is always
+  a select. A select shows the raw option values unless you add
+  `enumLabels:"key.a,key.b"` — one i18n key per option, in option order (a different
+  count is refused at registration and at load) — and `default:"a"` preselects an
+  option when a new asset is created (it must be one of the options; `default` is
+  supported on string fields only, and an asset already saved without the field is not
+  given it). Declare a secret as an `opskat.Credential` field, which is always
   `format:"password"` (see [Reading secret fields](#reading-secret-fields)).
+
+### Parameters opsctl can read from a file
+
+A payload too large or too awkward for a command line — an NDJSON bulk body — can be
+marked file-readable on the tool's registration handle:
+
+```go
+opskat.Tool("request", handleRequest).
+    PolicyResources(actions, classify).
+    FileParam("body") // the JSON name of a string parameter
+```
+
+`opsctl exec <asset> -- request --body-file payload.ndjson` (or `--body-file -` for
+stdin) is then exactly `--body <file content>`: opsctl reads the file and sends the
+inline form, so `PolicyFunc` / `PolicyResources`, the approval dialog, grants and
+audit all see the content, and the handler receives it as the ordinary `body`
+argument — there is nothing to implement. `describe()` reports the marker as
+`tools[].fileParams`, and `opsctl help <asset>` lists the `--body-file` form marked
+"opsctl only".
+
+- `FileParam` panics at registration unless the name is a declared **string**
+  parameter whose `<name>-file` spelling is not itself a parameter, and on a repeat;
+  the host's describe validation refuses such an entry as well. It ships under host
+  ABI 2.2, no further bump.
+- opsctl refuses, sending nothing and exiting non-zero: both `--body` and
+  `--body-file`; an unreadable file; content over 16 MiB or not valid UTF-8; stdin
+  named twice.
+- AI `exec` and the extension's own pages do not accept `--body-file` — it is an
+  unknown flag there. Reading files happens only inside the opsctl process.
 
 ### The asset comes from the host, not from the arguments
 
@@ -160,10 +203,14 @@ call: it runs the type's declared handler with the submitted config — see
 [Test connection](#test-connection).) An extension page that *does* work on a saved asset passes its `assetId` prop —
 `api.callTool(ext, tool, args, assetId)` / `api.executeAction(ext, action, args,
 onEvent, assetId)` — and the handler reads it from `ctx.Asset` the same way.
-`api.callTool` against a saved asset clears the exact same policy check / in-app
-approval dialog / grant / audit trail as `opsctl exec` on that asset does — a call
-needing confirmation pops the app's usual approval dialog, and a denial reaches the
-page as a rejected promise, not a result to display.
+`api.callTool` against a saved asset runs directly: it is the user's own action in the
+page, so there is no policy check, approval dialog, grant or audit row (those belong to
+AI `exec` and opsctl, which stay gated on the same asset). It is still scoped to that
+asset — `ctx.AssetConfig()`, endpoint gating, the connection settings and credential
+injection all apply — its arguments are checked against the tool's declared
+parameters (unknown keys are rejected), and it can be cancelled and honours the
+tool's timeout. A tool failure, the handler's error included, reaches the page as a
+rejected promise carrying the message as-is.
 
 ### Connection settings belong to the host
 
@@ -320,14 +367,73 @@ opskat.Tool("note_put", putNote).
     })
 ```
 
-The host does not take the classification as permission: it matches the action and
-resource against the rules on the asset and the permission groups granted on it, in
-this order — **deny → allow → grant → ask**.
+A call that may touch several resources at once — one request naming several indices,
+a bulk body spanning many — classifies with `.PolicyResources(actions, fn)`: `fn(args)`
+returns the action and every resource the call touches (zero, one or many). In these
+resources `*` and `?` are **wildcards** — `logs-*` stands for every index it could
+match — and every other character is literal; `.PolicyFunc` / `.Resource` resources stay
+literal, so a key that happens to contain `*` means exactly that key. A tool uses one of
+`.Policy`, `.PolicyFunc`, `.PolicyResources`. `.PolicyResources` needs `"hostABI": "2.2"`.
 
-- a matching **deny** rule refuses the call, and a denial beats every allow;
-- a matching **allow** rule runs it unattended;
-- otherwise a grant saved by an earlier "always allow" runs it;
+```go
+opskat.Tool("request", doRequest).
+    PolicyResources([]string{"read", "write", "delete"}, func(args requestArgs) (string, []string) {
+        return classify(args.Method, args.Path) // e.g. "delete", []string{"a", "prod-1"}
+    })
+```
+
+Some arguments are wrong whatever the user's rules say — a request path naming a host of
+its own, when every request must go to the asset. `.RejectArgs(fn)` refuses them
+outright: `fn(args)` returns `nil` to accept the call, or an error whose text is the
+reason. The host then denies the call with that reason before any rule or grant is
+consulted and **never asks the user** (there is nothing to approve: the call would only
+fail afterwards), and the audit log records it as a deny whose error is the reason.
+`fn` runs before the classifier, which only ever sees accepted arguments, and again
+before the handler on every call — including a page's, which skips policy — so the
+handler needs no second copy of the check. It works with `.Policy`, `.PolicyFunc` and
+`.PolicyResources`, and needs `"hostABI": "2.2"`. Keep it for arguments that can never
+run; what a user may do is the rules' to decide.
+
+```go
+opskat.Tool("request", doRequest).
+    RejectArgs(func(args requestArgs) error {
+        _, err := parseRequestPath(args.Path) // "path must not name a host", …
+        return err
+    }).
+    PolicyResources(requestActions, classifyRequest)
+```
+
+In a unit test, `TestHost.CheckPolicy` and `TestHost.CallTool` return the refusal as an
+`*opskat.ArgsRejectedError` whose `Reason` is `fn`'s error text:
+
+```go
+_, _, err := host.CheckPolicy("request", requestArgs{Path: "http://evil/x"})
+var rejected *opskat.ArgsRejectedError
+if !errors.As(err, &rejected) { t.Fatalf("want a rejection, got %v", err) }
+```
+
+Any other failure to classify — the guest erring, a malformed reply, an action the tool
+never declared — is not a refusal: the host asks the user about the call instead.
+
+The host does not take the classification as permission: it matches the action and
+each resource against the rules on the asset and the permission groups granted on it,
+in this order — **deny → allow → grant → ask**.
+
+- a **deny** rule matching **any** resource refuses the call, and a denial beats every
+  allow (`deny delete:prod-*` refuses `delete [x, prod-1]` even under a bare `delete`
+  allow);
+- the call runs unattended when **every** resource is covered by an **allow** rule or a
+  grant saved by an earlier "always allow" — different resources may be covered by
+  different rules or grants, and allow rules are consulted before grants;
 - anything else **asks the user**.
+
+A call with no resource is judged as the empty resource. For a wildcard resource, a deny
+rule hits when its glob **could** match one of the names the resource stands for (and
+when that cannot be decided), while an allow rule or grant covers it only when its glob
+matches **all** of them (`write:logs-*` covers `logs-2026-*` but not `logs*` or `*`).
+The audit log's matched pattern lists every rule and grant that allowed a
+multi-resource call, or each deny rule followed by the resources it denied
+(`delete:prod-* (prod-1)`).
 
 A rule is `<action>` or `<action>:<resource-glob>`. A rule without a resource covers
 the action on every resource; a glob uses the same `path.Match` semantics as command
@@ -341,7 +447,8 @@ contain `:` or whitespace.
 A grant request for an extension asset — the AI's `request_permission`, or one delivered
 over the opsctl approval channel (opsctl has no user-facing grant command) — is written
 the same way (`write:runbook/*`, or `write` for every resource) and is stored as
-`ext:<PolicyType>:<rule>`, so the next call it covers runs without asking. A
+`ext:<PolicyType>:<rule>`, so the next call it covers runs without asking — a grant
+covers a multi-resource call resource by resource, like a rule. A
 command-shaped pattern (`note_put *`) or an undeclared action is refused rather than
 stored as a grant nothing would ever match. The help the host generates for the
 extension's asset type lists each tool's action and this format for the model.
@@ -354,7 +461,7 @@ Group ids must be namespaced by the extension's policy type — `ext:<PolicyType
 A policy type belongs to one extension: loading a second extension that claims the same
 policy type, or a group id that is already registered, is refused. The action set itself
 is never declared separately — the host derives it from the tools' `.Policy` actions
-and `.PolicyFunc` action sets.
+and `.PolicyFunc` / `.PolicyResources` action sets.
 
 ## SKILL.md and locales
 
@@ -411,7 +518,8 @@ result, err := host.CallTool(asset, "note_put", putArgs{Key: "k", Content: "v"})
 
 `WithMockHTTP`, `WithMockTCP` and `WithActionCancel` stand in for the other host
 capabilities; `CallAction` captures the events an action emits, and `CheckPolicy`
-returns the action and resource a call requests.
+returns the action and the resources a call requests (a single-resource tool's as a
+one-element list).
 
 ## Frontend pages (optional)
 
@@ -447,8 +555,8 @@ h(hostUI.QueryResultTable, { columns: ["key", "size"], rows: notes });
 h(hostUI.JsonTreeView, { data: someNote });
 ```
 
-`hostUI.version` is bound to `hostABI` (currently `"2.1"`) — it tells a page which
-host-ui revision it's running against. Declare `"hostABI": "2.1"` in your own
+`hostUI.version` is bound to `hostABI` (currently `"2.2"`) — it tells a page which
+host-ui revision it's running against. Declare `"hostABI": "2.1"` (or later) in your own
 manifest once your page uses `hostUI`: that is the contract you are relying on, and
 it is what keeps a future host free to drop `hostUI` behind a still-higher ABI
 without silently breaking a `2.0` extension that never touched it.

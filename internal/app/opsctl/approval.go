@@ -2,7 +2,6 @@ package opsctl
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -75,7 +74,7 @@ func (o *Opsctl) requestSingleApproval(req approval.ApprovalRequest) approval.Ap
 	parsed, reason := o.awaitSingleApproval(o.ctx, permission.ApprovalItem{
 		Type: req.Type, AssetID: req.AssetID, AssetName: req.AssetName,
 		Command: req.Command, Detail: req.Detail, Review: req.Review,
-	}, req.SessionID, opsctlOrigin)
+	}, req.SessionID)
 	switch parsed.Decision {
 	case permission.ApprovalAllow:
 		return approval.ApprovalResponse{Approved: true}
@@ -93,26 +92,15 @@ func (o *Opsctl) requestSingleApproval(req approval.ApprovalRequest) approval.Ap
 	}
 }
 
-// approvalOrigin 说明一次单条审批是谁发起的。桌面端只有一个 "opsctl:approval" 弹窗，
-// opsctl 与扩展页面共用它，弹窗据此写标题，而不是自己猜。source 同时是审计来源列。
-type approvalOrigin struct {
-	source string
-	// extension 是发起调用的扩展页面所属扩展的显示名；opsctl 发起时为空。
-	extension string
-}
-
-var opsctlOrigin = approvalOrigin{source: "opsctl"}
-
-func extensionPageOrigin(extension string) approvalOrigin {
-	return approvalOrigin{source: "extension_page", extension: extension}
-}
+// opsctlAuditSource 是 opsctl 发起的审批与扩展工具调用落审计的来源列。
+const opsctlAuditSource = "opsctl"
 
 // awaitSingleApproval 在桌面端 "opsctl:approval" 弹窗里展示 item，等用户作答并校验。
 // 它不落任何 grant："始终允许"授权什么由调用方决定——opsctl socket 按命令串落
 // （requestSingleApproval），扩展工具闸门交给 HandleConfirm 按 (action, resource) 落
 // （extToolConfirm）。拒绝时第二个返回值是原因。ctx 是发起这次审批的调用：它被取消
-// （扩展页面取消了这次工具调用）就不再等待，按拒绝返回，之后到达的作答找不到这条待决审批。
-func (o *Opsctl) awaitSingleApproval(ctx context.Context, item permission.ApprovalItem, sessionID string, origin approvalOrigin) (permission.ParsedApprovalResponse, string) {
+// 就不再等待，按拒绝返回，之后到达的作答找不到这条待决审批。
+func (o *Opsctl) awaitSingleApproval(ctx context.Context, item permission.ApprovalItem, sessionID string) (permission.ParsedApprovalResponse, string) {
 	confirmID := fmt.Sprintf("opsctl_%d", time.Now().UnixNano())
 	kind := permission.ApprovalKindFor(item.Type, item.Command)
 	log := logger.Ctx(o.ctx).With(
@@ -120,7 +108,6 @@ func (o *Opsctl) awaitSingleApproval(ctx context.Context, item permission.Approv
 		zap.String("approvalType", item.Type),
 		zap.Int64("assetID", item.AssetID),
 		zap.String("sessionID", sessionID),
-		zap.String("source", origin.source),
 	)
 	log.Info("opsctl approval started")
 	denied := permission.ParsedApprovalResponse{Decision: permission.ApprovalDeny}
@@ -135,8 +122,9 @@ func (o *Opsctl) awaitSingleApproval(ctx context.Context, item permission.Approv
 	o.pendingOpsctlApprovals.Store(confirmID, pendingOpsctlApproval{kind: kind, items: expectedItems, ch: ch})
 	defer o.pendingOpsctlApprovals.Delete(confirmID)
 	// 发往 Wails 的 command/detail 即原始主体，展示与执行逐字一致；action/resource/
-	// remember_pattern 只有扩展类型才有（check_policy 的分类），前端据此在命令上方展示，
-	// 并让"记住"编辑实际落库的 <action>:<resource>。source/extension 是发起方。
+	// resources/remember_pattern 只有扩展类型才有（check_policy 的分类；resources 是这次
+	// 调用触及的全部资源，按扩展返回的原样），前端据此在命令上方展示，并让"记住"编辑
+	// 实际落库的 <action>:<resource>。
 	o.emit("opsctl:approval", map[string]any{
 		"confirm_id":       confirmID,
 		"kind":             kind,
@@ -147,11 +135,10 @@ func (o *Opsctl) awaitSingleApproval(ctx context.Context, item permission.Approv
 		"detail":           item.Detail,
 		"action":           item.Action,
 		"resource":         item.Resource,
+		"resources":        item.Resources,
 		"remember_pattern": item.RememberPattern,
 		"review":           item.Review,
 		"session_id":       sessionID,
-		"source":           origin.source,
-		"extension":        origin.extension,
 	})
 
 	select {
@@ -442,11 +429,10 @@ func (o *Opsctl) handleGrantApproval(req approval.ApprovalRequest) approval.Appr
 	}
 }
 
-// extToolGateResult is what gateExtToolCall hands back to either caller: exactly
-// the three things that exist regardless of who initiated the call (output,
-// decision, error), plus the normalized command the unified exec handler actually
-// ran — canonicalization can rewrite flag order/spelling, and a caller's audit row
-// should show what ran, not what was sent.
+// extToolGateResult is what gateExtToolCall hands back: the output and decision,
+// plus the normalized command the unified exec handler actually ran —
+// canonicalization can rewrite flag order/spelling, and the audit row should show
+// what ran, not what was sent.
 type extToolGateResult struct {
 	output            string
 	normalizedCommand string
@@ -454,25 +440,19 @@ type extToolGateResult struct {
 }
 
 // gateExtToolCall runs one extension-tool invocation through the exact same
-// policy check / in-app approval / grant / audit pipeline AI's unified exec uses,
-// regardless of who is asking: opsctl's socket bridge (handleExtToolExec) and an
-// extension's own frontend page (RunPageToolCall) differ only in origin (audit
-// source, and who the approval dialog says is asking) and grant-session identity.
+// policy check / in-app approval / grant / audit pipeline AI's unified exec uses.
 //
-// NeedConfirm always surfaces through the desktop's one "opsctl:approval" dialog
-// (extToolConfirm): a page call gets the identical in-app approval UI an opsctl
-// call gets, not a second one — titled after its origin.
+// NeedConfirm surfaces through the desktop's one "opsctl:approval" dialog
+// (extToolConfirm).
 //
 // It returns the context it built (audit source/session/decision slot all
 // installed on it) alongside the result: a caller's own WriteToolCall must use
 // that returned context, not the one it passed in, or the audit row it writes
-// carries none of what this function just annotated — including the audit
-// source, which is the entire reason a page call and an opsctl call end up
-// distinguishable in audit_logs at all.
-func (o *Opsctl) gateExtToolCall(ctx context.Context, origin approvalOrigin, sessionID string, assetID int64, command string) (context.Context, extToolGateResult, error) {
-	ctx = aictx.WithAuditSource(ctx, origin.source)
+// carries none of what this function just annotated, the audit source included.
+func (o *Opsctl) gateExtToolCall(ctx context.Context, sessionID string, assetID int64, command string) (context.Context, extToolGateResult, error) {
+	ctx = aictx.WithAuditSource(ctx, opsctlAuditSource)
 	ctx = aictx.WithSessionID(ctx, sessionID)
-	checker := permission.NewCommandPolicyChecker(o.extToolConfirm(sessionID, origin))
+	checker := permission.NewCommandPolicyChecker(o.extToolConfirm(sessionID))
 	ctx = permission.WithPolicyChecker(ctx, checker)
 
 	// 审计行由**做出决策的进程**写：策略判定、审批结果与规范化命令都只在这里存在，
@@ -493,9 +473,9 @@ func (o *Opsctl) gateExtToolCall(ctx context.Context, origin approvalOrigin, ses
 // "opsctl:approval" dialog, and the user's answer goes back unchanged, edits
 // included. Persisting an "always allow" is HandleConfirm's: it grants the
 // classification, the only shape extension grant matching reads.
-func (o *Opsctl) extToolConfirm(sessionID string, origin approvalOrigin) permission.CommandConfirmFunc {
+func (o *Opsctl) extToolConfirm(sessionID string) permission.CommandConfirmFunc {
 	return func(ctx context.Context, _ string, items []permission.ApprovalItem) permission.ApprovalResponse {
-		parsed, _ := o.awaitSingleApproval(ctx, items[0], sessionID, origin)
+		parsed, _ := o.awaitSingleApproval(ctx, items[0], sessionID)
 		switch parsed.Decision {
 		case permission.ApprovalAllowAll:
 			return permission.ApprovalResponse{Decision: "allowAll", EditedItems: parsed.EditedItems}
@@ -519,7 +499,7 @@ func (o *Opsctl) handleExtToolExec(req approval.ApprovalRequest) approval.Approv
 	}
 
 	ctx := i18n.Ctx(o.ctx, o.lang.Lang())
-	gateCtx, gateResult, err := o.gateExtToolCall(ctx, opsctlOrigin, req.SessionID, req.AssetID, req.Command)
+	gateCtx, gateResult, err := o.gateExtToolCall(ctx, req.SessionID, req.AssetID, req.Command)
 	decision := gateResult.decision
 	extAuditWriter.WriteToolCall(gateCtx, audit.ToolCallInfo{
 		ToolName: "exec",
@@ -539,58 +519,6 @@ func (o *Opsctl) handleExtToolExec(req approval.ApprovalRequest) approval.Approv
 		return approval.ApprovalResponse{ToolError: gateResult.output}
 	}
 	return approval.ApprovalResponse{Approved: true, ToolResult: gateResult.output}
-}
-
-// RunPageToolCall runs one call an extension's own frontend page makes against
-// the asset it was opened for, through the exact gate handleExtToolExec runs
-// opsctl's delegated commands through: same policy check, same in-app "opsctl:
-// approval" dialog, same grant persistence, same audit pipeline — only the audit
-// source differs, so a page call and an AI/opsctl exec on the same asset show up
-// in the same audit trail shape and honor the same "always allow" grants.
-//
-// The grant session is not per call: pageGrantSessionID gives every call against
-// the same asset in this desktop run the same session, so "remember" on one call
-// is honored by the next one, not just replayed by itself.
-//
-// extension is the display name of the extension whose page is calling: the
-// approval dialog names it, so the user can tell a page's request from opsctl's.
-//
-// A Deny (or a NeedConfirm the user rejects) comes back as an error: the page
-// gets a rejection it must handle, not a text result meant for a model to read.
-func (o *Opsctl) RunPageToolCall(ctx context.Context, extension string, assetID int64, command string) (string, error) {
-	if o.extExecutor == nil {
-		return "", fmt.Errorf("extension system not initialized")
-	}
-
-	gateCtx, gateResult, err := o.gateExtToolCall(ctx, extensionPageOrigin(extension), o.pageGrantSessionID(assetID), assetID, command)
-	decision := gateResult.decision
-	extAuditWriter.WriteToolCall(gateCtx, audit.ToolCallInfo{
-		ToolName: "exec",
-		ArgsJSON: fmt.Sprintf(`{"asset_id":%d,"command":%q}`, assetID, command),
-		Command:  gateResult.normalizedCommand,
-		Result:   gateResult.output,
-		Error:    err,
-		Decision: &decision,
-	})
-	if err != nil {
-		return "", err
-	}
-	if decision.Decision != aictx.Allow {
-		return "", errors.New(gateResult.output)
-	}
-	return gateResult.output, nil
-}
-
-// pageGrantSessionID names the grant session a page call's "always allow" is
-// persisted under and matched against. A page has no session concept of its own
-// the way an AI conversation or an opsctl CLI invocation does, so it is derived
-// from the asset and this desktop run: "always allow" set from one open page (or
-// tab, or a page reopened later) is honored by a call from another in the same
-// run, and — like every other grant session, bounded by its conversation or its
-// opsctl session — does not outlive it as a permanent rule the asset's policy
-// card never shows.
-func (o *Opsctl) pageGrantSessionID(assetID int64) string {
-	return fmt.Sprintf("ext_page_%s_asset_%d", o.pageRunID, assetID)
 }
 
 // extAuditWriter 与 opsctl CLI 侧用的是同一个默认写入器实现，两条路径落同一组列语义。

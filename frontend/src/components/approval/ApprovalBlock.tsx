@@ -21,7 +21,9 @@ import { permission } from "../../../wailsjs/go/models";
 import type { ContentBlock } from "@/stores/aiStore";
 import { hasApprovalCommandEdits } from "@/lib/approval";
 import { ApprovalClassification } from "./ApprovalClassification";
+import { ExtensionRequestDetail } from "./ExtensionRequestDetail";
 import { ReviewNotice } from "./ReviewNotice";
+import { TruncatedText } from "./TruncatedText";
 import { RememberPatternEditor } from "./RememberPatternEditor";
 import { hasRememberPatternErrors, rememberPrefill } from "./rememberPattern";
 
@@ -179,6 +181,7 @@ export const ApprovalBlock = memo(function ApprovalBlock({ block }: ApprovalBloc
                 <ApprovalClassification
                   action={item.action}
                   resource={item.resource}
+                  resources={item.resources}
                   className="text-[11px]"
                   labelClassName="text-warning"
                 />
@@ -196,7 +199,7 @@ export const ApprovalBlock = memo(function ApprovalBlock({ block }: ApprovalBloc
                       data-testid="ai-approval-command"
                       className="select-text block font-mono text-[11px] text-muted-foreground whitespace-pre-wrap break-all"
                     >
-                      {item.command}
+                      <TruncatedText testId="ai-approval-command-text" text={item.command} />
                     </code>
                   </div>
                 )}
@@ -205,12 +208,12 @@ export const ApprovalBlock = memo(function ApprovalBlock({ block }: ApprovalBloc
                     // 删除不可逆：警告不能藏在一次点击之后，常驻展示而不是 <details> 折叠。
                     <div className="text-[10px] text-muted-foreground/80">
                       <div className="select-none">{t(detailSummaryKey(item))}</div>
-                      <DetailPre text={item.detail} />
+                      <DetailPre text={item.detail} structured={!!item.action} />
                     </div>
                   ) : (
                     <details className="text-[10px] text-muted-foreground/80">
                       <summary className="cursor-pointer select-none">{t(detailSummaryKey(item))}</summary>
-                      <DetailPre text={item.detail} />
+                      <DetailPre text={item.detail} structured={!!item.action} />
                     </details>
                   ))}
               </div>
@@ -362,11 +365,16 @@ function detailSummaryKey(item: { type: string; action?: string }): string {
   }
 }
 
-function DetailPre({ text }: { text: string }) {
+// structured：扩展请求的 detail 是 {tool, args} JSON，逐参数展示并截断超长值。
+function DetailPre({ text, structured }: { text: string; structured: boolean }) {
   return (
-    <pre className="select-text mt-1.5 max-h-48 overflow-auto rounded bg-warning/5 px-2 py-1.5 font-mono whitespace-pre-wrap break-all">
-      {text}
-    </pre>
+    <div className="mt-1.5 max-h-48 overflow-auto rounded bg-warning/5 px-2 py-1.5">
+      {structured ? (
+        <ExtensionRequestDetail detail={text} />
+      ) : (
+        <pre className="select-text font-mono whitespace-pre-wrap break-all">{text}</pre>
+      )}
+    </div>
   );
 }
 

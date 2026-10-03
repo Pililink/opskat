@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"time"
 )
 
@@ -15,7 +16,8 @@ import (
 //
 //	opskat.Tool("list_objects", handler).Policy("list").Doc("tools.list_objects.description")
 //
-// or, when the action depends on the arguments, .PolicyFunc(actions, classify).
+// or, when the action depends on the arguments, .PolicyFunc(actions, classify)
+// (.PolicyResources when one call may touch several resources).
 //
 // describe() is generated from these registries, so a declaration cannot drift
 // from the handler that serves it: there is no second list to update. The
@@ -67,11 +69,20 @@ type toolEntry struct {
 	schema   map[string]any
 	invoke   func(ctx *ToolContext) (any, error)
 	resource func(args json.RawMessage) string
-	// actions and classify are set by PolicyFunc, in place of action / resource.
-	actions  []string
-	classify func(args json.RawMessage) (action, resource string, err error)
+	// actions and classify are set by PolicyFunc or PolicyResources, in place of
+	// action / resource. multiResource records which: it picks the check_policy
+	// reply shape (see dispatchPolicy) — PolicyFunc's single resource is a literal
+	// name, PolicyResources' resources may carry '*' / '?' wildcards.
+	actions       []string
+	classify      func(args json.RawMessage) (action string, resources []string, err error)
+	multiResource bool
+	// reject is set by RejectArgs: it answers a non-nil *ArgsRejectedError for
+	// arguments the tool refuses, and err for arguments that do not decode.
+	reject func(args json.RawMessage) (*ArgsRejectedError, error)
 	// timeout is the tool's own call timeout; 0 leaves the host default.
 	timeout time.Duration
+	// fileParams are the string parameters opsctl may read from a file (FileParam).
+	fileParams []string
 }
 
 type assetTypeEntry struct {
@@ -175,12 +186,42 @@ func Tool[T any](name string, handler func(ctx *ToolContext, args T) (any, error
 	return &ToolReg[T]{e: entry}
 }
 
+// FileParam marks the string parameter name (its JSON field name) as file-readable:
+// `opsctl exec <asset> -- <tool> --<name>-file <path>` (or `-` for stdin) is
+// exactly `--<name> <file content>`, so a large payload — an NDJSON bulk body —
+// need not be squeezed onto a command line. The marker changes nothing in the
+// handler, which still receives the content as the ordinary argument, and nothing
+// in policy, approval or audit, which see the content too. Only opsctl reads files:
+// AI exec and extension pages reject the `-file` form.
+//
+// It panics unless name is a declared string parameter whose `<name>-file`
+// spelling is not a parameter too, and on a repeat: like every other registration
+// error it fails the extension at load, not at first use.
+func (r *ToolReg[T]) FileParam(name string) *ToolReg[T] {
+	props, _ := r.e.schema["properties"].(map[string]any)
+	prop, ok := props[name].(map[string]any)
+	if !ok {
+		panic(fmt.Sprintf("opskat: tool %q FileParam(%q): no such parameter", r.e.name, name))
+	}
+	if _, clash := props[name+"-file"]; clash {
+		panic(fmt.Sprintf("opskat: tool %q FileParam(%q): %q is itself a parameter, which opsctl would read as the file form", r.e.name, name, name+"-file"))
+	}
+	if typ, _ := prop["type"].(string); typ != "string" {
+		panic(fmt.Sprintf("opskat: tool %q FileParam(%q): only a string parameter can be read from a file, not %v", r.e.name, name, prop["type"]))
+	}
+	if slices.Contains(r.e.fileParams, name) {
+		panic(fmt.Sprintf("opskat: tool %q FileParam(%q) is already declared", r.e.name, name))
+	}
+	r.e.fileParams = append(r.e.fileParams, name)
+	return r
+}
+
 // Policy declares which policy action this tool requests. The host matches it
 // against the user's permission groups before the tool runs; every tool needs
-// either this or PolicyFunc.
+// either this, PolicyFunc or PolicyResources.
 func (r *ToolReg[T]) Policy(action string) *ToolReg[T] {
 	if r.e.classify != nil {
-		panic(fmt.Sprintf("opskat: tool %q already classifies its calls with PolicyFunc; Policy and PolicyFunc are exclusive", r.e.name))
+		panic(fmt.Sprintf("opskat: tool %q already classifies its calls with PolicyFunc/PolicyResources; Policy is exclusive with both", r.e.name))
 	}
 	r.e.action = action
 	return r
@@ -200,22 +241,107 @@ func (r *ToolReg[T]) Policy(action string) *ToolReg[T] {
 // writes), or to derive action and resource in one place. A tool whose action is
 // fixed may equally keep Policy, plus Resource when it reports a resource.
 func (r *ToolReg[T]) PolicyFunc(actions []string, fn func(args T) (action, resource string)) *ToolReg[T] {
+	r.setClassify("PolicyFunc", actions, false, func(args T) (string, []string) {
+		action, resource := fn(args)
+		return action, []string{resource}
+	})
+	return r
+}
+
+// PolicyResources classifies each call from its arguments like PolicyFunc, for a
+// call that may touch several resources at once (one request naming several
+// indices, a bulk body spanning many): fn returns the action and every resource
+// the call touches — zero, one or many. A '*' or '?' in a resource is a wildcard:
+// the resource stands for every name it could match (an index pattern such as
+// logs-*). Every other character is literal.
+//
+// The host judges the call per resource: it is denied if any resource hits a deny
+// rule (a wildcard resource hits when the deny glob could match one of its names),
+// allowed only when every resource is covered by an allow rule or grant (a
+// wildcard resource must be covered for every name it could stand for), and asked
+// about otherwise. Zero resources is judged like PolicyFunc's empty resource.
+//
+// actions is the set fn can return, as for PolicyFunc. The reply is
+// {"action","resources"}, which only a host speaking hostABI 2.2 understands — an
+// extension using PolicyResources must declare hostABI "2.2" so an older app
+// refuses it instead of judging the call on no resource at all.
+func (r *ToolReg[T]) PolicyResources(actions []string, fn func(args T) (action string, resources []string)) *ToolReg[T] {
+	r.setClassify("PolicyResources", actions, true, fn)
+	return r
+}
+
+// setClassify installs a per-call classification (PolicyFunc / PolicyResources).
+func (r *ToolReg[T]) setClassify(method string, actions []string, multiResource bool, fn func(args T) (string, []string)) {
 	if len(actions) == 0 {
-		panic(fmt.Sprintf("opskat: tool %q: PolicyFunc needs the set of actions it can return", r.e.name))
+		panic(fmt.Sprintf("opskat: tool %q: %s needs the set of actions it can return", r.e.name, method))
 	}
-	if r.e.action != "" || r.e.resource != nil {
-		panic(fmt.Sprintf("opskat: tool %q already declares Policy/Resource; PolicyFunc replaces both", r.e.name))
+	if r.e.action != "" || r.e.resource != nil || r.e.classify != nil {
+		panic(fmt.Sprintf("opskat: tool %q already declares its policy; %s replaces Policy/Resource and excludes the other classifier", r.e.name, method))
 	}
 	r.e.actions = append([]string(nil), actions...)
-	r.e.classify = func(raw json.RawMessage) (string, string, error) {
+	r.e.multiResource = multiResource
+	r.e.classify = func(raw json.RawMessage) (string, []string, error) {
 		args, err := decodeArgs[T](raw)
 		if err != nil {
-			return "", "", fmt.Errorf("tool %s: %w", r.e.name, err)
+			return "", nil, fmt.Errorf("tool %s: %w", r.e.name, err)
 		}
-		action, resource := fn(args)
-		return action, resource, nil
+		action, resources := fn(args)
+		return action, resources, nil
+	}
+}
+
+// RejectArgs lets the tool refuse a call's arguments outright: fn returns nil to
+// accept them, or an error whose text is the reason they can never run — a request
+// path naming a host of its own, say, when every request must go to the asset.
+//
+// A refusal is not a classification. check_policy answers {"reject":"<reason>"}
+// instead of an action and resources, and the host denies the call with that
+// reason — no rule, grant or approval dialog can let it through, so the user is
+// never asked about a call that would only fail afterwards — and audits it as a
+// deny. execute_tool refuses it too, before the handler runs, so a call that
+// reaches the tool without a policy check (an extension page) is held to the same
+// rule and the handler needs no second copy of it. Both answer the refusal as an
+// *ArgsRejectedError. fn runs before the tool's classifier, which therefore only
+// ever sees accepted arguments; arguments that do not decode into T fail the call
+// as they always have.
+//
+// Reserve it for arguments that are wrong whatever the user's rules say; what a
+// user may or may not do is the policy's to decide. The {"reject"} reply is part
+// of hostABI 2.2: an extension using RejectArgs must declare "2.2", like
+// PolicyResources. It panics when the tool already declares one.
+func (r *ToolReg[T]) RejectArgs(fn func(args T) error) *ToolReg[T] {
+	if r.e.reject != nil {
+		panic(fmt.Sprintf("opskat: tool %q already declares RejectArgs", r.e.name))
+	}
+	r.e.reject = func(raw json.RawMessage) (*ArgsRejectedError, error) {
+		args, err := decodeArgs[T](raw)
+		if err != nil {
+			return nil, fmt.Errorf("tool %s: %w", r.e.name, err)
+		}
+		if err := fn(args); err != nil {
+			return &ArgsRejectedError{Reason: err.Error()}, nil
+		}
+		return nil, nil
 	}
 	return r
+}
+
+// ArgsRejectedError is a call refused by the tool's RejectArgs: what check_policy
+// and execute_tool answer for it, and what TestHost's CheckPolicy and CallTool
+// return, so a test can tell the refusal from any other failure with errors.As.
+type ArgsRejectedError struct {
+	// Reason is the error text RejectArgs' fn returned.
+	Reason string
+}
+
+func (e *ArgsRejectedError) Error() string { return e.Reason }
+
+// checkArgs runs the tool's RejectArgs, if it declares one.
+func (e *toolEntry) checkArgs(args json.RawMessage) (*ArgsRejectedError, error) {
+	if e.reject == nil {
+		return nil, nil
+	}
+	return e.reject(args)
 }
 
 // maxToolTimeout mirrors the host's ceiling (pkg/extension MaxToolTimeout): a
@@ -244,7 +370,7 @@ func (r *ToolReg[T]) Doc(description string) *ToolReg[T] {
 // Resource derives the resource string reported alongside the fixed policy action.
 func (r *ToolReg[T]) Resource(fn func(args T) string) *ToolReg[T] {
 	if r.e.classify != nil {
-		panic(fmt.Sprintf("opskat: tool %q already classifies its calls with PolicyFunc, which returns the resource", r.e.name))
+		panic(fmt.Sprintf("opskat: tool %q already classifies its calls with PolicyFunc/PolicyResources, which return the resource", r.e.name))
 	}
 	r.e.resource = func(raw json.RawMessage) string {
 		args, err := decodeArgs[T](raw)

@@ -4,8 +4,8 @@ import { OpsctlApprovalDialog } from "../components/approval/OpsctlApprovalDialo
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 import { RespondOpsctlApproval } from "../../wailsjs/go/opsctl/Opsctl";
 
-// 标题要点名是哪个扩展的页面：插值参数必须可观察，所以本文件的 t 把参数一并渲染出来
-// （同 ActiveTasksQuitDialog.test.tsx 的写法），全局 setup 的 t 会把它们丢掉。
+// 插值参数必须可观察，所以本文件的 t 把参数一并渲染出来（同 ActiveTasksQuitDialog.test.tsx
+// 的写法），全局 setup 的 t 会把它们丢掉。
 vi.mock("react-i18next", () => {
   const t = (key: string, params?: Record<string, unknown>) => (params ? `${key}(${JSON.stringify(params)})` : key);
   const i18n = { language: "en", changeLanguage: vi.fn() };
@@ -45,9 +45,7 @@ function fireClassifiedApproval(
       action: "delete",
       resource: "logs-app",
       remember_pattern: "delete:logs-app",
-      session_id: "ext_page_run_asset_3",
-      source: "extension_page",
-      extension: "ES Verify",
+      session_id: "opsctl-session-1",
       ...overrides,
     });
   });
@@ -131,8 +129,6 @@ describe("OpsctlApprovalDialog — 分类审批的「记住」编辑器", () => 
       action: "",
       resource: "",
       remember_pattern: "",
-      source: "opsctl",
-      extension: "",
     });
 
     fireEvent.click(screen.getByText("opsctlApproval.remember"));
@@ -144,28 +140,76 @@ describe("OpsctlApprovalDialog — 分类审批的「记住」编辑器", () => 
   });
 });
 
-describe("OpsctlApprovalDialog — 审批来源", () => {
+describe("OpsctlApprovalDialog — 多资源与超长参数", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("扩展页面发起的审批标题点名扩展页面，不再是 CLI 审批", () => {
+  function fireMultiResource(handlers: Map<string, (data: unknown) => void>, overrides: Record<string, unknown> = {}) {
+    fireClassifiedApproval(handlers, {
+      resource: "",
+      resources: ["logs-a", "logs-b", "metrics-1"],
+      remember_pattern: "delete",
+      ...overrides,
+    });
+  }
+
+  it("列出动作与全部资源", () => {
     const handlers = captureHandlers();
     render(<OpsctlApprovalDialog />);
-    fireClassifiedApproval(handlers);
+    fireMultiResource(handlers);
 
-    expect(screen.getByText('opsctlApproval.extensionPageTitle({"extension":"ES Verify"})')).toBeInTheDocument();
-    expect(screen.getByText('opsctlApproval.extensionPageDescription({"extension":"ES Verify"})')).toBeInTheDocument();
-    expect(screen.queryByText("opsctlApproval.title")).not.toBeInTheDocument();
-    expect(screen.queryByText("opsctlApproval.description")).not.toBeInTheDocument();
+    expect(screen.getByText("delete")).toBeInTheDocument();
+    const resources = screen.getAllByTestId("approval-resource").map((el) => el.textContent);
+    expect(resources).toEqual(["logs-a", "logs-b", "metrics-1"]);
   });
 
-  it("opsctl 发起的审批保持原标题", () => {
+  it("多资源的记住预填取后端给的规则，原样发回不算编辑", () => {
     const handlers = captureHandlers();
     render(<OpsctlApprovalDialog />);
-    fireClassifiedApproval(handlers, { source: "opsctl", extension: "" });
+    fireMultiResource(handlers, { resources: ["logs-a", "logs-b"], remember_pattern: "delete:logs-*" });
 
-    expect(screen.getByText("opsctlApproval.title")).toBeInTheDocument();
-    expect(screen.getByText("opsctlApproval.description")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("opsctlApproval.remember"));
+    expect(screen.getByTestId("approval-remember-pattern")).toHaveValue("delete:logs-*");
+    fireEvent.click(screen.getByText("opsctlApproval.approve"));
+
+    const response = vi.mocked(RespondOpsctlApproval).mock.calls[0]?.[1];
+    expect(response?.decision).toBe("allowAll");
+    expect(response?.edited_items).toBeUndefined();
+  });
+
+  it("预填退回裸动作时不报错、可直接提交；手改成别的裸动作仍报错", () => {
+    const handlers = captureHandlers();
+    render(<OpsctlApprovalDialog />);
+    fireMultiResource(handlers);
+
+    fireEvent.click(screen.getByText("opsctlApproval.remember"));
+    expect(screen.getByTestId("approval-remember-pattern")).toHaveValue("delete");
+    expect(screen.queryByTestId("approval-remember-pattern-error")).not.toBeInTheDocument();
+    expect(screen.getByText("opsctlApproval.approve")).toBeEnabled();
+
+    fireEvent.change(screen.getByTestId("approval-remember-pattern"), { target: { value: "get" } });
+    expect(screen.getByTestId("approval-remember-pattern-error")).toBeInTheDocument();
+    expect(screen.getByText("opsctlApproval.approve")).toBeDisabled();
+  });
+
+  it("超长参数值截断显示并标出总大小，可展开看全文", () => {
+    const handlers = captureHandlers();
+    render(<OpsctlApprovalDialog />);
+    const body = "x".repeat(5000) + "TAIL-MARKER";
+    fireClassifiedApproval(handlers, {
+      detail: JSON.stringify({ tool: "request", args: { method: "POST", body } }, null, 2),
+    });
+
+    fireEvent.click(screen.getByText("ai.approvalRequestDetail"));
+    const value = screen.getByTestId("approval-arg-body");
+    expect(value.textContent).not.toContain("TAIL-MARKER");
+    expect(screen.getByTestId("approval-arg-body-size")).toHaveTextContent("4.9 KB");
+    // 短参数不受影响
+    expect(screen.getByTestId("approval-arg-method")).toHaveTextContent("POST");
+    expect(screen.queryByTestId("approval-arg-method-size")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("approval-arg-body-toggle"));
+    expect(screen.getByTestId("approval-arg-body").textContent).toBe(body);
   });
 });

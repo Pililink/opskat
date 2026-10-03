@@ -13,6 +13,8 @@ import {
 import { useWailsEvent } from "@/hooks/useWailsEvent";
 import { S3Icon } from "@/components/asset/brand-icons";
 import { ApprovalClassification } from "./ApprovalClassification";
+import { ExtensionRequestDetail } from "./ExtensionRequestDetail";
+import { TruncatedText } from "./TruncatedText";
 import { RememberPatternEditor } from "./RememberPatternEditor";
 import { hasRememberPatternErrors, rememberPrefill } from "./rememberPattern";
 import { RespondOpsctlApproval } from "../../../wailsjs/go/opsctl/Opsctl";
@@ -46,13 +48,11 @@ interface ApprovalItemData {
   // 以及"记住"实际落库的 <action>:<resource-glob>。
   action?: string;
   resource?: string;
+  resources?: string[];
   remember_pattern?: string;
   // 模型审核结果：辅助审批下审核未通过或审核失败时才有，说明为什么要人确认。
   review?: ReviewInfo;
 }
-
-// 单条审批的发起方（internal/app/opsctl 的 approvalOrigin）：opsctl CLI，或某个扩展的页面。
-type ApprovalSource = "opsctl" | "extension_page";
 
 interface SingleApprovalEvent {
   confirm_id: string;
@@ -64,12 +64,10 @@ interface SingleApprovalEvent {
   detail?: string;
   action?: string;
   resource?: string;
+  resources?: string[];
   remember_pattern?: string;
   review?: ReviewInfo;
   session_id: string;
-  source: ApprovalSource;
-  // 扩展页面发起时是该扩展的显示名。
-  extension: string;
 }
 
 interface BatchApprovalEvent {
@@ -93,9 +91,6 @@ interface QueueItem {
   description?: string;
   sessionID?: string;
   editable: boolean;
-  // 只有单条审批事件带发起方；批量 / grant 审批只来自 opsctl。
-  source?: ApprovalSource;
-  extension?: string;
 }
 
 // 递归/通配 cp 一次展开出的路径可以到 200 条（D19 上限），原样铺开没法读。超过这条线
@@ -190,14 +185,13 @@ export function OpsctlApprovalDialog({ suspended = false }: { suspended?: boolea
               detail,
               action: data.action,
               resource: data.resource,
+              resources: data.resources,
               remember_pattern: data.remember_pattern,
               review: data.review,
             },
           ],
           sessionID: data.session_id,
           editable: false,
-          source: data.source,
-          extension: data.extension,
         });
       },
       [enqueue]
@@ -301,6 +295,7 @@ export function OpsctlApprovalDialog({ suspended = false }: { suspended?: boolea
       <ApprovalClassification
         action={item.action}
         resource={item.resource}
+        resources={item.resources}
         className="text-xs"
         labelClassName="text-foreground"
       />
@@ -319,7 +314,9 @@ export function OpsctlApprovalDialog({ suspended = false }: { suspended?: boolea
         />
       ) : (
         <div className="rounded-md bg-muted p-2 max-h-[150px] overflow-auto">
-          <code className="select-text text-xs font-mono whitespace-pre-wrap break-all">{item.command}</code>
+          <code className="text-xs font-mono">
+            <TruncatedText testId="approval-command-text" text={item.command} />
+          </code>
         </div>
       )}
       {item.detail &&
@@ -328,9 +325,9 @@ export function OpsctlApprovalDialog({ suspended = false }: { suspended?: boolea
           // <details> 折叠机制展示（与 ApprovalBlock.tsx 同一套），而不是常驻铺开。
           <details className="text-xs text-muted-foreground">
             <summary className="cursor-pointer select-none">{t("ai.approvalRequestDetail")}</summary>
-            <pre className="select-text mt-1 max-h-48 overflow-auto rounded bg-muted p-2 font-mono whitespace-pre-wrap break-all">
-              {item.detail}
-            </pre>
+            <div className="mt-1 max-h-48 overflow-auto rounded bg-muted p-2 text-xs">
+              <ExtensionRequestDetail detail={item.detail} />
+            </div>
           </details>
         ) : (
           <div className="select-text text-xs text-muted-foreground font-mono whitespace-pre-wrap">{item.detail}</div>
@@ -404,9 +401,7 @@ export function OpsctlApprovalDialog({ suspended = false }: { suspended?: boolea
                     ? t("opsctlApproval.batchTitle")
                     : current.kind === "delete"
                       ? t("ai.approvalDeleteTitle")
-                      : current.source === "extension_page"
-                        ? t("opsctlApproval.extensionPageTitle", { extension: current.extension })
-                        : t("opsctlApproval.title")}
+                      : t("opsctlApproval.title")}
                 {queue.length > 1 && (
                   <span className="text-sm font-normal text-muted-foreground">(1/{queue.length})</span>
                 )}
@@ -416,11 +411,9 @@ export function OpsctlApprovalDialog({ suspended = false }: { suspended?: boolea
                   ? t("opsctlApproval.grantDescription")
                   : current.kind === "batch"
                     ? t("opsctlApproval.batchDescription", { count: current.items.length })
-                    : current.source === "extension_page"
-                      ? t("opsctlApproval.extensionPageDescription", { extension: current.extension })
-                      : current.items[0]?.type === "ext_dev_install"
-                        ? t("opsctlApproval.extDevInstallDescription")
-                        : t("opsctlApproval.description")}
+                    : current.items[0]?.type === "ext_dev_install"
+                      ? t("opsctlApproval.extDevInstallDescription")
+                      : t("opsctlApproval.description")}
               </DialogDescription>
             </DialogHeader>
 

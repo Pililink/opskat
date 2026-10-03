@@ -16,16 +16,22 @@ type ApprovalItem struct {
 	GroupName string `json:"group_name,omitempty"`
 	Command   string `json:"command"`
 	Detail    string `json:"detail,omitempty"`
-	// Action / Resource are set only for extension types registered with a
-	// ClassifyFunc (type_registry.go): the check_policy classification of Command,
-	// shown next to it so approving means approving a legible (action, resource)
-	// pair rather than only an opaque exec string (spec 参数级策略 › 审批展示).
-	Action   string `json:"action,omitempty"`
-	Resource string `json:"resource,omitempty"`
-	// RememberPattern is set together with Action: the "<action>:<resource-glob>"
-	// tail an "always allow" persists as ext:<type>:<tail> (resource glob-escaped, so
-	// untouched it grants only the resource shown). The "Remember" editor pre-fills
-	// and edits this instead of Command; an edited value must keep "<action>:".
+	// Action / Resource / Resources are set only for extension types registered
+	// with a ClassifyFunc (type_registry.go): the check_policy classification of
+	// Command, shown next to it so approving means approving a legible (action,
+	// resources) pair rather than only an opaque exec string (spec 参数级策略 ›
+	// 审批展示). Resources lists every resource the call touches as the extension
+	// returned it; Resource is that resource when there is exactly one.
+	Action    string   `json:"action,omitempty"`
+	Resource  string   `json:"resource,omitempty"`
+	Resources []string `json:"resources,omitempty"`
+	// RememberPattern is set together with Action: the "<action>[:<resource-glob>]"
+	// tail an "always allow" persists as ext:<type>:<tail>. One resource: its exact
+	// tail (a literal resource glob-quoted, so untouched it grants only the resource
+	// shown). Several: the narrowest "<action>:<common-prefix>*" covering all of
+	// them, else the bare action (multiResourceRememberPattern). The "Remember"
+	// editor pre-fills and edits this instead of Command; an edited value must keep
+	// "<action>:", and echoing the pre-fill back unchanged is no edit.
 	RememberPattern string `json:"remember_pattern,omitempty"`
 	// Review 是模型审核结果：辅助审批下审核未通过或审核失败时带上，给人看为什么要确认。
 	Review *aictx.ReviewInfo `json:"review,omitempty"`
@@ -137,7 +143,9 @@ func ParseApprovalResponse(kind string, resp ApprovalResponse, expectedItems ...
 				if want.Action != "" {
 					// A classified extension item's Remember value is its grant tail,
 					// not its command text (see ApprovalItem.RememberPattern).
-					if err := validateExtGrantEdit(want.Action, item.Command); err != nil {
+					// Echoing the backend's own pre-fill is no edit and is trusted as
+					// is — it may be the bare action, which a typed edit may not be.
+					if err := validateExtGrantEdit(want.Action, item.Command); err != nil && item.Command != want.RememberPattern {
 						return ParsedApprovalResponse{Decision: ApprovalDeny},
 							fmt.Errorf("approval edited_items[%d]: %w", i, err)
 					}

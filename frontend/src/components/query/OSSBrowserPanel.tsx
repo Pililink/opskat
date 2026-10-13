@@ -7,6 +7,7 @@ import { useResizeHandle, ConfirmDialog, Button } from "@opskat/ui";
 import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
 import { useOssBrowserStore } from "@/stores/ossBrowserStore";
 import { useOssTransferStore } from "@/stores/ossTransferStore";
+import { useAssetStore } from "@/stores/assetStore";
 import { flattenPrefixTree } from "@/lib/ossPrefixTree";
 import { formatBytes } from "@/lib/formatBytes";
 import { notifySuccess } from "@/lib/notify";
@@ -18,6 +19,7 @@ import { OSSObjectDetail } from "@/components/oss/OSSObjectDetail";
 import { OSSPresignDialog } from "@/components/oss/OSSPresignDialog";
 import { OSSTransferDock } from "@/components/oss/OSSTransferDock";
 import { useOssFileDrop } from "@/components/oss/useOssFileDrop";
+import { parseOSSConfig } from "@/components/asset/OSSConfigSection.config";
 import { NameDialog } from "@/components/common/NameDialog";
 
 export interface OSSBrowserPanelProps {
@@ -62,9 +64,12 @@ export function OSSBrowserPanel({ tabId }: OSSBrowserPanelProps) {
 
   const fail = useCallback((e: unknown) => toast.error(`${t("oss.browser.loadFailed")}: ${String(e)}`), [t]);
 
+  const assetConfig = useAssetStore((s) => s.assets.find((a) => a.ID === assetId)?.Config);
+  const defaultBucket = useMemo(() => parseOSSConfig(assetConfig ?? "").bucket, [assetConfig]);
+
   useEffect(() => {
-    if (assetId) void loadBuckets(tabId, assetId).catch(fail);
-  }, [assetId, tabId, loadBuckets, fail]);
+    if (assetId) void loadBuckets(tabId, assetId, defaultBucket).catch(fail);
+  }, [assetId, tabId, defaultBucket, loadBuckets, fail]);
 
   const rows = useMemo(() => (state ? flattenPrefixTree(state.tree, state.expanded, "") : []), [state]);
 

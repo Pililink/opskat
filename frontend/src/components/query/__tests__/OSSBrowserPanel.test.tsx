@@ -4,12 +4,15 @@ import { OSSCreateFolder, OSSListBuckets, OSSListObjects, OSSUploadObject } from
 import { OSSBrowserPanel } from "../OSSBrowserPanel";
 import { useTabStore } from "@/stores/tabStore";
 import { useOssBrowserStore } from "@/stores/ossBrowserStore";
+import { useAssetStore } from "@/stores/assetStore";
 
 const TAB = "query-7";
 
 beforeEach(() => {
   vi.mocked(OSSListBuckets).mockReset();
+  vi.mocked(OSSListObjects).mockReset();
   useOssBrowserStore.setState({ tabs: {} });
+  useAssetStore.setState({ assets: [] });
   useTabStore.setState({
     tabs: [
       {
@@ -42,6 +45,24 @@ describe("OSSBrowserPanel", () => {
     await waitFor(() => expect(OSSListBuckets).toHaveBeenCalledWith(7));
     expect(await screen.findByTestId("oss-bucket-b1")).toBeInTheDocument();
     expect(screen.getByTestId("oss-browser-panel")).toBeInTheDocument();
+  });
+
+  it("opens straight into the asset's default bucket", async () => {
+    useAssetStore.setState({
+      assets: [{ ID: 7, Type: "oss", Config: '{"endpoint":"e","access_key_id":"a","bucket":"ootd"}' }] as never,
+    });
+    vi.mocked(OSSListBuckets).mockResolvedValue([{ name: "ootd", creationDate: 0 }] as never);
+    vi.mocked(OSSListObjects).mockResolvedValue({
+      prefixes: [],
+      objects: [],
+      nextContinuationToken: "",
+      isTruncated: false,
+    } as never);
+    render(<OSSBrowserPanel tabId={TAB} />);
+    await waitFor(() =>
+      expect(OSSListObjects).toHaveBeenCalledWith(expect.objectContaining({ assetId: 7, bucket: "ootd", prefix: "" }))
+    );
+    expect(screen.queryByTestId("oss-no-bucket")).not.toBeInTheDocument();
   });
 
   it("guards against a missing asset id", () => {

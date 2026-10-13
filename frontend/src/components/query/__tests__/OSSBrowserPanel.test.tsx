@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
-import { OSSCreateFolder, OSSListBuckets, OSSListObjects, OSSUploadObject } from "../../../../wailsjs/go/oss/OSS";
+import {
+  OSSCreateFolder,
+  OSSDownloadFolder,
+  OSSListBuckets,
+  OSSListObjects,
+  OSSUploadObject,
+} from "../../../../wailsjs/go/oss/OSS";
 import { OSSBrowserPanel } from "../OSSBrowserPanel";
 import { useTabStore } from "@/stores/tabStore";
 import { useOssBrowserStore } from "@/stores/ossBrowserStore";
@@ -11,6 +17,7 @@ const TAB = "query-7";
 beforeEach(() => {
   vi.mocked(OSSListBuckets).mockReset();
   vi.mocked(OSSListObjects).mockReset();
+  vi.mocked(OSSDownloadFolder).mockReset();
   useOssBrowserStore.setState({ tabs: {} });
   useAssetStore.setState({ assets: [] });
   useTabStore.setState({
@@ -93,6 +100,31 @@ describe("OSSBrowserPanel", () => {
     );
     fireEvent.click(await screen.findByTestId("oss-upload"));
     await waitFor(() => expect(OSSUploadObject).toHaveBeenCalledWith(7, "b1", "docs/"));
+  });
+
+  it.each(["list", "grid"] as const)("downloads a folder of the current bucket from the %s view", async (viewMode) => {
+    vi.mocked(OSSListBuckets).mockResolvedValue([{ name: "b1", creationDate: 0 }] as never);
+    vi.mocked(OSSDownloadFolder).mockResolvedValue("" as never);
+    render(<OSSBrowserPanel tabId={TAB} />);
+    await screen.findByTestId("oss-bucket-b1");
+    useOssBrowserStore.setState(
+      (s) =>
+        ({
+          tabs: {
+            ...s.tabs,
+            [TAB]: {
+              ...s.tabs[TAB],
+              viewMode,
+              currentBucket: "b1",
+              currentPrefix: "docs/",
+              listing: { objects: [], prefixes: ["docs/sub/"], truncated: false, cursor: "" },
+            },
+          },
+        }) as never
+    );
+    const testId = viewMode === "grid" ? "oss-grid-download-docs/sub/" : "oss-download-docs/sub/";
+    fireEvent.click(await screen.findByTestId(testId));
+    await waitFor(() => expect(OSSDownloadFolder).toHaveBeenCalledWith(7, "b1", "docs/sub/"));
   });
 
   it("opens an in-app dialog and creates a folder", async () => {

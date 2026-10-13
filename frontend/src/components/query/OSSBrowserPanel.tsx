@@ -52,6 +52,7 @@ export function OSSBrowserPanel({ tabId }: OSSBrowserPanelProps) {
   const transferTab = useOssTransferStore((s) => s.tabs[tabId]);
   const startUpload = useOssTransferStore((s) => s.startUpload);
   const startDownload = useOssTransferStore((s) => s.startDownload);
+  const startDownloadFolder = useOssTransferStore((s) => s.startDownloadFolder);
   const cancelTransfer = useOssTransferStore((s) => s.cancel);
   const clearTransfer = useOssTransferStore((s) => s.clear);
   const clearCompleted = useOssTransferStore((s) => s.clearCompleted);
@@ -167,6 +168,16 @@ export function OSSBrowserPanel({ tabId }: OSSBrowserPanelProps) {
     [assetId, state, startDownload, tabId, t]
   );
 
+  const onDownloadFolder = useCallback(
+    (prefix: string) => {
+      if (!assetId || !state?.currentBucket) return;
+      void startDownloadFolder(tabId, assetId, state.currentBucket, prefix).catch(() =>
+        toast.error(t("oss.transfer.downloadFailed"))
+      );
+    },
+    [assetId, state, startDownloadFolder, tabId, t]
+  );
+
   const confirmDelete = async () => {
     setConfirmOpen(false);
     try {
@@ -253,6 +264,7 @@ export function OSSBrowserPanel({ tabId }: OSSBrowserPanelProps) {
                   truncated={state.listing?.truncated ?? false}
                   thumbnails={state.thumbnails}
                   onNavigatePrefix={onNavigate}
+                  onDownloadFolder={onDownloadFolder}
                   onFocusObject={(key) => focusObject(tabId, key)}
                   onEnsureThumbnail={(key) => void ensureThumbnail(tabId, key)}
                   onScrollNearBottom={() => void loadNextPage(tabId).catch(fail)}
@@ -271,6 +283,7 @@ export function OSSBrowserPanel({ tabId }: OSSBrowserPanelProps) {
                   onFocusObject={(key) => focusObject(tabId, key)}
                   onScrollNearBottom={() => void loadNextPage(tabId).catch(fail)}
                   onDownload={onDownload}
+                  onDownloadFolder={onDownloadFolder}
                 />
               )}
               {transfers.length > 0 && (

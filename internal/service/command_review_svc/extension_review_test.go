@@ -3,6 +3,9 @@ package command_review_svc
 import (
 	"context"
 	"errors"
+	"sort"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,6 +19,7 @@ type fakeExtensionReviewer struct {
 	name, version, settingsHash string
 	maxItems, maxCommandLen     int
 	questions                   []extension.ReviewQuestion
+	mu                          sync.Mutex
 	calls                       [][]extension.ReviewItem
 	reply                       func(items []extension.ReviewItem) ([]extension.ReviewCommandResult, error)
 }
@@ -27,7 +31,9 @@ func (f *fakeExtensionReviewer) Limits() (int, int)                    { return 
 func (f *fakeExtensionReviewer) Questions() []extension.ReviewQuestion { return f.questions }
 func (f *fakeExtensionReviewer) Review(_ context.Context, items []extension.ReviewItem) ([]extension.ReviewCommandResult, error) {
 	cp := append([]extension.ReviewItem(nil), items...)
+	f.mu.Lock()
 	f.calls = append(f.calls, cp)
+	f.mu.Unlock()
 	return f.reply(items)
 }
 
@@ -95,9 +101,10 @@ func TestExtensionReviewerSplitsBatchesAndRejectsOverlong(t *testing.T) {
 	})
 
 	require.Len(t, rev.calls, 2, "maxItems=2，三条可审命令要拆成两次调用")
-	assert.Len(t, rev.calls[0], 2)
-	assert.Len(t, rev.calls[1], 1)
-	assert.Equal(t, "ls", rev.calls[0][0].Command)
+	// 批次并发调用，先后不定：按批的大小排好再比。
+	sort.Slice(rev.calls, func(i, j int) bool { return len(rev.calls[i]) > len(rev.calls[j]) })
+	assert.Equal(t, []string{"ls", "pwd"}, []string{rev.calls[0][0].Command, rev.calls[0][1].Command})
+	assert.Equal(t, "who", rev.calls[1][0].Command)
 	assert.Equal(t, OutcomePass, got[0].Outcome)
 	assert.Equal(t, OutcomePass, got[2].Outcome)
 	assert.Equal(t, OutcomeFail, got[3].Outcome)
@@ -195,6 +202,54 @@ func TestExtensionReviewerTimeout(t *testing.T) {
 	r := s.Review(context.Background(), Input{AssetType: "ssh", Command: "ls"})
 	assert.Equal(t, OutcomeFail, r.Outcome)
 	assert.Equal(t, ReasonTimeout, r.Reason)
+	assert.Len(t, rev.calls, 2, "超时重试一次，和内置审核一样")
+	assert.Equal(t, 2, r.Attempts)
+}
+
+// 第一次超时（如 opsctl 新进程里第一次建连接）、第二次成功：照常得出结果。
+func TestExtensionReviewerRetriesOnceAfterTimeout(t *testing.T) {
+	var n atomic.Int32
+	rev := &fakeExtensionReviewer{
+		name: "rev", version: "1.0.0", maxItems: 8, maxCommandLen: 100,
+		reply: func(items []extension.ReviewItem) ([]extension.ReviewCommandResult, error) {
+			if n.Add(1) == 1 {
+				return nil, context.DeadlineExceeded
+			}
+			return passAll(items)
+		},
+	}
+	s, _ := newTestService(&fakeEvaluator{}, enabledConfig())
+	s.extension = func(context.Context) (ExtensionReviewer, error) { return rev, nil }
+
+	r := s.Review(context.Background(), Input{AssetType: "ssh", Command: "ls"})
+	assert.Equal(t, OutcomePass, r.Outcome)
+	assert.Equal(t, 2, r.Attempts)
+}
+
+// 单批只收一条的审核器也不能让一批命令排队：多个批次并发调用（扩展的实例池最多 4 个）。
+func TestExtensionReviewerBatchesRunConcurrently(t *testing.T) {
+	var waiting sync.WaitGroup
+	waiting.Add(2)
+	rev := &fakeExtensionReviewer{
+		name: "rev", version: "1.0.0", maxItems: 1, maxCommandLen: 100,
+		reply: func(items []extension.ReviewItem) ([]extension.ReviewCommandResult, error) {
+			waiting.Done()
+			done := make(chan struct{})
+			go func() { waiting.Wait(); close(done) }()
+			select {
+			case <-done:
+				return passAll(items)
+			case <-time.After(2 * time.Second):
+				return nil, errors.New("the other batch never ran alongside this one")
+			}
+		},
+	}
+	s, _ := newTestService(&fakeEvaluator{}, enabledConfig())
+	s.extension = func(context.Context) (ExtensionReviewer, error) { return rev, nil }
+
+	got := s.ReviewBatch(context.Background(), []Input{{AssetType: "ssh", Command: "ls"}, {AssetType: "ssh", Command: "pwd"}})
+	assert.Equal(t, OutcomePass, got[0].Outcome)
+	assert.Equal(t, OutcomePass, got[1].Outcome)
 }
 
 func passAll(items []extension.ReviewItem) ([]extension.ReviewCommandResult, error) {

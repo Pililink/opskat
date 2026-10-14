@@ -511,35 +511,64 @@ func (s *service) reviewWithExtension(ctx context.Context, rev ExtensionReviewer
 		pending = append(pending, pendingExt{idx: i, key: key, item: extension.ReviewItem{AssetType: in.AssetType, Command: command, Syntax: string(in.Syntax)}})
 	}
 
+	var batches [][]pendingExt
 	for start := 0; start < len(pending); start += maxItems {
-		end := start + maxItems
-		if end > len(pending) {
-			end = len(pending)
-		}
-		batch := pending[start:end]
-		items := make([]extension.ReviewItem, len(batch))
-		for i, p := range batch {
-			items[i] = p.item
-		}
-		reqCtx, cancel := context.WithTimeout(ctx, cfg.Timeout)
-		startAt := time.Now()
-		out, err := rev.Review(reqCtx, items)
-		elapsed := time.Since(startAt)
-		cancel()
-		if err != nil || len(out) != len(batch) {
+		batches = append(batches, pending[start:min(start+maxItems, len(pending))])
+	}
+
+	// 和内置审核一样：只有调用这一步并行（扩展的实例池最多 maxParallelReviews 个），
+	// 每次调用单独计时，超时重试一次；读写缓存按顺序做。
+	type call struct {
+		out      []extension.ReviewCommandResult
+		err      error
+		elapsed  time.Duration
+		attempts int
+	}
+	calls := make([]call, len(batches))
+	sem := make(chan struct{}, maxParallelReviews)
+	var wg sync.WaitGroup
+	for j, batch := range batches {
+		wg.Add(1)
+		go func(j int, batch []pendingExt) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			items := make([]extension.ReviewItem, len(batch))
+			for i, p := range batch {
+				items[i] = p.item
+			}
+			startAt := time.Now()
+			for attempt := 1; ; attempt++ {
+				reqCtx, cancel := context.WithTimeout(ctx, cfg.Timeout)
+				out, err := rev.Review(reqCtx, items)
+				cancel()
+				timedOut := errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil
+				if !timedOut || attempt == maxAttempts {
+					calls[j] = call{out: out, err: err, elapsed: time.Since(startAt), attempts: attempt}
+					return
+				}
+				logger.Ctx(ctx).Warn("extension command review timed out, retrying", zap.String("extension", name), zap.Int("attempt", attempt))
+			}
+		}(j, batch)
+	}
+	wg.Wait()
+
+	for j, batch := range batches {
+		c := calls[j]
+		if c.err != nil || len(c.out) != len(batch) {
 			reason := ReasonInvalidResult
-			if errors.Is(err, context.DeadlineExceeded) {
+			if errors.Is(c.err, context.DeadlineExceeded) {
 				reason = ReasonTimeout
 			}
-			logger.Ctx(ctx).Warn("extension command review failed", zap.String("extension", name), zap.String("reason", reason), zap.Error(err))
+			logger.Ctx(ctx).Warn("extension command review failed", zap.String("extension", name), zap.String("reason", reason), zap.Error(c.err))
 			for _, p := range batch {
-				results[p.idx] = s.recordFailure(Result{Outcome: OutcomeFail, Reason: reason, Extension: name, Version: version, Duration: elapsed, Attempts: 1})
+				results[p.idx] = s.recordFailure(Result{Outcome: OutcomeFail, Reason: reason, Extension: name, Version: version, Duration: c.elapsed, Attempts: c.attempts})
 			}
 			continue
 		}
 		s.recordSuccess()
 		for i, p := range batch {
-			r := extensionResult(name, version, questions, out[i], elapsed)
+			r := extensionResult(name, version, questions, c.out[i], c.elapsed, c.attempts)
 			if r.Outcome == OutcomeFail {
 				results[p.idx] = s.recordFailure(r)
 				continue
@@ -554,7 +583,7 @@ func (s *service) reviewWithExtension(ctx context.Context, rev ExtensionReviewer
 }
 
 // extensionResult 把审核扩展的回答落成宿主的结果：error 是"没能得到判断"，按审核失败处理。
-func extensionResult(name, version string, questions []extension.ReviewQuestion, r extension.ReviewCommandResult, elapsed time.Duration) Result {
+func extensionResult(name, version string, questions []extension.ReviewQuestion, r extension.ReviewCommandResult, elapsed time.Duration, attempts int) Result {
 	out := Result{
 		Outcome:   Outcome(r.Outcome),
 		Reason:    r.Reason,
@@ -562,7 +591,7 @@ func extensionResult(name, version string, questions []extension.ReviewQuestion,
 		Extension: name,
 		Version:   version,
 		Duration:  elapsed,
-		Attempts:  1,
+		Attempts:  attempts,
 	}
 	if r.Outcome == extension.ReviewOutcomeError {
 		out.Outcome = OutcomeFail

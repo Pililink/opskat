@@ -103,8 +103,6 @@ func Execute() int {
 	if _, err := bootstrap.LoadConfig(resolvedDataDir); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to load config: %v\n", err)
 	}
-	// 只在选了审核扩展时编译并实例化那一个；其余扩展保持 describe-only。
-	loadSelectedReviewer(ctx)
 
 	handlers := buildHandlerMap()
 

@@ -26,9 +26,9 @@ func TestActiveCommandReviewerRequiresLoadedReviewer(t *testing.T) {
 		Name: "rev",
 		Dir:  extDir,
 		Manifest: &extension.Manifest{
-			Name:    "rev",
-			Version: "1.0.0",
-			Backend: extension.ManifestBackend{Binary: "main.wasm"},
+			Name:         "rev",
+			Version:      "1.0.0",
+			Backend:      extension.ManifestBackend{Binary: "main.wasm"},
 			Capabilities: extension.Capabilities{CommandReview: true},
 			Reviewer: &extension.ReviewerDef{
 				Questions:     []extension.ReviewQuestion{{ID: "destructive", I18n: extension.I18nNames{Name: map[string]string{"en": "Destroys data"}}}},
@@ -50,5 +50,99 @@ func TestActiveCommandReviewerRequiresLoadedReviewer(t *testing.T) {
 
 	repo.rows["rev"].PackageSHA256 = "dead"
 	_, err = svc.ActiveCommandReviewer(context.Background(), "rev")
+	require.Error(t, err)
+}
+
+// writeReviewerPackage 写一个最小的已安装审核扩展目录，返回它的包摘要。
+func writeReviewerPackage(t *testing.T, root, name string) string {
+	t.Helper()
+	extDir := filepath.Join(root, name)
+	require.NoError(t, os.MkdirAll(extDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(extDir, "main.wasm"), []byte("wasm"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(extDir, "manifest.json"),
+		[]byte(`{"name":"`+name+`","version":"1.0.0","hostABI":"2.3","backend":{"runtime":"wasm","binary":"main.wasm"},"capabilities":{"commandReview":true}}`), 0o600))
+	sum, err := extension.PackageSHA256(extDir, "main.wasm")
+	require.NoError(t, err)
+	return sum
+}
+
+func reviewerExtension(name, dir string) *extension.Extension {
+	return &extension.Extension{
+		Name: name,
+		Dir:  dir,
+		Manifest: &extension.Manifest{
+			Name:         name,
+			Version:      "1.0.0",
+			Backend:      extension.ManifestBackend{Binary: "main.wasm"},
+			Capabilities: extension.Capabilities{CommandReview: true},
+			Reviewer: &extension.ReviewerDef{
+				Questions:     []extension.ReviewQuestion{{ID: "destructive", I18n: extension.I18nNames{Name: map[string]string{"en": "Destroys data"}}}},
+				MaxItems:      4,
+				MaxCommandLen: 100,
+			},
+		},
+		Plugin: &extension.Plugin{},
+	}
+}
+
+func TestActiveCommandReviewerLoadsOnDemand(t *testing.T) {
+	root := t.TempDir()
+	sum := writeReviewerPackage(t, root, "rev")
+	mgr := extension.NewManager(root, func(string) extension.HostProvider { return nil }, nopLogger())
+	repo := &memStateRepo{rows: map[string]*extension_state_entity.ExtensionState{
+		"rev": {Name: "rev", Enabled: true, Source: InstallOriginStore, PackageSHA256: sum},
+	}}
+	var loads []string
+	svc := &Service{manager: mgr, stateRepo: repo, logger: nopLogger(),
+		reviewerLoader: func(_ context.Context, dir string) error {
+			loads = append(loads, dir)
+			mgr.PutForTest(reviewerExtension("rev", dir))
+			return nil
+		}}
+
+	got, err := svc.ActiveCommandReviewer(context.Background(), "rev")
+	require.NoError(t, err)
+	require.Equal(t, "rev", got.Name)
+	require.Equal(t, []string{mgr.ExtDir("rev")}, loads)
+
+	_, err = svc.ActiveCommandReviewer(context.Background(), "rev")
+	require.NoError(t, err)
+	require.Len(t, loads, 1, "已加载的审核器不再重复加载")
+}
+
+func TestActiveCommandReviewerOnDemandChecksBeforeRunningCode(t *testing.T) {
+	cases := map[string]*extension_state_entity.ExtensionState{
+		"disabled":        {Name: "rev", Enabled: false, Source: InstallOriginStore},
+		"digest mismatch": {Name: "rev", Enabled: true, Source: InstallOriginStore, PackageSHA256: "dead"},
+	}
+	for name, state := range cases {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			sum := writeReviewerPackage(t, root, "rev")
+			if state.PackageSHA256 == "" {
+				state.PackageSHA256 = sum
+			}
+			mgr := extension.NewManager(root, func(string) extension.HostProvider { return nil }, nopLogger())
+			repo := &memStateRepo{rows: map[string]*extension_state_entity.ExtensionState{"rev": state}}
+			loaded := false
+			svc := &Service{manager: mgr, stateRepo: repo, logger: nopLogger(),
+				reviewerLoader: func(context.Context, string) error { loaded = true; return nil }}
+
+			_, err := svc.ActiveCommandReviewer(context.Background(), "rev")
+			require.Error(t, err)
+			require.False(t, loaded, "检查不过时不能运行扩展代码")
+		})
+	}
+}
+
+func TestActiveCommandReviewerWithoutOnDemandRequiresLoaded(t *testing.T) {
+	root := t.TempDir()
+	sum := writeReviewerPackage(t, root, "rev")
+	mgr := extension.NewManager(root, func(string) extension.HostProvider { return nil }, nopLogger())
+	repo := &memStateRepo{rows: map[string]*extension_state_entity.ExtensionState{
+		"rev": {Name: "rev", Enabled: true, Source: InstallOriginStore, PackageSHA256: sum},
+	}}
+	svc := &Service{manager: mgr, stateRepo: repo, logger: nopLogger()}
+	_, err := svc.ActiveCommandReviewer(context.Background(), "rev")
 	require.Error(t, err)
 }

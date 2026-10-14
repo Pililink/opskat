@@ -45,6 +45,8 @@ type Service struct {
 	logger      *zap.Logger
 
 	onReload func()
+	// reviewerLoader 非空时，ActiveCommandReviewer 会在审核器尚未加载时用它加载（见 LoadReviewersOnDemand）。
+	reviewerLoader func(ctx context.Context, dir string) error
 
 	mu       sync.Mutex
 	initDone atomic.Bool

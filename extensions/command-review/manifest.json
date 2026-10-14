@@ -1,6 +1,6 @@
 {
   "name": "command-review",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "hostABI": "2.3",
   "backend": {
     "runtime": "wasm",
@@ -9,7 +9,10 @@
   "capabilities": {
     "commandReview": true,
     "http": {
-      "allowlist": ["https://api.typesafe.ai/"]
-    }
+      "allowlist": [
+        "https://api.typesafe.ai/"
+      ]
+    },
+    "tunnel": true
   }
 }

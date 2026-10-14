@@ -3,6 +3,9 @@ package extension
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/cago-frame/cago/pkg/logger"
@@ -49,6 +52,16 @@ func currentDescribeCache() DescribeCache {
 func WasmHash(wasmBytes []byte) string {
 	sum := sha256.Sum256(wasmBytes)
 	return hex.EncodeToString(sum[:])
+}
+
+// PackageSHA256 是已安装扩展目录里 WASM 文件的摘要。加载审核器前重算它，
+// 与安装时记下的值比对，防止同名包覆盖或篡改。
+func PackageSHA256(dir, binary string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(dir, binary)) //nolint:gosec // 路径来自已安装扩展目录
+	if err != nil {
+		return "", fmt.Errorf("read wasm for package digest: %w", err)
+	}
+	return WasmHash(data), nil
 }
 
 // cachedDescriptor returns the stored descriptor for name when it was produced by

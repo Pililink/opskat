@@ -4,8 +4,7 @@ import { PermissionModeCard } from "../PermissionModeCard";
 import { useAssetStore } from "@/stores/assetStore";
 import { useTabStore } from "@/stores/tabStore";
 import { toast } from "sonner";
-import { GetCommandReviewSettings } from "../../../../wailsjs/go/system/System";
-import { GetCommandReviewer } from "../../../../wailsjs/go/extension/Extension";
+import { GetCommandReviewState } from "../../../../wailsjs/go/extension/Extension";
 import { group_entity } from "../../../../wailsjs/go/models";
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), warning: vi.fn(), info: vi.fn(), success: vi.fn() } }));
@@ -13,14 +12,13 @@ vi.mock("sonner", () => ({ toast: { error: vi.fn(), warning: vi.fn(), info: vi.f
 const group = (ID: number, Name: string, ParentID: number, permissionMode = "") =>
   new group_entity.Group({ ID, Name, ParentID, Icon: "", SortOrder: ID, Status: 1, permissionMode });
 
-function mockApiKey(apiKeySet: boolean) {
-  vi.mocked(GetCommandReviewSettings).mockResolvedValue({
-    apiKeySet,
-    model: "jev-1.13.0",
-    timeoutMs: 5000,
-    threshold: 0.2,
-    lastFailReason: "",
-    lastFailAt: 0,
+// mockReviewer 设定有没有可用的命令审核扩展。
+function mockReviewer(available: boolean) {
+  vi.mocked(GetCommandReviewState).mockResolvedValue({
+    reviewers: [],
+    selected: "",
+    active: available ? "command-review" : "",
+    problem: available ? "" : "no_reviewer",
   } as never);
 }
 
@@ -36,8 +34,7 @@ const option = (key: string) => screen.getByRole("radio", { name: `commandReview
 
 describe("PermissionModeCard", () => {
   beforeEach(() => {
-    mockApiKey(true);
-    vi.mocked(GetCommandReviewer).mockReset().mockResolvedValue("");
+    mockReviewer(true);
     // 生产（autopilot）> 数据库（沿用）；测试（没设置）
     useAssetStore.setState({
       groups: [group(1, "生产", 0, "autopilot"), group(2, "数据库", 1), group(3, "测试", 0)],
@@ -130,26 +127,24 @@ describe("PermissionModeCard", () => {
     expect(screen.queryByTestId("permission-mode-inherit-source")).toBeNull();
   });
 
-  it("需要审核但没配置 API key 时提示，确认弹窗里也提醒", async () => {
-    mockApiKey(false);
+  it("需要审核但没有可用的审核扩展时提示，确认弹窗里也提醒", async () => {
+    mockReviewer(false);
     await renderCard({ value: "assisted" });
-    expect(screen.getByTestId("permission-mode-no-api-key")).toBeInTheDocument();
+    expect(screen.getByTestId("permission-mode-no-reviewer")).toHaveTextContent("commandReview.mode.noReviewer");
 
     fireEvent.click(option("autopilot"));
-    expect(within(screen.getByRole("alertdialog")).getByText("commandReview.mode.noApiKey")).toBeInTheDocument();
+    expect(within(screen.getByRole("alertdialog")).getByText("commandReview.mode.noReviewer")).toBeInTheDocument();
   });
 
-  it("默认模式下不提示 API key", async () => {
-    mockApiKey(false);
+  it("默认模式下不提示", async () => {
+    mockReviewer(false);
     await renderCard({ value: "default" });
-    expect(screen.queryByTestId("permission-mode-no-api-key")).toBeNull();
+    expect(screen.queryByTestId("permission-mode-no-reviewer")).toBeNull();
   });
 
-  // 用审核扩展时不需要内置审核的 API key，不能提示"没配置 API key"。
-  it("选了审核扩展时不提示内置审核缺 API key", async () => {
-    mockApiKey(false);
-    vi.mocked(GetCommandReviewer).mockResolvedValue("command-review");
+  it("有可用的审核扩展时不提示", async () => {
+    mockReviewer(true);
     await renderCard({ value: "autopilot" });
-    expect(screen.queryByTestId("permission-mode-no-api-key")).toBeNull();
+    expect(screen.queryByTestId("permission-mode-no-reviewer")).toBeNull();
   });
 });

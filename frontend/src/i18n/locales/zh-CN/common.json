@@ -3329,7 +3329,7 @@
       "remote_code": "会下载并执行代码"
     },
     "reason": {
-      "not_configured": "未配置命令审核的 API key",
+      "not_configured": "命令审核扩展还没配置好",
       "api_key_unreadable": "已保存的命令审核 API key 无法读取",
       "invalid_api_key": "命令审核的 API key 无效",
       "timeout": "超时",
@@ -3338,40 +3338,27 @@
       "undecodable": "命令把要执行的内容藏在解码后面",
       "unavailable": "服务不可用",
       "invalid_result": "审核扩展返回了无效结果",
-      "reviewer_unavailable": "选中的审核扩展不可用，或安装包摘要不符"
+      "reviewer_unavailable": "要用的命令审核扩展不可用",
+      "no_reviewer": "没有可用的命令审核扩展"
     },
     "settings": {
       "title": "命令审核",
-      "desc": "服务器的权限模式为辅助审批或 Autopilot 时，规则判断不了、原本要问人的命令会先交给 Jev 格式（TypeSafe System One API）的模型审核，只拦破坏数据、中断服务、下载并执行代码这类明确的危险操作。发送前会把命令里的密码、token、密钥等敏感信息替换掉。",
-      "apiKey": "API key",
-      "apiKeySet": "已设置。留空则保持不变",
-      "apiKeyNotSet": "未设置",
-      "apiKeyPlaceholder": "填写 API key",
-      "clearApiKey": "清除 API key",
-      "baseUrl": "Base URL",
-      "baseUrlHint": "Jev 格式（TypeSafe System One API）的服务地址，默认是 TypeSafe 官方地址",
-      "model": "模型",
-      "modelHint": "填写服务端提供的模型名，点「测试模型」确认可用",
-      "timeout": "超时（毫秒）",
-      "threshold": "阈值",
-      "timeoutHint": "超时指单次请求；超时或连接出错时会自动重试一次",
-      "thresholdHint": "任意一项风险的概率达到阈值就不通过，数值越小越严格",
+      "desc": "资产或分组的权限模式为辅助审批或 Autopilot 时，规则判断不了、原本要问人的命令先交给命令审核扩展判断，只拦明确危险的操作。送审前会展开解码后执行的命令、替换密码等敏感信息。",
+      "timeout": "审核超时（毫秒）",
+      "timeoutHint": "每次调用审核扩展的超时；超时会自动重试一次",
       "timeoutRange": "超时需在 {{min}}~{{max}} 毫秒之间",
-      "thresholdRange": "阈值需大于 0、小于 1",
-      "reviewer": "审核服务",
-      "reviewerHint": "内置审核调用 TypeSafe 的 Jev 模型；也可以选一个已安装的审核扩展。选中的审核扩展用不了时审核按失败处理，不会改用内置审核。",
-      "builtin": "内置审核",
+      "reviewer": "审核扩展",
       "unsigned": "未经签名",
       "reviewerUnusable": "{{name}} 现在不能使用：{{reason}}",
       "reviewerSaved": "审核服务已切换",
-      "extensionTimeout": "审核超时沿用内置审核设置里的值（{{timeout}} 毫秒）。",
       "save": "保存",
       "saved": "命令审核设置已保存",
-      "test": "测试模型",
+      "test": "测试审核服务",
       "testing": "正在测试…",
-      "testSuccess": "模型可用：{{model}}",
       "lastFail": "最近一次审核失败：{{reason}}（{{time}}）",
-      "notice": "这是省事功能，不是安全防线：命令里故意写的误导文字可能影响判断，真正的底线仍然是禁止规则。"
+      "notice": "这是省事功能，不是安全防线：命令里故意写的误导文字可能影响判断，真正的底线仍然是禁止规则。",
+      "noReviewer": "还没有可用的命令审核扩展。在 设置 › 扩展 里安装并启用一个（例如「命令审核（Jev）」）之后，辅助审批和 Autopilot 才会自动审核；在那之前，辅助审批会全部转人工，Autopilot 会全部拒绝。",
+      "selectReviewer": "启用了多个命令审核扩展，请选用其中一个。"
     },
     "mode": {
       "title": "权限模式",
@@ -3400,14 +3387,15 @@
       "confirmAssisted": "规则判断不了的命令会先交给审核模型，审核通过就自动执行，不再问你。审核未通过或审核失败时仍然问你。命令会（替换掉敏感信息后）发给设置里的审核服务。",
       "confirmAutopilot": "规则判断不了的命令会先交给审核模型，审核通过就自动执行；判断为明确危险或审核失败时直接拒绝，不会等你确认。适合无人值守的场景。命令会（替换掉敏感信息后）发给设置里的审核服务。",
       "confirm": "开启",
-      "noApiKey": "还没配置命令审核的 API key：需要审核的命令都会审核失败（辅助审批转人工确认，Autopilot 直接拒绝）。请到设置 › AI 里配置。",
-      "saved": "权限模式已保存"
+      "saved": "权限模式已保存",
+      "noReviewer": "当前没有可用的命令审核扩展：辅助审批会全部转人工，Autopilot 会全部拒绝。"
     },
     "configError": {
-      "not_configured": "有服务器开启了辅助审批或 Autopilot，但还没配置命令审核的 API key，需要审核的命令都会审核失败。",
-      "api_key_unreadable": "已保存的命令审核 API key 无法读取（可能换了主密钥），需要审核的命令都会审核失败。请重新填写 API key。",
-      "invalid_api_key": "命令审核的 API key 无效，需要审核的命令都会审核失败。",
-      "openSettings": "打开设置"
+      "not_configured": "命令审核扩展还没配置好（比如没填 API key），要审核的命令都会审核失败。",
+      "invalid_api_key": "命令审核扩展的 API key 无效，要审核的命令都会审核失败。",
+      "openSettings": "打开设置",
+      "no_reviewer": "有资产开启了辅助审批或 Autopilot，但没有可用的命令审核扩展，要审核的命令都会审核失败。",
+      "reviewer_unavailable": "要用的命令审核扩展现在不可用（可能被停用，或安装包被改动过），要审核的命令都会审核失败。"
     },
     "scores": "评分",
     "scoreThreshold": "阈值 {{threshold}}",

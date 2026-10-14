@@ -37,6 +37,7 @@ const REVIEW_FAIL_REASONS: readonly string[] = [
   "undecodable",
   "unavailable",
   "invalid_result",
+  "no_reviewer",
   "reviewer_unavailable",
 ];
 

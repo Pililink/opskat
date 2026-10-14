@@ -3329,7 +3329,7 @@
       "remote_code": "downloads and runs code"
     },
     "reason": {
-      "not_configured": "the command review API key is not configured",
+      "not_configured": "the command review extension is not configured",
       "api_key_unreadable": "the saved command review API key cannot be read",
       "invalid_api_key": "the command review API key is invalid",
       "timeout": "timed out",
@@ -3338,40 +3338,27 @@
       "undecodable": "the command hides the code it runs behind decoding",
       "unavailable": "service unavailable",
       "invalid_result": "the review extension returned an invalid result",
-      "reviewer_unavailable": "the selected review extension is unavailable, or its package digest does not match"
+      "reviewer_unavailable": "the command review extension in use is unavailable",
+      "no_reviewer": "no command review extension is available"
     },
     "settings": {
       "title": "Command review",
-      "desc": "When a server's permission mode is Assisted or Autopilot, commands that no rule decides (the ones that would ask you) are first reviewed by a Jev-format model (TypeSafe System One API), which only stops clearly dangerous operations: destroying data, interrupting services, or downloading and running code. Passwords, tokens, keys and other sensitive values in commands are replaced before sending.",
-      "apiKey": "API key",
-      "apiKeySet": "Set. Leave empty to keep it",
-      "apiKeyNotSet": "Not set",
-      "apiKeyPlaceholder": "Enter an API key",
-      "clearApiKey": "Clear API key",
-      "baseUrl": "Base URL",
-      "baseUrlHint": "Address of a Jev-format (TypeSafe System One API) service; defaults to the official TypeSafe address",
-      "model": "Model",
-      "modelHint": "Enter a model name the service provides, then use Test model to confirm it works",
-      "timeout": "Timeout (ms)",
-      "threshold": "Threshold",
-      "timeoutHint": "The timeout applies to each request; a request that times out or fails to connect is retried once",
-      "thresholdHint": "A command fails review when any risk's probability reaches the threshold; lower is stricter",
+      "desc": "When an asset or group uses Assisted approval or Autopilot, a command the rules cannot decide is first judged by a command review extension, which stops only clearly dangerous operations. Decoded scripts are expanded and passwords and other secrets are masked before review.",
+      "timeout": "Review timeout (ms)",
+      "timeoutHint": "Timeout for each call to the review extension; a timed-out call is retried once",
       "timeoutRange": "Timeout must be between {{min}} and {{max}} ms",
-      "thresholdRange": "Threshold must be greater than 0 and less than 1",
-      "reviewer": "Review service",
-      "reviewerHint": "Built-in review calls TypeSafe's Jev model; you can also pick an installed review extension. If the selected extension becomes unavailable, reviews fail instead of falling back to built-in review.",
-      "builtin": "Built-in review",
+      "reviewer": "Review extension",
       "unsigned": "unsigned",
       "reviewerUnusable": "{{name}} can't be used right now: {{reason}}",
       "reviewerSaved": "Review service switched",
-      "extensionTimeout": "The review timeout uses the built-in review setting ({{timeout}} ms).",
       "save": "Save",
       "saved": "Command review settings saved",
-      "test": "Test model",
+      "test": "Test review service",
       "testing": "Testing…",
-      "testSuccess": "Model works: {{model}}",
       "lastFail": "Last review failure: {{reason}} ({{time}})",
-      "notice": "This saves effort; it is not a security boundary. Misleading text written into a command can sway the model. Deny rules remain the real safeguard."
+      "notice": "This saves effort; it is not a security boundary. Misleading text written into a command can sway the model. Deny rules remain the real safeguard.",
+      "noReviewer": "No command review extension is available. Install and enable one under Settings › Extensions (for example \"Command Review (Jev)\"); until then Assisted approval asks you about every such command and Autopilot refuses them.",
+      "selectReviewer": "Several command review extensions are enabled; select one."
     },
     "mode": {
       "title": "Permission mode",
@@ -3400,14 +3387,15 @@
       "confirmAssisted": "Commands that no rule decides will first be reviewed by the review model and run without asking you when the review passes. If the review does not pass or fails, you are still asked. Commands (with sensitive values replaced) are sent to the review service in Settings.",
       "confirmAutopilot": "Commands that no rule decides will first be reviewed by the review model. They run when the review passes and are rejected without waiting for you when judged clearly dangerous or when the review fails. Meant for unattended use. Commands (with sensitive values replaced) are sent to the review service in Settings.",
       "confirm": "Turn on",
-      "noApiKey": "No command review API key is configured: every command that needs review will fail review (Assisted asks you, Autopilot rejects). Configure it in Settings › AI.",
-      "saved": "Permission mode saved"
+      "saved": "Permission mode saved",
+      "noReviewer": "No command review extension is available: Assisted approval asks you about every such command and Autopilot refuses them."
     },
     "configError": {
-      "not_configured": "A server uses Assisted or Autopilot, but no command review API key is configured, so every command that needs review fails review.",
-      "api_key_unreadable": "The saved command review API key cannot be read (the master key may have changed), so every command that needs review fails review. Enter the API key again.",
-      "invalid_api_key": "The command review API key is invalid, so every command that needs review fails review.",
-      "openSettings": "Open settings"
+      "not_configured": "The command review extension is not configured yet (for example, no API key), so every review fails.",
+      "invalid_api_key": "The command review extension's API key is invalid, so every review fails.",
+      "openSettings": "Open settings",
+      "no_reviewer": "Some assets use Assisted approval or Autopilot, but no command review extension is available, so every review fails.",
+      "reviewer_unavailable": "The command review extension in use is unavailable (it may be disabled, or its package was changed), so every review fails."
     },
     "scores": "Scores",
     "scoreThreshold": "threshold {{threshold}}",

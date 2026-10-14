@@ -8,8 +8,9 @@ import { Segmented, type SegmentedOption } from "@/components/asset/fields";
 import { resolveInheritedPermissionMode, type EffectivePermissionMode, type PermissionMode } from "@/lib/commandReview";
 import { openGroupDetail } from "@/lib/infoTab";
 import { useAssetStore } from "@/stores/assetStore";
-import { GetCommandReviewSettings } from "../../../wailsjs/go/system/System";
-import { GetCommandReviewer } from "../../../wailsjs/go/extension/Extension";
+import { useSettingsUiStore } from "@/stores/settingsUiStore";
+import { openSettingsTab } from "@/stores/tabStore";
+import { GetCommandReviewState } from "../../../wailsjs/go/extension/Extension";
 
 const MODES: PermissionMode[] = ["", "default", "assisted", "autopilot"];
 const needsReview = (mode: EffectivePermissionMode) => mode === "assisted" || mode === "autopilot";
@@ -34,8 +35,8 @@ export function PermissionModeCard({ value, subject, parentGroupId, onChange }: 
   const { t } = useTranslation();
   const groups = useAssetStore((s) => s.groups);
   const { mode: inherited, from } = resolveInheritedPermissionMode(parentGroupId, groups);
-  // 用内置审核却没配置 API key：开启审核后每条命令都会审核失败。选了审核扩展时不需要这个 key。
-  const [missingApiKey, setMissingApiKey] = useState(false);
+  // 没有可用的审核扩展：这时辅助审批全部转人工、Autopilot 全部拒绝，要让用户知道。
+  const [noReviewer, setNoReviewer] = useState(false);
   const [pending, setPending] = useState<PermissionMode | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -52,8 +53,8 @@ export function PermissionModeCard({ value, subject, parentGroupId, onChange }: 
   };
 
   useEffect(() => {
-    Promise.all([GetCommandReviewSettings(), GetCommandReviewer()])
-      .then(([s, reviewer]) => setMissingApiKey(!reviewer && !s.apiKeySet))
+    GetCommandReviewState()
+      .then((st) => setNoReviewer(!st.active))
       .catch((e: unknown) => toast.error(e instanceof Error ? e.message : String(e)));
   }, []);
 
@@ -119,13 +120,25 @@ export function PermissionModeCard({ value, subject, parentGroupId, onChange }: 
           </p>
         )}
         <p className="text-foreground">{t(`commandReview.mode.${effective}Desc`)}</p>
-        {needsReview(effective) && missingApiKey && (
+        {needsReview(effective) && noReviewer && (
           <div
-            data-testid="permission-mode-no-api-key"
+            data-testid="permission-mode-no-reviewer"
             className="flex items-start gap-1.5 rounded-md bg-warning/15 px-2.5 py-2 text-foreground"
           >
             <AlertTriangle aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
-            <span>{t("commandReview.mode.noApiKey")}</span>
+            <span>
+              {t("commandReview.mode.noReviewer")}
+              <button
+                type="button"
+                onClick={() => {
+                  useSettingsUiStore.getState().setActiveTab("ai");
+                  openSettingsTab(t("nav.settings"));
+                }}
+                className="ml-1 font-medium underline-offset-2 hover:underline"
+              >
+                {t("commandReview.configError.openSettings")}
+              </button>
+            </span>
           </div>
         )}
       </div>
@@ -142,7 +155,7 @@ export function PermissionModeCard({ value, subject, parentGroupId, onChange }: 
                 ? t("commandReview.mode.confirmAutopilot")
                 : t("commandReview.mode.confirmAssisted")}
             </p>
-            {missingApiKey && <p>{t("commandReview.mode.noApiKey")}</p>}
+            {noReviewer && <p>{t("commandReview.mode.noReviewer")}</p>}
           </div>
         }
         cancelText={t("action.cancel")}

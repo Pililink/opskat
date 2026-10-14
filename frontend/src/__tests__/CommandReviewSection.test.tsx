@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { CommandReviewSection } from "../components/settings/CommandReviewSection";
 import { useSettingsUiStore } from "@/stores/settingsUiStore";
-import { GetCommandReviewSettings, SaveCommandReviewTimeout, TestCommandReview } from "../../wailsjs/go/system/System";
+import { GetCommandReviewSettings, SaveCommandReviewTimeout } from "../../wailsjs/go/system/System";
 import { GetCommandReviewState, GetExtensionSettings, SetCommandReviewer } from "../../wailsjs/go/extension/Extension";
 
 const toastError = vi.hoisted(() => vi.fn());
@@ -39,7 +39,6 @@ describe("CommandReviewSection", () => {
       .mockResolvedValue({ timeoutMs: 5000, lastFailReason: "", lastFailAt: 0 } as never);
     vi.mocked(SaveCommandReviewTimeout).mockReset().mockResolvedValue(undefined);
     vi.mocked(SetCommandReviewer).mockReset().mockResolvedValue(undefined);
-    vi.mocked(TestCommandReview).mockReset();
     vi.mocked(GetExtensionSettings)
       .mockReset()
       .mockResolvedValue({ schema: { type: "object", properties: {} }, values: {}, secretsSet: [] } as never);
@@ -90,15 +89,6 @@ describe("CommandReviewSection", () => {
       fireEvent.click(screen.getByTestId("command-reviewer-a"));
     });
     expect(SetCommandReviewer).toHaveBeenCalledWith("a");
-  });
-
-  it("测试审核服务并显示结果", async () => {
-    vi.mocked(TestCommandReview).mockResolvedValue({ mode: "", outcome: "pass", extension: "jev" } as never);
-    await renderSection();
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "commandReview.settings.test" }));
-    });
-    expect(screen.getByTestId("command-review-test-result")).toHaveTextContent("commandReview.summary.pass");
   });
 
   it("保存超时，超出范围不保存", async () => {

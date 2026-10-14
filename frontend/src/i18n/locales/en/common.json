@@ -2819,7 +2819,8 @@
       "required": "Required",
       "title": "Settings",
       "save": "Save settings",
-      "saved": "Extension settings saved"
+      "saved": "Extension settings saved",
+      "saveAndTest": "Save and test"
     },
     "title": "Extensions",
     "mirror": {
@@ -3353,8 +3354,6 @@
       "reviewerSaved": "Review service switched",
       "save": "Save",
       "saved": "Command review settings saved",
-      "test": "Test review service",
-      "testing": "Testing…",
       "lastFail": "Last review failure: {{reason}} ({{time}})",
       "notice": "This saves effort; it is not a security boundary. Misleading text written into a command can sway the model. Deny rules remain the real safeguard.",
       "noReviewer": "No command review extension is available. Install and enable one under Settings › Extensions (for example \"Command Review (Jev)\"); until then Assisted approval asks you about every such command and Autopilot refuses them.",

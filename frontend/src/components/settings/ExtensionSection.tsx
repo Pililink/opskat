@@ -465,7 +465,7 @@ function ExtensionDetail({ ext }: { ext: ExtInfo }) {
           <Separator />
           <div>
             <h4 className="text-sm font-medium mb-2">{t("extension.settings.title")}</h4>
-            <ExtensionSettingsForm key={ext.name} extensionName={ext.name} />
+            <ExtensionSettingsForm key={ext.name} extensionName={ext.name} reviewer={commandReview} />
           </div>
         </>
       )}

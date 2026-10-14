@@ -196,3 +196,53 @@ func TestExtensionReviewerTimeout(t *testing.T) {
 	assert.Equal(t, OutcomeFail, r.Outcome)
 	assert.Equal(t, ReasonTimeout, r.Reason)
 }
+
+func passAll(items []extension.ReviewItem) ([]extension.ReviewCommandResult, error) {
+	out := make([]extension.ReviewCommandResult, len(items))
+	for i := range out {
+		out[i] = extension.ReviewCommandResult{Outcome: extension.ReviewOutcomePass}
+	}
+	return out, nil
+}
+
+// 审核扩展和内置审核看到的是同一份命令：解码后执行的脚本先展开，扩展不能只看到编码后的外壳。
+func TestExtensionReviewerSeesDecodedScript(t *testing.T) {
+	script := "cd /root/app\ndocker compose up -d"
+	rev := &fakeExtensionReviewer{name: "rev", version: "1.0.0", maxItems: 8, maxCommandLen: 1000, reply: passAll}
+	s, _ := newTestService(&fakeEvaluator{}, enabledConfig())
+	s.extension = func(context.Context) (ExtensionReviewer, error) { return rev, nil }
+
+	r := s.Review(context.Background(), Input{AssetType: "ssh", Syntax: SyntaxShell, Command: pipeDecodeExec(script, "bash")})
+
+	assert.Equal(t, OutcomePass, r.Outcome)
+	require.Len(t, rev.calls, 1)
+	assert.Equal(t, script, rev.calls[0][0].Command)
+}
+
+// 解不开要执行的内容时不交给扩展，按 undecodable 失败。
+func TestExtensionReviewerNotCalledForUndecodableExec(t *testing.T) {
+	rev := &fakeExtensionReviewer{name: "rev", version: "1.0.0", maxItems: 8, maxCommandLen: 1000, reply: passAll}
+	s, _ := newTestService(&fakeEvaluator{}, enabledConfig())
+	s.extension = func(context.Context) (ExtensionReviewer, error) { return rev, nil }
+
+	r := s.Review(context.Background(), Input{AssetType: "ssh", Syntax: SyntaxShell, Command: "echo '!!!' | base64 -d | bash"})
+
+	assert.Equal(t, OutcomeFail, r.Outcome)
+	assert.Equal(t, ReasonUndecodable, r.Reason)
+	assert.Empty(t, rev.calls)
+}
+
+// 内置审核的 API key 解不开不影响审核扩展：扩展照常审核，超时用设置里的值。
+func TestExtensionReviewerIgnoresUnreadableBuiltinKey(t *testing.T) {
+	rev := &fakeExtensionReviewer{name: "rev", version: "1.0.0", maxItems: 8, maxCommandLen: 1000, reply: passAll}
+	cfg := enabledConfig()
+	cfg.APIKey = ""
+	s := New(func() (Config, error) { return cfg, errors.New("decrypt: cipher: message authentication failed") },
+		&memCache{m: map[string]Result{}}, func(string, string) Evaluator { return &fakeEvaluator{} },
+		func(context.Context) (ExtensionReviewer, error) { return rev, nil })
+
+	r := s.Review(context.Background(), Input{AssetType: "ssh", Command: "ls"})
+
+	assert.Equal(t, OutcomePass, r.Outcome)
+	assert.Len(t, rev.calls, 1)
+}

@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label } from "@opskat/ui";
-import { AlertTriangle, Loader2, RefreshCw, Save } from "lucide-react";
+import { AlertTriangle, Loader2, RefreshCw, Save, Settings2 } from "lucide-react";
 import { toast } from "sonner";
 import { notifySuccess } from "@/lib/notify";
 import { failReasonLabel, type ReviewInfo } from "@/lib/commandReview";
 import { Segmented } from "@/components/asset/fields";
 import { ReviewNotice } from "@/components/approval/ReviewNotice";
-import { ExtensionSettingsForm } from "@/components/settings/ExtensionSettingsForm";
+import { useSettingsUiStore } from "@/stores/settingsUiStore";
 import {
   GetCommandReviewSettings,
   SaveCommandReviewTimeout,
@@ -23,9 +23,9 @@ const TIMEOUT_MIN = 1000;
 const TIMEOUT_MAX = 60000;
 
 /**
- * 命令审核的设置（设置 › AI）。审核由审核扩展来做：这里显示实际在用的审核扩展和它自己的设置
- * （API key、模型等），装了多个时选用哪个；没有可用的审核扩展时说明原因。宿主侧只有调用超时，
- * 另有"测试审核服务"和本次启动以来最近一次审核失败。
+ * 命令审核的设置（设置 › AI）。审核由审核扩展来做：这里显示实际在用的审核扩展，装了多个时选用
+ * 哪个，没有可用的时说明原因；扩展自己的设置（API key、模型等）只在扩展详情里，这里给个入口。
+ * 宿主侧只有调用超时，另有"测试审核服务"和本次启动以来最近一次审核失败。
  */
 export function CommandReviewSection() {
   const { t } = useTranslation();
@@ -135,6 +135,19 @@ export function CommandReviewSection() {
               </p>
             )
           )}
+          {active && (
+            <div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1"
+                onClick={() => useSettingsUiStore.getState().openExtensionDetail(active.name)}
+              >
+                <Settings2 className="h-3.5 w-3.5" />
+                {t("commandReview.settings.configureReviewer")}
+              </Button>
+            </div>
+          )}
           {state.reviewers
             .filter((r) => !r.usable)
             .map((r) => (
@@ -158,8 +171,6 @@ export function CommandReviewSection() {
             </div>
           )}
         </div>
-
-        {active?.hasSettings && <ExtensionSettingsForm key={active.name} extensionName={active.name} />}
 
         <div className="grid gap-1.5 sm:max-w-xs">
           <Label htmlFor="command-review-timeout">{t("commandReview.settings.timeout")}</Label>

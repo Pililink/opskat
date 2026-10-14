@@ -3358,7 +3358,8 @@
       "lastFail": "Last review failure: {{reason}} ({{time}})",
       "notice": "This saves effort; it is not a security boundary. Misleading text written into a command can sway the model. Deny rules remain the real safeguard.",
       "noReviewer": "No command review extension is available. Install and enable one under Settings › Extensions (for example \"Command Review (Jev)\"); until then Assisted approval asks you about every such command and Autopilot refuses them.",
-      "selectReviewer": "Several command review extensions are enabled; select one."
+      "selectReviewer": "Several command review extensions are enabled; select one.",
+      "configureReviewer": "Configure in extension details"
     },
     "mode": {
       "title": "Permission mode",

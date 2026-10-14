@@ -61,6 +61,7 @@ import { useStoreInstalls } from "./useStoreInstalls";
 import { syncExtensionUpdates, useExtensionUpdates } from "./extensionUpdates";
 import { Segmented } from "@/components/asset/fields";
 import { ExtensionSettingsForm } from "@/components/settings/ExtensionSettingsForm";
+import { useSettingsUiStore } from "@/stores/settingsUiStore";
 import type { ExtCapabilities } from "@/extension/types";
 
 interface ExtInfo {
@@ -206,6 +207,17 @@ export function ExtensionSection() {
       toast.error(String(e));
     }
   };
+
+  // 别的设置页（命令审核的"去扩展里设置"）要求打开某个扩展的详情。
+  const requestedDetail = useSettingsUiStore((st) => st.extensionDetail);
+  useEffect(() => {
+    if (!requestedDetail) return;
+    useSettingsUiStore.getState().clearExtensionDetail();
+    // 与挂载时拉取同一写法：setState 都在 await 之后
+    void (async () => {
+      await openDetail(requestedDetail);
+    })();
+  }, [requestedDetail]);
 
   return (
     <div className="space-y-4">

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
 import { ExtensionSection } from "../../../components/settings/ExtensionSection";
+import { useSettingsUiStore } from "@/stores/settingsUiStore";
 import {
   ListInstalledExtensions,
   GetExtensionDetail,
@@ -71,5 +72,17 @@ describe("ExtensionSection detail", () => {
     await openDetail(installed("notebook", ""));
     expect(screen.queryByTestId("extension-settings-form")).toBeNull();
     expect(GetExtensionSettings).not.toHaveBeenCalled();
+  });
+
+  // 设置 › AI › 命令审核里点"去扩展里设置"：切到扩展页并直接打开那个扩展的详情。
+  it("opens the detail of the extension another settings page asked for", async () => {
+    const ext = installed("command-review", "");
+    vi.mocked(ListInstalledExtensions).mockResolvedValue([ext] as never);
+    vi.mocked(GetExtensionDetail).mockResolvedValue(ext as never);
+    useSettingsUiStore.getState().openExtensionDetail("command-review");
+    render(<ExtensionSection />);
+    await waitFor(() => expect(GetExtensionDetail).toHaveBeenCalledWith("command-review"));
+    await screen.findByRole("dialog");
+    expect(useSettingsUiStore.getState().extensionDetail).toBeNull();
   });
 });

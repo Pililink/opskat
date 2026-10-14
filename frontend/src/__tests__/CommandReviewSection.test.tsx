@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { CommandReviewSection } from "../components/settings/CommandReviewSection";
+import { useSettingsUiStore } from "@/stores/settingsUiStore";
 import { GetCommandReviewSettings, SaveCommandReviewTimeout, TestCommandReview } from "../../wailsjs/go/system/System";
 import { GetCommandReviewState, GetExtensionSettings, SetCommandReviewer } from "../../wailsjs/go/extension/Extension";
 
@@ -44,11 +45,15 @@ describe("CommandReviewSection", () => {
       .mockResolvedValue({ schema: { type: "object", properties: {} }, values: {}, secretsSet: [] } as never);
   });
 
-  it("只有一个审核扩展时直接显示它和它的设置", async () => {
+  it("显示在用的审核扩展；它的设置在扩展详情里，这里只给入口", async () => {
     await renderSection();
     expect(screen.getByTestId("command-reviewer-active")).toHaveTextContent("JEV");
-    expect(GetExtensionSettings).toHaveBeenCalledWith("jev");
+    expect(GetExtensionSettings).not.toHaveBeenCalled();
     expect(screen.queryByTestId("command-review-problem")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "commandReview.settings.configureReviewer" }));
+    expect(useSettingsUiStore.getState().activeTab).toBe("extensions");
+    expect(useSettingsUiStore.getState().extensionDetail).toBe("jev");
   });
 
   it("没有审核扩展时说明要先安装，辅助审批和 Autopilot 在那之前不会自动审核", async () => {
@@ -85,7 +90,6 @@ describe("CommandReviewSection", () => {
       fireEvent.click(screen.getByTestId("command-reviewer-a"));
     });
     expect(SetCommandReviewer).toHaveBeenCalledWith("a");
-    expect(GetExtensionSettings).toHaveBeenCalledWith("a");
   });
 
   it("测试审核服务并显示结果", async () => {

@@ -60,6 +60,7 @@ import { ExtensionStore, InstallFailed, InstallProgress, type CardInstall, type 
 import { useStoreInstalls } from "./useStoreInstalls";
 import { syncExtensionUpdates, useExtensionUpdates } from "./extensionUpdates";
 import { Segmented } from "@/components/asset/fields";
+import { ExtensionSettingsForm } from "@/components/settings/ExtensionSettingsForm";
 import type { ExtCapabilities } from "@/extension/types";
 
 interface ExtInfo {
@@ -82,6 +83,7 @@ interface ExtInfo {
     frontend?: {
       pages?: { id: string; i18n?: { name?: string }; slot?: string }[];
     };
+    settingsSchema?: Record<string, unknown>;
   };
 }
 
@@ -413,6 +415,9 @@ function ExtensionDetail({ ext }: { ext: ExtInfo }) {
     manifest?.policies?.groups || [];
   const pages: { id: string; i18n?: { name?: string }; slot?: string }[] = manifest?.frontend?.pages || [];
   const credentialsRead = ext.manifest?.capabilities?.credentials === "read";
+  const commandReview = ext.manifest?.capabilities?.commandReview === true;
+  // 扩展在 describe() 里声明的设置项；停用的扩展没有加载，读不到设置。
+  const hasSettings = ext.enabled && !!manifest?.settingsSchema;
 
   return (
     <div className="space-y-4">
@@ -425,6 +430,15 @@ function ExtensionDetail({ ext }: { ext: ExtInfo }) {
           <span>{t("extension.credentialsReadWarning")}</span>
         </div>
       )}
+      {commandReview && (
+        <div
+          role="alert"
+          className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/15 p-3 text-sm text-warning"
+        >
+          <ShieldAlert className="h-4 w-4 mt-0.5 shrink-0" />
+          <span>{t("extension.commandReviewWarning")}</span>
+        </div>
+      )}
 
       {/* Basic Info */}
       <div className="space-y-1 text-sm">
@@ -433,6 +447,16 @@ function ExtensionDetail({ ext }: { ext: ExtInfo }) {
         </p>
         {ext.description && <p className="text-muted-foreground">{ext.description}</p>}
       </div>
+
+      {hasSettings && (
+        <>
+          <Separator />
+          <div>
+            <h4 className="text-sm font-medium mb-2">{t("extension.settings.title")}</h4>
+            <ExtensionSettingsForm key={ext.name} extensionName={ext.name} />
+          </div>
+        </>
+      )}
 
       <Separator />
 

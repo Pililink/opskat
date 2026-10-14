@@ -4,6 +4,7 @@ import { PermissionModeCard } from "../PermissionModeCard";
 import { useAssetStore } from "@/stores/assetStore";
 import { useTabStore } from "@/stores/tabStore";
 import { GetCommandReviewSettings } from "../../../../wailsjs/go/system/System";
+import { GetCommandReviewer } from "../../../../wailsjs/go/extension/Extension";
 import { group_entity } from "../../../../wailsjs/go/models";
 
 const group = (ID: number, Name: string, ParentID: number, permissionMode = "") =>
@@ -33,6 +34,7 @@ const option = (key: string) => screen.getByRole("radio", { name: `commandReview
 describe("PermissionModeCard", () => {
   beforeEach(() => {
     mockApiKey(true);
+    vi.mocked(GetCommandReviewer).mockReset().mockResolvedValue("");
     // 生产（autopilot）> 数据库（沿用）；测试（没设置）
     useAssetStore.setState({
       groups: [group(1, "生产", 0, "autopilot"), group(2, "数据库", 1), group(3, "测试", 0)],
@@ -109,6 +111,14 @@ describe("PermissionModeCard", () => {
   it("默认模式下不提示 API key", async () => {
     mockApiKey(false);
     await renderCard({ value: "default" });
+    expect(screen.queryByTestId("permission-mode-no-api-key")).toBeNull();
+  });
+
+  // 用审核扩展时不需要内置审核的 API key，不能提示"没配置 API key"。
+  it("选了审核扩展时不提示内置审核缺 API key", async () => {
+    mockApiKey(false);
+    vi.mocked(GetCommandReviewer).mockResolvedValue("command-review");
+    await renderCard({ value: "autopilot" });
     expect(screen.queryByTestId("permission-mode-no-api-key")).toBeNull();
   });
 });

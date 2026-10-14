@@ -2815,6 +2815,11 @@
     "count": "{{count}} 个问题"
   },
   "extension": {
+    "settings": {
+      "title": "设置",
+      "save": "保存设置",
+      "saved": "扩展设置已保存"
+    },
     "title": "扩展",
     "mirror": {
       "title": "扩展下载",
@@ -3350,6 +3355,13 @@
       "thresholdHint": "任意一项风险的概率达到阈值就不通过，数值越小越严格",
       "timeoutRange": "超时需在 {{min}}~{{max}} 毫秒之间",
       "thresholdRange": "阈值需大于 0、小于 1",
+      "reviewer": "审核服务",
+      "reviewerHint": "内置审核调用 TypeSafe 的 Jev 模型；也可以选一个已安装的审核扩展。选中的审核扩展用不了时审核按失败处理，不会改用内置审核。",
+      "builtin": "内置审核",
+      "unsigned": "未经签名",
+      "reviewerUnusable": "{{name}} 现在不能使用：{{reason}}",
+      "reviewerSaved": "审核服务已切换",
+      "extensionTimeout": "审核超时沿用内置审核设置里的值（{{timeout}} 毫秒）。",
       "save": "保存",
       "saved": "命令审核设置已保存",
       "test": "测试模型",

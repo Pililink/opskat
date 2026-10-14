@@ -101,7 +101,8 @@ type CommandReviewerInfo struct {
 	Usable bool   `json:"usable"`
 	Reason string `json:"reason,omitempty"`
 	// Signed 表示从官方商店安装、签名已校验；非正式版上本地安装的审核器可用但不是签名的。
-	Signed bool `json:"signed"`
+	Signed      bool `json:"signed"` // HasSettings 表示扩展声明了设置项，设置页据此显示它的设置表单。
+	HasSettings bool `json:"hasSettings"`
 }
 
 // ListCommandReviewers 列出已加载的审核扩展及其能否使用，供设置页选择。
@@ -112,7 +113,10 @@ func (s *Service) ListCommandReviewers(ctx context.Context, lang string) []Comma
 			continue
 		}
 		localized := ext.Manifest.Localized(func(key string) string { return ext.Translate(lang, key) })
-		info := CommandReviewerInfo{Name: ext.Name, DisplayName: localized.I18n.DisplayName, Version: ext.Manifest.Version}
+		info := CommandReviewerInfo{
+			Name: ext.Name, DisplayName: localized.I18n.DisplayName, Version: ext.Manifest.Version,
+			HasSettings: ext.Manifest.SettingsSchema != nil,
+		}
 		signed, err := s.reviewerProvenance(ctx, ext.Name, ext.Dir, ext.Manifest.Backend.Binary)
 		if err != nil {
 			info.Reason = err.Error()

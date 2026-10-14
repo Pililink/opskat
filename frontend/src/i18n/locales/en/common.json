@@ -2815,6 +2815,11 @@
     "count": "{{count}} issue(s)"
   },
   "extension": {
+    "settings": {
+      "title": "Settings",
+      "save": "Save settings",
+      "saved": "Extension settings saved"
+    },
     "title": "Extensions",
     "mirror": {
       "title": "Extension Downloads",
@@ -3350,6 +3355,13 @@
       "thresholdHint": "A command fails review when any risk's probability reaches the threshold; lower is stricter",
       "timeoutRange": "Timeout must be between {{min}} and {{max}} ms",
       "thresholdRange": "Threshold must be greater than 0 and less than 1",
+      "reviewer": "Review service",
+      "reviewerHint": "Built-in review calls TypeSafe's Jev model; you can also pick an installed review extension. If the selected extension becomes unavailable, reviews fail instead of falling back to built-in review.",
+      "builtin": "Built-in review",
+      "unsigned": "unsigned",
+      "reviewerUnusable": "{{name}} can't be used right now: {{reason}}",
+      "reviewerSaved": "Review service switched",
+      "extensionTimeout": "The review timeout uses the built-in review setting ({{timeout}} ms).",
       "save": "Save",
       "saved": "Command review settings saved",
       "test": "Test model",

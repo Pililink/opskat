@@ -27,7 +27,9 @@ export function ReviewNotice({
   return (
     <div data-testid="review-notice" className={cn("flex items-start gap-1.5 text-xs", className)}>
       <Icon aria-hidden className={cn("mt-0.5 h-3.5 w-3.5 shrink-0", tone)} />
-      <span className="text-foreground">{withMode ? reviewWithMode(t, review, i18n.language) : reviewSummary(t, review, i18n.language)}</span>
+      <span className="text-foreground">
+        {withMode ? reviewWithMode(t, review, i18n.language) : reviewSummary(t, review, i18n.language)}
+      </span>
     </div>
   );
 }

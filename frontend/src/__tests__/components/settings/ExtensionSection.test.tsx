@@ -1,7 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
 import { ExtensionSection } from "../../../components/settings/ExtensionSection";
-import { ListInstalledExtensions, GetExtensionDetail } from "../../../../wailsjs/go/extension/Extension";
+import {
+  ListInstalledExtensions,
+  GetExtensionDetail,
+  GetExtensionSettings,
+} from "../../../../wailsjs/go/extension/Extension";
 
 function installed(name: string, credentials: string) {
   return {
@@ -16,7 +20,7 @@ function installed(name: string, credentials: string) {
 }
 
 // Opens the extension's detail dialog the way a user does: row menu → Details.
-async function openDetail(ext: ReturnType<typeof installed>) {
+async function openDetail(ext: { name: string; [key: string]: unknown }) {
   vi.mocked(ListInstalledExtensions).mockResolvedValue([ext] as never);
   vi.mocked(GetExtensionDetail).mockResolvedValue(ext as never);
   render(<ExtensionSection />);
@@ -41,5 +45,31 @@ describe("ExtensionSection detail", () => {
   it("shows no credentials warning for an extension without credentials:read", async () => {
     await openDetail(installed("notebook", ""));
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("shows a review extension's settings and warns that it can let commands run", async () => {
+    vi.mocked(GetExtensionSettings).mockResolvedValue({
+      schema: { type: "object", properties: { token: { type: "string", format: "password", title: "API key" } } },
+      values: {},
+      secretsSet: [],
+    } as never);
+    const ext = installed("command-review", "");
+    await openDetail({
+      ...ext,
+      manifest: {
+        ...ext.manifest,
+        capabilities: { commandReview: true },
+        settingsSchema: { type: "object", properties: { token: { type: "string", format: "password" } } },
+      },
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent("extension.commandReviewWarning");
+    expect(await screen.findByTestId("extension-settings-form")).toBeInTheDocument();
+    expect(GetExtensionSettings).toHaveBeenCalledWith("command-review");
+  });
+
+  it("shows no settings section for an extension without settings", async () => {
+    await openDetail(installed("notebook", ""));
+    expect(screen.queryByTestId("extension-settings-form")).toBeNull();
+    expect(GetExtensionSettings).not.toHaveBeenCalled();
   });
 });

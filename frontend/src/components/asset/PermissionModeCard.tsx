@@ -8,6 +8,7 @@ import { resolveInheritedPermissionMode, type EffectivePermissionMode, type Perm
 import { openGroupDetail } from "@/lib/infoTab";
 import { useAssetStore } from "@/stores/assetStore";
 import { GetCommandReviewSettings } from "../../../wailsjs/go/system/System";
+import { GetCommandReviewer } from "../../../wailsjs/go/extension/Extension";
 
 const MODES: PermissionMode[] = ["", "default", "assisted", "autopilot"];
 const needsReview = (mode: EffectivePermissionMode) => mode === "assisted" || mode === "autopilot";
@@ -32,12 +33,13 @@ export function PermissionModeCard({ value, subject, parentGroupId, saving, onCh
   const { t } = useTranslation();
   const groups = useAssetStore((s) => s.groups);
   const { mode: inherited, from } = resolveInheritedPermissionMode(parentGroupId, groups);
-  const [apiKeySet, setApiKeySet] = useState<boolean | null>(null);
+  // 用内置审核却没配置 API key：开启审核后每条命令都会审核失败。选了审核扩展时不需要这个 key。
+  const [missingApiKey, setMissingApiKey] = useState(false);
   const [pending, setPending] = useState<PermissionMode | null>(null);
 
   useEffect(() => {
-    GetCommandReviewSettings()
-      .then((s) => setApiKeySet(s.apiKeySet))
+    Promise.all([GetCommandReviewSettings(), GetCommandReviewer()])
+      .then(([s, reviewer]) => setMissingApiKey(!reviewer && !s.apiKeySet))
       .catch((e: unknown) => toast.error(e instanceof Error ? e.message : String(e)));
   }, []);
 
@@ -103,7 +105,7 @@ export function PermissionModeCard({ value, subject, parentGroupId, saving, onCh
           </p>
         )}
         <p className="text-foreground">{t(`commandReview.mode.${effective}Desc`)}</p>
-        {needsReview(effective) && apiKeySet === false && (
+        {needsReview(effective) && missingApiKey && (
           <div
             data-testid="permission-mode-no-api-key"
             className="flex items-start gap-1.5 rounded-md bg-warning/15 px-2.5 py-2 text-foreground"
@@ -126,7 +128,7 @@ export function PermissionModeCard({ value, subject, parentGroupId, saving, onCh
                 ? t("commandReview.mode.confirmAutopilot")
                 : t("commandReview.mode.confirmAssisted")}
             </p>
-            {apiKeySet === false && <p>{t("commandReview.mode.noApiKey")}</p>}
+            {missingApiKey && <p>{t("commandReview.mode.noApiKey")}</p>}
           </div>
         }
         cancelText={t("action.cancel")}

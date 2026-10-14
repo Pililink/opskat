@@ -20,7 +20,9 @@ describe("reviewSummary", () => {
   });
 
   it("审核未通过时列出没满足的题目", () => {
-    expect(reviewSummary(t, { mode: "assisted", outcome: "reject", failed: ["disruptive", "remote_code"] }, "zh-CN")).toBe(
+    expect(
+      reviewSummary(t, { mode: "assisted", outcome: "reject", failed: ["disruptive", "remote_code"] }, "zh-CN")
+    ).toBe(
       "commandReview.summary.reject(commandReview.question.disruptive" +
         "commandReview.listSeparator" +
         "commandReview.question.remote_code)"

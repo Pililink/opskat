@@ -6,14 +6,20 @@ import { toast } from "sonner";
 import { notifySuccess } from "@/lib/notify";
 import { failReasonLabel } from "@/lib/commandReview";
 import { SecretInput } from "@/components/SecretInput";
+import { Segmented } from "@/components/asset/fields";
+import { ExtensionSettingsForm } from "@/components/settings/ExtensionSettingsForm";
 import {
   GetCommandReviewSettings,
   SaveCommandReviewSettings,
   TestCommandReview,
 } from "../../../wailsjs/go/system/System";
-import { system } from "../../../wailsjs/go/models";
+import { GetCommandReviewer, ListCommandReviewers, SetCommandReviewer } from "../../../wailsjs/go/extension/Extension";
+import { extension_svc, system } from "../../../wailsjs/go/models";
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+// 审核服务选择里"内置审核"那一项；后端用空字符串表示。
+const BUILTIN = "builtin";
 
 // 与 internal/app/system/command_review.go 的校验一致。
 const TIMEOUT_MIN = 1000;
@@ -34,9 +40,10 @@ const toForm = (s: system.CommandReviewSettings): FormState => ({
 });
 
 /**
- * 命令审核的设置：Jev 格式（TypeSafe System One API）的服务地址、API key（只写不读）、
- * 模型名（不做限制，用"测试模型"确认可用）、超时、阈值，以及本次启动以来最近一次审核失败。
- * 放在设置 › AI 标签页。
+ * 命令审核的设置：先选审核服务——内置审核或一个已安装的审核扩展。
+ * 内置审核是 Jev 格式（TypeSafe System One API）的服务地址、API key（只写不读）、
+ * 模型名（不做限制，用"测试模型"确认可用）、超时、阈值；审核扩展显示它自己声明的设置。
+ * 两种都显示本次启动以来最近一次审核失败。放在设置 › AI 标签页。
  */
 export function CommandReviewSection() {
   const { t } = useTranslation();
@@ -45,6 +52,8 @@ export function CommandReviewSection() {
   const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [reviewers, setReviewers] = useState<extension_svc.CommandReviewerInfo[]>([]);
+  const [reviewer, setReviewer] = useState(BUILTIN);
 
   const apply = useCallback((s: system.CommandReviewSettings) => {
     setLoaded(s);
@@ -56,7 +65,25 @@ export function CommandReviewSection() {
     GetCommandReviewSettings()
       .then(apply)
       .catch((e: unknown) => toast.error(errMsg(e)));
+    Promise.all([ListCommandReviewers(), GetCommandReviewer()])
+      .then(([list, selected]) => {
+        setReviewers(list ?? []);
+        setReviewer(selected || BUILTIN);
+      })
+      .catch((e: unknown) => toast.error(errMsg(e)));
   }, [apply]);
+
+  const selectReviewer = async (next: string) => {
+    if (next === reviewer) return;
+    try {
+      await SetCommandReviewer(next === BUILTIN ? "" : next);
+      setReviewer(next);
+      notifySuccess(t("commandReview.settings.reviewerSaved"));
+    } catch (e: unknown) {
+      toast.error(errMsg(e));
+    }
+  };
+  const selectedExtension = reviewers.find((r) => r.name === reviewer);
 
   // 校验通过返回保存入参，否则提示并返回 null。
   const buildInput = (clearApiKey: boolean): system.CommandReviewSaveInput | null => {
@@ -127,68 +154,112 @@ export function CommandReviewSection() {
         ) : (
           <>
             <div className="grid gap-1.5">
-              <Label htmlFor="command-review-api-key">{t("commandReview.settings.apiKey")}</Label>
-              <SecretInput
-                id="command-review-api-key"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder={t("commandReview.settings.apiKeyPlaceholder")}
-                autoComplete="off"
+              <Label>{t("commandReview.settings.reviewer")}</Label>
+              <Segmented
+                value={reviewer}
+                onChange={selectReviewer}
+                aria-label={t("commandReview.settings.reviewer")}
+                options={[
+                  { value: BUILTIN, label: t("commandReview.settings.builtin"), testid: "command-reviewer-builtin" },
+                  ...reviewers.map((r) => ({
+                    value: r.name,
+                    label:
+                      r.usable && !r.signed
+                        ? `${r.displayName} · ${t("commandReview.settings.unsigned")}`
+                        : r.displayName,
+                    disabled: !r.usable,
+                    testid: `command-reviewer-${r.name}`,
+                  })),
+                ]}
               />
-              <p className="text-xs text-muted-foreground">
-                {loaded.apiKeySet ? t("commandReview.settings.apiKeySet") : t("commandReview.settings.apiKeyNotSet")}
-              </p>
+              <p className="text-xs text-muted-foreground">{t("commandReview.settings.reviewerHint")}</p>
+              {reviewers
+                .filter((r) => !r.usable)
+                .map((r) => (
+                  <p key={r.name} data-testid="command-reviewer-unusable" className="text-xs text-warning">
+                    {t("commandReview.settings.reviewerUnusable", { name: r.displayName, reason: r.reason })}
+                  </p>
+                ))}
             </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="command-review-base-url">{t("commandReview.settings.baseUrl")}</Label>
-              <Input
-                id="command-review-base-url"
-                value={form.baseUrl}
-                onChange={(e) => setForm((f) => ({ ...f, baseUrl: e.target.value }))}
-                autoComplete="off"
-                spellCheck={false}
-              />
-              <p className="text-xs text-muted-foreground">{t("commandReview.settings.baseUrlHint")}</p>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div className="grid gap-1.5">
-                <Label htmlFor="command-review-model">{t("commandReview.settings.model")}</Label>
-                <Input
-                  id="command-review-model"
-                  value={form.model}
-                  onChange={(e) => setForm((f) => ({ ...f, model: e.target.value }))}
-                />
+
+            {selectedExtension ? (
+              <div className="space-y-2" data-testid="command-reviewer-extension">
+                <p className="text-xs text-muted-foreground">
+                  {t("commandReview.settings.extensionTimeout", { timeout: loaded.timeoutMs })}
+                </p>
+                {selectedExtension.hasSettings && (
+                  <ExtensionSettingsForm key={selectedExtension.name} extensionName={selectedExtension.name} />
+                )}
               </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="command-review-timeout">{t("commandReview.settings.timeout")}</Label>
-                <Input
-                  id="command-review-timeout"
-                  type="number"
-                  min={TIMEOUT_MIN}
-                  max={TIMEOUT_MAX}
-                  step={500}
-                  value={form.timeoutMs}
-                  onChange={(e) => setForm((f) => ({ ...f, timeoutMs: e.target.value }))}
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="command-review-threshold">{t("commandReview.settings.threshold")}</Label>
-                <Input
-                  id="command-review-threshold"
-                  type="number"
-                  min={0.01}
-                  max={0.99}
-                  step={0.05}
-                  value={form.threshold}
-                  onChange={(e) => setForm((f) => ({ ...f, threshold: e.target.value }))}
-                />
-              </div>
-            </div>
-            <div className="space-y-1 text-xs text-muted-foreground">
-              <p>{t("commandReview.settings.modelHint")}</p>
-              <p>{t("commandReview.settings.timeoutHint")}</p>
-              <p>{t("commandReview.settings.thresholdHint")}</p>
-            </div>
+            ) : (
+              <>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="command-review-api-key">{t("commandReview.settings.apiKey")}</Label>
+                  <SecretInput
+                    id="command-review-api-key"
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    placeholder={t("commandReview.settings.apiKeyPlaceholder")}
+                    autoComplete="off"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {loaded.apiKeySet
+                      ? t("commandReview.settings.apiKeySet")
+                      : t("commandReview.settings.apiKeyNotSet")}
+                  </p>
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="command-review-base-url">{t("commandReview.settings.baseUrl")}</Label>
+                  <Input
+                    id="command-review-base-url"
+                    value={form.baseUrl}
+                    onChange={(e) => setForm((f) => ({ ...f, baseUrl: e.target.value }))}
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                  <p className="text-xs text-muted-foreground">{t("commandReview.settings.baseUrlHint")}</p>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="command-review-model">{t("commandReview.settings.model")}</Label>
+                    <Input
+                      id="command-review-model"
+                      value={form.model}
+                      onChange={(e) => setForm((f) => ({ ...f, model: e.target.value }))}
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="command-review-timeout">{t("commandReview.settings.timeout")}</Label>
+                    <Input
+                      id="command-review-timeout"
+                      type="number"
+                      min={TIMEOUT_MIN}
+                      max={TIMEOUT_MAX}
+                      step={500}
+                      value={form.timeoutMs}
+                      onChange={(e) => setForm((f) => ({ ...f, timeoutMs: e.target.value }))}
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="command-review-threshold">{t("commandReview.settings.threshold")}</Label>
+                    <Input
+                      id="command-review-threshold"
+                      type="number"
+                      min={0.01}
+                      max={0.99}
+                      step={0.05}
+                      value={form.threshold}
+                      onChange={(e) => setForm((f) => ({ ...f, threshold: e.target.value }))}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1 text-xs text-muted-foreground">
+                  <p>{t("commandReview.settings.modelHint")}</p>
+                  <p>{t("commandReview.settings.timeoutHint")}</p>
+                  <p>{t("commandReview.settings.thresholdHint")}</p>
+                </div>
+              </>
+            )}
 
             {loaded.lastFailReason && (
               <div
@@ -205,32 +276,34 @@ export function CommandReviewSection() {
               </div>
             )}
 
-            <div className="flex flex-wrap gap-2">
-              <Button onClick={() => save()} disabled={saving || testing} variant="outline" className="gap-1">
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                {t("commandReview.settings.save")}
-              </Button>
-              <Button
-                onClick={test}
-                disabled={saving || testing || (!loaded.apiKeySet && apiKey.trim() === "")}
-                variant="outline"
-                className="gap-1"
-              >
-                {testing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                {testing ? t("commandReview.settings.testing") : t("commandReview.settings.test")}
-              </Button>
-              {loaded.apiKeySet && (
-                <Button
-                  onClick={() => save(true)}
-                  disabled={saving || testing}
-                  variant="ghost"
-                  className="gap-1 text-muted-foreground"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  {t("commandReview.settings.clearApiKey")}
+            {!selectedExtension && (
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={() => save()} disabled={saving || testing} variant="outline" className="gap-1">
+                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                  {t("commandReview.settings.save")}
                 </Button>
-              )}
-            </div>
+                <Button
+                  onClick={test}
+                  disabled={saving || testing || (!loaded.apiKeySet && apiKey.trim() === "")}
+                  variant="outline"
+                  className="gap-1"
+                >
+                  {testing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                  {testing ? t("commandReview.settings.testing") : t("commandReview.settings.test")}
+                </Button>
+                {loaded.apiKeySet && (
+                  <Button
+                    onClick={() => save(true)}
+                    disabled={saving || testing}
+                    variant="ghost"
+                    className="gap-1 text-muted-foreground"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    {t("commandReview.settings.clearApiKey")}
+                  </Button>
+                )}
+              </div>
+            )}
 
             <p className="text-xs text-muted-foreground">{t("commandReview.settings.notice")}</p>
           </>

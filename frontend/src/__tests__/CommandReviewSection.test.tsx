@@ -2,6 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { CommandReviewSection } from "../components/settings/CommandReviewSection";
 import { GetCommandReviewSettings, SaveCommandReviewSettings, TestCommandReview } from "../../wailsjs/go/system/System";
+import {
+  GetCommandReviewer,
+  GetExtensionSettings,
+  ListCommandReviewers,
+  SetCommandReviewer,
+} from "../../wailsjs/go/extension/Extension";
 
 const toastError = vi.hoisted(() => vi.fn());
 const notifySuccess = vi.hoisted(() => vi.fn());
@@ -39,6 +45,77 @@ describe("CommandReviewSection", () => {
     vi.mocked(SaveCommandReviewSettings).mockReset().mockResolvedValue(undefined);
     vi.mocked(TestCommandReview).mockReset().mockResolvedValue("jev-1.13.0");
     vi.mocked(GetCommandReviewSettings).mockReset().mockResolvedValue(settings());
+    vi.mocked(ListCommandReviewers).mockReset().mockResolvedValue([]);
+    vi.mocked(GetCommandReviewer).mockReset().mockResolvedValue("");
+    vi.mocked(SetCommandReviewer).mockReset().mockResolvedValue(undefined);
+    vi.mocked(GetExtensionSettings)
+      .mockReset()
+      .mockResolvedValue({ schema: { type: "object", properties: {} }, values: {}, secretsSet: [] } as never);
+  });
+
+  const reviewers = [
+    {
+      name: "command-review",
+      displayName: "Command Review",
+      version: "1.0.0",
+      usable: true,
+      signed: true,
+      hasSettings: true,
+    },
+    {
+      name: "local-review",
+      displayName: "Local Review",
+      version: "0.1.0",
+      usable: true,
+      signed: false,
+      hasSettings: false,
+    },
+    {
+      name: "tampered",
+      displayName: "Tampered",
+      version: "1.0.0",
+      usable: false,
+      signed: false,
+      hasSettings: false,
+      reason: "package digest does not match",
+    },
+  ];
+
+  it("列出审核扩展：未签名的标出来，用不了的不能选并写明原因", async () => {
+    vi.mocked(ListCommandReviewers).mockResolvedValue(reviewers as never);
+    await renderSection();
+    expect(screen.getByTestId("command-reviewer-builtin")).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByTestId("command-reviewer-local-review")).toHaveTextContent("commandReview.settings.unsigned");
+    expect(screen.getByTestId("command-reviewer-tampered")).toBeDisabled();
+    expect(screen.getByTestId("command-reviewer-unusable")).toHaveTextContent(
+      "commandReview.settings.reviewerUnusable"
+    );
+  });
+
+  it("选中审核扩展后保存选择，换成该扩展的设置，不再显示内置审核的设置", async () => {
+    vi.mocked(ListCommandReviewers).mockResolvedValue(reviewers as never);
+    await renderSection();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("command-reviewer-command-review"));
+    });
+    expect(SetCommandReviewer).toHaveBeenCalledWith("command-review");
+    expect(GetExtensionSettings).toHaveBeenCalledWith("command-review");
+    expect(screen.getByTestId("command-reviewer-extension")).toBeInTheDocument();
+    expect(screen.queryByLabelText("commandReview.settings.baseUrl")).toBeNull();
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("command-reviewer-builtin"));
+    });
+    expect(SetCommandReviewer).toHaveBeenLastCalledWith("");
+    expect(screen.getByLabelText("commandReview.settings.baseUrl")).toBeInTheDocument();
+  });
+
+  it("读回已选中的审核扩展", async () => {
+    vi.mocked(ListCommandReviewers).mockResolvedValue(reviewers as never);
+    vi.mocked(GetCommandReviewer).mockResolvedValue("local-review");
+    await renderSection();
+    expect(screen.getByTestId("command-reviewer-local-review")).toHaveAttribute("aria-checked", "true");
+    expect(GetExtensionSettings).not.toHaveBeenCalled();
   });
 
   it("加载已保存的设置", async () => {

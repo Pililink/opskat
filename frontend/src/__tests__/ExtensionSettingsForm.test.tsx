@@ -1,0 +1,41 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { ExtensionSettingsForm } from "../components/settings/ExtensionSettingsForm";
+import { GetExtensionSettings, SaveExtensionSettings } from "../../wailsjs/go/extension/Extension";
+
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), warning: vi.fn(), info: vi.fn(), success: vi.fn() } }));
+vi.mock("@/lib/notify", () => ({ notifySuccess: vi.fn(), notifyCopied: vi.fn() }));
+
+const view = {
+  schema: {
+    type: "object",
+    properties: {
+      endpoint: { type: "string", format: "endpoint", title: "Endpoint" },
+      token: { type: "string", format: "password", title: "API key" },
+    },
+  },
+  values: { endpoint: "https://review.example.com" },
+  secretsSet: ["token"],
+};
+
+describe("ExtensionSettingsForm", () => {
+  beforeEach(() => {
+    vi.mocked(GetExtensionSettings)
+      .mockReset()
+      .mockResolvedValue(view as never);
+    vi.mocked(SaveExtensionSettings).mockReset().mockResolvedValue(undefined);
+  });
+
+  it("读回非密钥字段，已设置的密钥只显示为已设置，留空保存不提交新值", async () => {
+    await act(async () => {
+      render(<ExtensionSettingsForm extensionName="command-review" />);
+    });
+    expect(await screen.findByDisplayValue("https://review.example.com")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("asset.passwordUnchanged")).toHaveValue("");
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "extension.settings.save" }));
+    });
+    expect(SaveExtensionSettings).toHaveBeenCalledWith("command-review", { endpoint: "https://review.example.com" });
+  });
+});

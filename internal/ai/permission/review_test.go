@@ -35,7 +35,7 @@ func (f *fakeReviewer) ReviewBatch(_ context.Context, ins []command_review_svc.I
 	return out
 }
 
-func (f *fakeReviewer) Test(context.Context) command_review_svc.Result {
+func (f *fakeReviewer) TestReviewer(context.Context, command_review_svc.ExtensionReviewer) command_review_svc.Result {
 	return command_review_svc.Result{}
 }
 func (f *fakeReviewer) Status() command_review_svc.Status          { return command_review_svc.Status{} }

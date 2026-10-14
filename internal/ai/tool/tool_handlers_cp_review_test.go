@@ -31,7 +31,7 @@ func (rejectReviewer) ReviewBatch(_ context.Context, ins []command_review_svc.In
 	return out
 }
 
-func (rejectReviewer) Test(context.Context) command_review_svc.Result {
+func (rejectReviewer) TestReviewer(context.Context, command_review_svc.ExtensionReviewer) command_review_svc.Result {
 	return command_review_svc.Result{}
 }
 func (rejectReviewer) Status() command_review_svc.Status   { return command_review_svc.Status{} }

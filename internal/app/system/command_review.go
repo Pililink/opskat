@@ -7,7 +7,6 @@ import (
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 	"go.uber.org/zap"
 
-	"github.com/opskat/opskat/internal/ai/aictx"
 	"github.com/opskat/opskat/internal/bootstrap"
 	"github.com/opskat/opskat/internal/service/command_review_svc"
 )
@@ -62,16 +61,6 @@ func (s *System) SaveCommandReviewTimeout(timeoutMs int) error {
 	}
 	logger.Ctx(ctx).Info("command review timeout saved", zap.Int("timeoutMs", timeoutMs))
 	return nil
-}
-
-// TestCommandReview 用要用的审核扩展审一条无害的命令，不读写缓存，返回审核结果：
-// 设置页据此确认审核服务能不能用、用的是哪个扩展。
-func (s *System) TestCommandReview() *aictx.ReviewInfo {
-	ctx := s.desktopCtx()
-	r := command_review_svc.Default().Test(ctx)
-	logger.Ctx(ctx).Info("test command review", zap.String("outcome", string(r.Outcome)),
-		zap.String("reason", r.Reason), zap.String("extension", r.Extension))
-	return r.Info("")
 }
 
 // watchCommandReviewConfigErrors 把审核的设置问题转成前端事件。

@@ -12,7 +12,6 @@ import (
 	"github.com/opskat/opskat/internal/repository/command_review_repo"
 	"github.com/opskat/opskat/internal/service/command_review_svc"
 	"github.com/opskat/opskat/internal/service/extension_svc"
-	"github.com/opskat/opskat/pkg/extension"
 )
 
 // registerCommandReview 注册命令的模型审核服务。桌面端和 opsctl 都经 Init 走到这里，
@@ -57,22 +56,5 @@ func activeCommandReviewer(ctx context.Context) (command_review_svc.ExtensionRev
 		logger.Ctx(ctx).Warn("command reviewer unavailable", zap.String("extension", name), zap.Error(err))
 		return nil, fmt.Errorf("%w: %s", command_review_svc.ErrReviewerUnavailable, err.Error())
 	}
-	return &loadedExtensionReviewer{active: active}, nil
-}
-
-type loadedExtensionReviewer struct {
-	active *extension_svc.ActiveReviewer
-}
-
-func (r *loadedExtensionReviewer) Identity() (string, string, string) {
-	return r.active.Name, r.active.Version, r.active.SettingsHash
-}
-func (r *loadedExtensionReviewer) Limits() (int, int) {
-	return r.active.MaxItems, r.active.MaxCommandLen
-}
-func (r *loadedExtensionReviewer) Questions() []extension.ReviewQuestion {
-	return r.active.Questions
-}
-func (r *loadedExtensionReviewer) Review(ctx context.Context, items []extension.ReviewItem) ([]extension.ReviewCommandResult, error) {
-	return r.active.Plugin.ReviewCommands(ctx, items, 0)
+	return active, nil
 }

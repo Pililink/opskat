@@ -18,8 +18,27 @@ type ActiveReviewer struct {
 	SettingsHash  string
 	MaxItems      int
 	MaxCommandLen int
-	Questions     []extension.ReviewQuestion
+	questions     []extension.ReviewQuestion
 	Plugin        *extension.Plugin
+}
+
+// ActiveReviewer 就是审核服务要的 command_review_svc.ExtensionReviewer。
+var _ command_review_svc.ExtensionReviewer = (*ActiveReviewer)(nil)
+
+// Identity 是扩展名、版本和设置哈希；设置哈希参与审核缓存键。
+func (r *ActiveReviewer) Identity() (string, string, string) {
+	return r.Name, r.Version, r.SettingsHash
+}
+
+// Limits 是 describe() 声明的单批条数和单条命令最大长度。
+func (r *ActiveReviewer) Limits() (int, int) { return r.MaxItems, r.MaxCommandLen }
+
+// Questions 是 describe() 声明的题目。
+func (r *ActiveReviewer) Questions() []extension.ReviewQuestion { return r.questions }
+
+// Review 调用扩展的 review_commands；超时由调用方的 ctx 控制。
+func (r *ActiveReviewer) Review(ctx context.Context, items []extension.ReviewItem) ([]extension.ReviewCommandResult, error) {
+	return r.Plugin.ReviewCommands(ctx, items, 0)
 }
 
 // ActiveCommandReviewer 返回名为 name 的已加载审核器。
@@ -53,7 +72,7 @@ func (s *Service) ActiveCommandReviewer(ctx context.Context, name string) (*Acti
 		SettingsHash:  hash,
 		MaxItems:      rev.MaxItems,
 		MaxCommandLen: rev.MaxCommandLen,
-		Questions:     rev.Questions,
+		questions:     rev.Questions,
 		Plugin:        ext.Plugin,
 	}, nil
 }

@@ -518,21 +518,13 @@ func TestTransientFailuresShowInStatusWithoutNotifying(t *testing.T) {
 
 // ---- 测试审核服务 ----
 
-// 测试要的是这一刻审核服务的真实回答：不命中、也不写入缓存。
-func TestTestBypassesTheCache(t *testing.T) {
+// 测试要的是这一刻审核扩展的真实回答：不命中、也不写入缓存。
+func TestTestReviewerBypassesTheCache(t *testing.T) {
 	rev := newReviewer()
-	s, cache := newService(rev)
+	s, cache := newService(newReviewer())
 
-	assert.Equal(t, OutcomePass, s.Test(context.Background()).Outcome)
-	assert.Equal(t, OutcomePass, s.Test(context.Background()).Outcome)
-	assert.Len(t, rev.calls, 2)
+	assert.Equal(t, OutcomePass, s.TestReviewer(context.Background(), rev).Outcome)
+	assert.Equal(t, OutcomePass, s.TestReviewer(context.Background(), rev).Outcome)
+	assert.Len(t, rev.calls, 2, "测的是传进来的那个扩展，不是在用的那个")
 	assert.Empty(t, cache.m)
-}
-
-func TestTestReportsAMissingReviewer(t *testing.T) {
-	s := New(func() time.Duration { return DefaultTimeout }, &memCache{m: map[string]Result{}},
-		func(context.Context) (ExtensionReviewer, error) { return nil, ErrNoReviewer })
-	r := s.Test(context.Background())
-	assert.Equal(t, OutcomeFail, r.Outcome)
-	assert.Equal(t, ReasonNoReviewer, r.Reason)
 }

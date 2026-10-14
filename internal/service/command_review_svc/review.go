@@ -141,8 +141,8 @@ type Service interface {
 	Review(ctx context.Context, in Input) Result
 	// ReviewBatch 审核多条命令，结果与输入一一对应；调用审核扩展这一步并行。
 	ReviewBatch(ctx context.Context, ins []Input) []Result
-	// Test 用要用的审核扩展审一条无害的命令，不读写缓存，设置页据此确认审核服务能不能用。
-	Test(ctx context.Context) Result
+	// TestReviewer 用 rev 审一条无害的命令，不读写缓存：扩展设置页据此确认这个审核扩展能不能用。
+	TestReviewer(ctx context.Context, rev ExtensionReviewer) Result
 	// Status 返回本进程启动以来最近一次审核失败的情况，没失败过则为空。
 	Status() Status
 	// SetConfigErrorListener 注册设置问题（没有审核扩展、扩展没配置好等）的通知，
@@ -232,11 +232,7 @@ func (s *service) ReviewBatch(ctx context.Context, ins []Input) []Result {
 // testCommand 是测试审核服务时送审的命令：只读、无害，正常的审核服务应当判它通过。
 var testCommand = Input{AssetType: "ssh", Command: "ls -la /tmp", Syntax: SyntaxShell}
 
-func (s *service) Test(ctx context.Context) Result {
-	rev, failed := s.resolve(ctx, 1)
-	if failed != nil {
-		return failed[0]
-	}
+func (s *service) TestReviewer(ctx context.Context, rev ExtensionReviewer) Result {
 	return s.reviewWith(ctx, rev, []Input{testCommand}, false)[0]
 }
 

@@ -44,9 +44,14 @@ func init() {
 
 // --- fakes -------------------------------------------------------------------
 
+// fakePlugin stands in for *extension.Plugin. Its resources are what
+// Plugin.CheckPolicy hands the host — globs, a literal resource quoted — so a
+// test meaning the literal resource "prod-*" writes `prod-\*`. resource is the
+// single-resource shorthand.
 type fakePlugin struct {
 	action    string
 	resource  string
+	resources []string
 	policyErr error
 	callErr   error
 	lastTool  string
@@ -88,8 +93,11 @@ func (p *fakePlugin) CallTool(_ context.Context, toolName string, args json.RawM
 	return json.RawMessage(result), nil
 }
 
-func (p *fakePlugin) CheckPolicy(_ context.Context, _ string, _ json.RawMessage) (string, string, error) {
-	return p.action, p.resource, p.policyErr
+func (p *fakePlugin) CheckPolicy(_ context.Context, _ string, _ json.RawMessage) (string, []string, error) {
+	if p.resources != nil || p.resource == "" {
+		return p.action, p.resources, p.policyErr
+	}
+	return p.action, []string{p.resource}, p.policyErr
 }
 
 func testManifest() *extension.Manifest {
@@ -408,7 +416,7 @@ func TestExtensionGrantDoesNotCoverADifferentResource(t *testing.T) {
 // the very call it was granted for.
 func TestExtensionGrantForAGlobLikeResourceIsExact(t *testing.T) {
 	t.Run("a '*' in the resource does not cover other resources", func(t *testing.T) {
-		plugin := &fakePlugin{action: "object.write", resource: "prod-*"}
+		plugin := &fakePlugin{action: "object.write", resource: `prod-\*`} // the literal resource "prod-*"
 		registerFake(t, plugin)
 		ctx := withGrantFixture(t, 1, "acme-store")
 
@@ -422,7 +430,7 @@ func TestExtensionGrantForAGlobLikeResourceIsExact(t *testing.T) {
 	})
 
 	t.Run("a '[' in the resource still matches itself", func(t *testing.T) {
-		registerFake(t, &fakePlugin{action: "object.write", resource: "logs[1]"})
+		registerFake(t, &fakePlugin{action: "object.write", resource: `logs\[1]`}) // the literal resource "logs[1]"
 		ctx := withGrantFixture(t, 1, "acme-store")
 
 		require.Equal(t, aictx.Allow, allowAllChecker().CheckForAsset(ctx, 1, "acme-store", "list_objects --bucket=prod").Decision)
@@ -618,4 +626,44 @@ func TestExtensionGrantRequestRefusesCommandShapedPatterns(t *testing.T) {
 			assert.Empty(t, items)
 		})
 	}
+}
+
+// --- connection fields ---------------------------------------------------------
+
+func registerWithConnection(t *testing.T, conn *extension.ConnectionDef) {
+	t.Helper()
+	m := testManifest()
+	m.AssetTypes[0].Connection = conn
+	l := loaded{name: m.Name, manifest: m, plugin: &fakePlugin{}}
+	localized := m.Localized(func(k string) string { return k })
+	require.NoError(t, register(l, helpDocument("# Acme\nProse about acme.", m.Name, localized), "acme skill"))
+	t.Cleanup(func() { Unregister(m.Name) })
+}
+
+func TestDeclaredConnectionItemsBecomeAutomationFields(t *testing.T) {
+	registerWithConnection(t, &extension.ConnectionDef{SSHTunnel: true, ProxyChain: true, TLS: true})
+
+	prepared, err := assettype.PrepareCreate("acme-store", map[string]any{
+		"endpoint": "https://acme.test", "ssh_asset_id": float64(3), "tls": true, "tls_ca_pem": "CA-PEM",
+	})
+	require.NoError(t, err)
+
+	asset := &asset_entity.Asset{Type: "acme-store"}
+	require.NoError(t, prepared.Handler.ApplyCreateArgs(context.Background(), asset, prepared.Config))
+	// The stored config is what the extension host's dialer reads: its reserved key.
+	var stored map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal([]byte(asset.Config), &stored))
+	assert.JSONEq(t, `{"tls":{"enabled":true,"caCert":"CA-PEM"}}`, string(stored[extension.HostConnectionConfigKey]))
+	assert.Equal(t, int64(3), asset.SSHTunnelID)
+}
+
+func TestHelpListsTheConfigFieldsAnAssetAccepts(t *testing.T) {
+	registerWithConnection(t, &extension.ConnectionDef{SSHTunnel: true, TLS: true})
+
+	help, ok := permission.HelpFor("acme-store")
+	require.True(t, ok)
+	for _, field := range []string{"`endpoint`", "`token`", "`ssh_asset_id`", "`tls_ca_pem`", "`tls_key_pem`"} {
+		assert.Contains(t, help, field)
+	}
+	assert.NotContains(t, help, "`proxy_chain`", "a connection item the type did not declare is not offered")
 }

@@ -26,13 +26,21 @@ import (
 // a frontend-only addition that changes nothing about the WASM host_call/host_io
 // contract. A 2.0 extension keeps loading and working exactly as before; it just
 // doesn't get hostUI.
-const HostABIVersion = "2.1"
+//
+// 2.2 lets check_policy answer {"action","resources":[...]} (the SDK's
+// PolicyResources): a call classified on several resources at once, whose '*' /
+// '?' are wildcards. The {"action","resource"} reply keeps its exact meaning. An
+// older host would read the list reply as a call with no resource at all, so an
+// extension that uses it declares 2.2 and an older app refuses to load it. 2.2
+// also lets check_policy answer {"reject":"<reason>"} (the SDK's RejectArgs): the
+// tool refusing the call's arguments, which the host denies without asking.
+const HostABIVersion = "2.2"
 
-// SupportedHostABIs lists all host ABI versions the runtime accepts. 2.0 stays
-// listed so extensions built before host-ui keep loading unchanged; only a
-// hostABI newer than everything here (e.g. an extension declaring 2.2 or 3.0)
-// is refused.
-var SupportedHostABIs = []string{"2.0", "2.1"}
+// SupportedHostABIs lists all host ABI versions the runtime accepts. 2.0 and 2.1
+// stay listed so extensions built before host-ui or multi-resource classification
+// keep loading unchanged; only a hostABI newer than everything here (e.g. an
+// extension declaring 2.3 or 3.0) is refused.
+var SupportedHostABIs = []string{"2.0", "2.1", "2.2"}
 
 var (
 	semverRe         = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
@@ -294,6 +302,9 @@ type ToolDef struct {
 	// knows whether it answers in a second or scans an index for minutes, and it
 	// holds for every caller alike — AI exec, opsctl and the extension's page.
 	TimeoutMs int64 `json:"timeoutMs,omitempty"`
+	// FileParams names the string parameters opsctl may fill from a file
+	// (`--<name>-file <path>`); every other entry point rejects that form.
+	FileParams []string `json:"fileParams,omitempty"`
 }
 
 // MaxToolTimeout is the longest timeout a tool may declare. A tool call holds
@@ -422,7 +433,7 @@ func (m *Manifest) Localized(tr func(key string) string) *Manifest {
 	return &out
 }
 
-// localizeConfigSchema translates title, placeholder, description fields in a JSON Schema.
+// localizeConfigSchema translates title, placeholder, description and enumLabels fields in a JSON Schema.
 func localizeConfigSchema(schema map[string]any, tr func(string) string) map[string]any {
 	if schema == nil {
 		return nil
@@ -436,6 +447,18 @@ func localizeConfigSchema(schema map[string]any, tr func(string) string) map[str
 		if s, ok := out[field].(string); ok && s != "" {
 			out[field] = tr(s)
 		}
+	}
+	// Enum option labels are i18n keys, like title.
+	if labels, ok := out["enumLabels"].([]any); ok {
+		translated := make([]any, len(labels))
+		for i, l := range labels {
+			if key, ok := l.(string); ok {
+				translated[i] = tr(key)
+			} else {
+				translated[i] = l
+			}
+		}
+		out["enumLabels"] = translated
 	}
 	// Recurse into properties
 	if props, ok := out["properties"].(map[string]any); ok {

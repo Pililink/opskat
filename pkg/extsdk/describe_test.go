@@ -2,6 +2,10 @@ package opskat
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,6 +23,7 @@ type demoConfig struct {
 	Endpoint string `json:"endpoint" title:"config.endpoint.title" placeholder:"config.endpoint.placeholder"`
 	Secret   string `json:"secret,omitempty" title:"config.secret.title" format:"password"`
 	Mode     string `json:"mode,omitempty" enum:"fast,safe"`
+	Auth     string `json:"auth,omitempty" enum:"none,basic" enumLabels:"config.auth.none,config.auth.basic" default:"none"`
 }
 
 func decodeDescribe(t *testing.T) map[string]any {
@@ -117,8 +122,12 @@ func TestDescribeIsDerivedFromRegistrations(t *testing.T) {
 			})
 			So(props["secret"].(map[string]any)["format"], ShouldEqual, "password")
 			So(props["mode"].(map[string]any)["enum"], ShouldResemble, []any{"fast", "safe"})
+			auth := props["auth"].(map[string]any)
+			So(auth["enum"], ShouldResemble, []any{"none", "basic"})
+			So(auth["enumLabels"], ShouldResemble, []any{"config.auth.none", "config.auth.basic"})
+			So(auth["default"], ShouldEqual, "none")
 			So(schema["required"], ShouldResemble, []any{"endpoint"})
-			So(schema["propertyOrder"], ShouldResemble, []any{"endpoint", "secret", "mode"})
+			So(schema["propertyOrder"], ShouldResemble, []any{"endpoint", "secret", "mode", "auth"})
 		})
 
 		Convey("a tool registered after the first describe still shows up", func() {
@@ -335,6 +344,205 @@ func TestPolicyFuncClassifiesEachCall(t *testing.T) {
 	})
 }
 
+type bulkArgs struct {
+	Indices []string `json:"indices,omitempty"`
+	Write   bool     `json:"write,omitempty"`
+}
+
+func classifyBulk(args bulkArgs) (string, []string) {
+	if args.Write {
+		return "index.write", args.Indices
+	}
+	return "index.read", args.Indices
+}
+
+func TestPolicyResourcesClassifiesACallTouchingSeveralResources(t *testing.T) {
+	Convey("PolicyResources answers check_policy with every resource the call touches", t, func() {
+		resetRegistries()
+		Extension(Meta{PolicyType: "demo"})
+		Tool("request", func(_ *ToolContext, _ bulkArgs) (any, error) { return nil, nil }).
+			PolicyResources([]string{"index.read", "index.write"}, classifyBulk)
+
+		check := func(args string) (string, error) {
+			raw, err := dispatch("check_policy", []byte(`{"tool":"request","args":`+args+`}`))
+			return string(raw), err
+		}
+
+		Convey("the reply carries the resource list, not the single-resource field", func() {
+			raw, err := check(`{"indices":["a","prod-1","logs-*"],"write":true}`)
+			So(err, ShouldBeNil)
+			So(raw, ShouldEqual, `{"action":"index.write","resources":["a","prod-1","logs-*"]}`)
+		})
+
+		Convey("a call touching no resource answers an empty list, never null", func() {
+			raw, err := check(`{}`)
+			So(err, ShouldBeNil)
+			So(raw, ShouldEqual, `{"action":"index.read","resources":[]}`)
+		})
+
+		Convey("arguments the tool cannot decode fail the check instead of classifying blind", func() {
+			_, err := check(`{"indices":"a"}`)
+			So(err, ShouldNotBeNil)
+		})
+
+		Convey("describe declares the action set", func() {
+			tool := decodeDescribe(t)["tools"].([]any)[0].(map[string]any)
+			So(tool["policyActions"], ShouldResemble, []any{"index.read", "index.write"})
+		})
+
+		Convey("TestHost reports both reply shapes as a resource list", func() {
+			Tool("list", func(_ *ToolContext, _ listArgs) (any, error) { return nil, nil }).
+				Policy("list").Resource(func(a listArgs) string { return a.Bucket })
+			host := NewTestHost()
+			defer host.Close()
+
+			action, resources, err := host.CheckPolicy("request", bulkArgs{Indices: []string{"x", "prod-1"}, Write: true})
+			So(err, ShouldBeNil)
+			So(action, ShouldEqual, "index.write")
+			So(resources, ShouldResemble, []string{"x", "prod-1"})
+
+			action, resources, err = host.CheckPolicy("list", listArgs{Bucket: "b1"})
+			So(err, ShouldBeNil)
+			So(action, ShouldEqual, "list")
+			So(resources, ShouldResemble, []string{"b1"})
+
+			// As the host reads it (pkg/extension decodePolicyDecision): an empty
+			// single resource is no resource, not one empty-named resource.
+			_, resources, err = host.CheckPolicy("list", listArgs{})
+			So(err, ShouldBeNil)
+			So(resources, ShouldBeEmpty)
+		})
+	})
+
+	Convey("a PolicyResources declaration that cannot be honored fails at init", t, func() {
+		resetRegistries()
+		noop := func(_ *ToolContext, _ bulkArgs) (any, error) { return nil, nil }
+		classifyOne := func(a bulkArgs) (string, string) { return "index.read", "" }
+
+		So(func() { Tool("a", noop).PolicyResources(nil, classifyBulk) }, ShouldPanic)
+		So(func() { Tool("b", noop).Policy("index.read").PolicyResources([]string{"index.read"}, classifyBulk) }, ShouldPanic)
+		So(func() { Tool("c", noop).PolicyResources([]string{"index.read"}, classifyBulk).Policy("index.read") }, ShouldPanic)
+		So(func() {
+			Tool("d", noop).PolicyResources([]string{"index.read"}, classifyBulk).
+				Resource(func(bulkArgs) string { return "" })
+		}, ShouldPanic)
+		So(func() {
+			Tool("e", noop).PolicyFunc([]string{"index.read"}, classifyOne).
+				PolicyResources([]string{"index.read"}, classifyBulk)
+		}, ShouldPanic)
+		So(func() {
+			Tool("f", noop).PolicyResources([]string{"index.read"}, classifyBulk).
+				PolicyFunc([]string{"index.read"}, classifyOne)
+		}, ShouldPanic)
+	})
+}
+
+type pathArgs struct {
+	Path  string `json:"path,omitempty"`
+	Index string `json:"index,omitempty"`
+}
+
+func rejectHostPath(a pathArgs) error {
+	if strings.Contains(a.Path, "://") {
+		return fmt.Errorf("path %q must not name a host", a.Path)
+	}
+	return nil
+}
+
+func TestRejectArgsRefusesTheCallWithTheToolsReason(t *testing.T) {
+	Convey("RejectArgs lets a tool refuse a call's arguments outright", t, func() {
+		resetRegistries()
+		Extension(Meta{PolicyType: "demo"})
+		ran := false
+		Tool("request", func(_ *ToolContext, _ pathArgs) (any, error) {
+			ran = true
+			return map[string]string{"ok": "1"}, nil
+		}).
+			RejectArgs(rejectHostPath).
+			PolicyResources([]string{"index.read"}, func(a pathArgs) (string, []string) {
+				return "index.read", []string{a.Index}
+			})
+
+		Convey("check_policy answers the rejection and its reason instead of a classification", func() {
+			raw, err := dispatch("check_policy", []byte(`{"tool":"request","args":{"path":"http://evil/x"}}`))
+			So(err, ShouldBeNil)
+			So(string(raw), ShouldEqual, `{"reject":"path \"http://evil/x\" must not name a host"}`)
+		})
+
+		Convey("accepted arguments classify exactly as without RejectArgs", func() {
+			raw, err := dispatch("check_policy", []byte(`{"tool":"request","args":{"path":"/a/_search","index":"a"}}`))
+			So(err, ShouldBeNil)
+			So(string(raw), ShouldEqual, `{"action":"index.read","resources":["a"]}`)
+		})
+
+		Convey("arguments the tool cannot decode are still a failed check, not a rejection", func() {
+			_, err := dispatch("check_policy", []byte(`{"tool":"request","args":{"path":7}}`))
+			So(err, ShouldNotBeNil)
+			var rejected *ArgsRejectedError
+			So(errors.As(err, &rejected), ShouldBeFalse)
+		})
+
+		Convey("TestHost observes the rejection as an ArgsRejectedError", func() {
+			host := NewTestHost()
+			defer host.Close()
+
+			_, _, err := host.CheckPolicy("request", pathArgs{Path: "http://evil/x"})
+			var rejected *ArgsRejectedError
+			So(errors.As(err, &rejected), ShouldBeTrue)
+			So(rejected.Reason, ShouldEqual, `path "http://evil/x" must not name a host`)
+
+			action, resources, err := host.CheckPolicy("request", pathArgs{Path: "/a", Index: "a"})
+			So(err, ShouldBeNil)
+			So(action, ShouldEqual, "index.read")
+			So(resources, ShouldResemble, []string{"a"})
+		})
+
+		// A page calls the tool without asking policy first; the refusal still
+		// holds, so the handler never needs a second copy of the check.
+		Convey("the handler never runs on arguments the tool rejects", func() {
+			host := NewTestHost()
+			defer host.Close()
+
+			_, err := host.CallTool(Asset{ID: 1}, "request", pathArgs{Path: "http://evil/x"})
+			var rejected *ArgsRejectedError
+			So(errors.As(err, &rejected), ShouldBeTrue)
+			So(err.Error(), ShouldContainSubstring, "must not name a host")
+			So(ran, ShouldBeFalse)
+
+			_, err = host.CallTool(Asset{ID: 1}, "request", pathArgs{Path: "/a"})
+			So(err, ShouldBeNil)
+			So(ran, ShouldBeTrue)
+		})
+	})
+
+	Convey("RejectArgs works with every way a tool declares its policy", t, func() {
+		resetRegistries()
+		noop := func(_ *ToolContext, _ pathArgs) (any, error) { return nil, nil }
+		Tool("fixed", noop).Policy("index.read").
+			Resource(func(a pathArgs) string { return a.Index }).RejectArgs(rejectHostPath)
+		Tool("one", noop).RejectArgs(rejectHostPath).
+			PolicyFunc([]string{"index.read"}, func(a pathArgs) (string, string) { return "index.read", a.Index })
+
+		for _, tool := range []string{"fixed", "one"} {
+			raw, err := dispatch("check_policy", []byte(`{"tool":"`+tool+`","args":{"path":"http://evil/x"}}`))
+			So(err, ShouldBeNil)
+			So(string(raw), ShouldStartWith, `{"reject":`)
+
+			// The single-resource reply of an accepted call is byte-for-byte the 2.0/2.1 one.
+			raw, err = dispatch("check_policy", []byte(`{"tool":"`+tool+`","args":{"index":"a"}}`))
+			So(err, ShouldBeNil)
+			So(string(raw), ShouldEqual, `{"action":"index.read","resource":"a"}`)
+		}
+	})
+
+	Convey("a second RejectArgs on one tool fails at init", t, func() {
+		resetRegistries()
+		reg := Tool("request", func(_ *ToolContext, _ pathArgs) (any, error) { return nil, nil }).
+			Policy("index.read").RejectArgs(rejectHostPath)
+		So(func() { reg.RejectArgs(rejectHostPath) }, ShouldPanic)
+	})
+}
+
 func TestDescribeReportsToolTimeout(t *testing.T) {
 	Convey("a tool's own timeout is declared through describe", t, func() {
 		resetRegistries()
@@ -355,6 +563,69 @@ func TestDescribeReportsToolTimeout(t *testing.T) {
 			So(func() { reg.Timeout(10*time.Minute + time.Millisecond) }, ShouldPanic)
 			So(func() { reg.Timeout(0) }, ShouldPanic)
 			So(func() { reg.Timeout(10 * time.Minute) }, ShouldNotPanic)
+		})
+	})
+}
+
+func TestDescribeReportsFileParams(t *testing.T) {
+	type bulkArgs struct {
+		Body     string `json:"body"`
+		Index    string `json:"index"`
+		Size     int    `json:"size"`
+		IndexArg string `json:"index-file"`
+	}
+	noop := func(_ *ToolContext, _ bulkArgs) (any, error) { return nil, nil }
+	Convey("a string parameter marked file-readable is reported by describe", t, func() {
+		resetRegistries()
+		AssetType[demoConfig]("demo")
+		Tool("bulk", noop).Policy("write").FileParam("body")
+		Tool("plain", noop).Policy("read")
+
+		byName := map[string]map[string]any{}
+		for _, raw := range decodeDescribe(t)["tools"].([]any) {
+			tool := raw.(map[string]any)
+			byName[tool["name"].(string)] = tool
+		}
+		So(byName["bulk"]["fileParams"], ShouldResemble, []any{"body"})
+		So(byName["plain"], ShouldNotContainKey, "fileParams")
+
+		Convey("a non-string, unknown or repeated parameter fails at registration", func() {
+			reg := Tool("bad", noop).Policy("read")
+			So(func() { reg.FileParam("size") }, ShouldPanic)
+			So(func() { reg.FileParam("missing") }, ShouldPanic)
+			So(func() { reg.FileParam("body") }, ShouldNotPanic)
+			So(func() { reg.FileParam("body") }, ShouldPanic)
+			So(func() { reg.FileParam("index") }, ShouldPanic) // its -file spelling is the index-file parameter
+		})
+	})
+}
+
+func TestConfigSchemaEnumTagsAreChecked(t *testing.T) {
+	Convey("enumLabels and default that the host could not render fail at registration", t, func() {
+		refl := func(v any) func() { return func() { reflectSchema(reflect.TypeOf(v), "cfg", schemaModeConfig) } }
+		Convey("labels without an enum", func() {
+			type c struct {
+				A string `json:"a" enumLabels:"x"`
+			}
+			So(refl(c{}), ShouldPanicWith, "opskat: cfg: field A declares enumLabels without enum")
+		})
+		Convey("labels of a different length than the enum", func() {
+			type c struct {
+				A string `json:"a" enum:"x,y" enumLabels:"x"`
+			}
+			So(refl(c{}), ShouldPanic)
+		})
+		Convey("a default that is not one of the options", func() {
+			type c struct {
+				A string `json:"a" enum:"x,y" default:"z"`
+			}
+			So(refl(c{}), ShouldPanic)
+		})
+		Convey("a default on a non-string field", func() {
+			type c struct {
+				A int `json:"a" default:"1"`
+			}
+			So(refl(c{}), ShouldPanic)
 		})
 	})
 }

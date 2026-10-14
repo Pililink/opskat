@@ -546,3 +546,74 @@ func TestParseDescriptorPolicyActionSets(t *testing.T) {
 		})
 	})
 }
+
+func TestParseDescriptorFileParams(t *testing.T) {
+	tool := func(fileParams string) []byte {
+		return desc(`"tools":[{"name":"t","policyAction":"read","parameters":{"type":"object","properties":{"body":{"type":"string"},"n":{"type":"integer"}}},"fileParams":` + fileParams + `}]`)
+	}
+	Convey("A tool may mark string parameters as file-readable", t, func() {
+		Convey("a string parameter is kept on the tool", func() {
+			d, err := ParseDescriptor(tool(`["body"]`))
+			So(err, ShouldBeNil)
+			So(d.Tools[0].FileParams, ShouldResemble, []string{"body"})
+		})
+		Convey("a non-string parameter is refused at load", func() {
+			_, err := ParseDescriptor(tool(`["n"]`))
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring, `tools["t"].fileParams`)
+		})
+		Convey("an undeclared parameter is refused at load", func() {
+			_, err := ParseDescriptor(tool(`["nope"]`))
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring, `tools["t"].fileParams`)
+		})
+		// opsctl reads --body-file as body's file form, so a real body-file
+		// parameter could never be passed.
+		Convey("a parameter whose -file spelling is itself a parameter is refused at load", func() {
+			_, err := ParseDescriptor(desc(`"tools":[{"name":"t","policyAction":"read","parameters":{"type":"object","properties":{"body":{"type":"string"},"body-file":{"type":"string"}}},"fileParams":["body"]}]`))
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring, `"body-file"`)
+		})
+	})
+}
+
+func TestParseDescriptorEnumPresentation(t *testing.T) {
+	withProp := func(prop string) []byte {
+		return []byte(`{"assetTypes":[{"type":"x","i18n":{"name":"n"},` +
+			`"configSchema":{"type":"object","properties":{"auth":` + prop + `}}}],"policies":{"type":"x"}}`)
+	}
+	Convey("enumLabels and default are checked against the enum they decorate", t, func() {
+		Convey("matching labels and a member default are accepted", func() {
+			_, err := ParseDescriptor(withProp(`{"type":"string","enum":["a","b"],"enumLabels":["A","B"],"default":"a"}`))
+			So(err, ShouldBeNil)
+		})
+		Convey("labels of another length", func() {
+			_, err := ParseDescriptor(withProp(`{"type":"string","enum":["a","b"],"enumLabels":["A"]}`))
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring, "enumLabels")
+		})
+		Convey("labels without an enum", func() {
+			_, err := ParseDescriptor(withProp(`{"type":"string","enumLabels":["A"]}`))
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring, "enumLabels")
+		})
+		Convey("non-string labels", func() {
+			_, err := ParseDescriptor(withProp(`{"type":"string","enum":["a"],"enumLabels":[1]}`))
+			So(err, ShouldNotBeNil)
+		})
+		Convey("a default outside the enum", func() {
+			_, err := ParseDescriptor(withProp(`{"type":"string","enum":["a","b"],"default":"c"}`))
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring, "default")
+		})
+	})
+
+	Convey("localizing a config schema translates the option labels", t, func() {
+		out := localizeConfigSchema(map[string]any{"properties": map[string]any{
+			"auth": map[string]any{"enum": []any{"a"}, "enumLabels": []any{"k.a"}, "default": "a"},
+		}}, func(k string) string { return "T:" + k })
+		auth := out["properties"].(map[string]any)["auth"].(map[string]any)
+		So(auth["enumLabels"], ShouldResemble, []any{"T:k.a"})
+		So(auth["enum"], ShouldResemble, []any{"a"})
+	})
+}

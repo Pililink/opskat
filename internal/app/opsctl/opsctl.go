@@ -8,8 +8,6 @@ import (
 	"context"
 	"sync"
 
-	"github.com/google/uuid"
-
 	"github.com/opskat/opskat/internal/ai/permission"
 	"github.com/opskat/opskat/internal/approval"
 
@@ -40,8 +38,9 @@ type ExtToolExecutor interface {
 //
 // 与 ExtToolExecutor 同一条理由——位置而非语义：安装要落 enabled 状态、经 extreg
 // 注册资产类型/策略/技能、刷新前端，这些注册表只存在于桌面进程。因此这里跑的就是
-// 扩展页"从目录安装"按钮跑的那一个 extension_svc.Install，dev 与 prod 的加载路径
-// 由构造相同，而不是靠两套宿主维持一致。
+// 扩展页"从目录安装"按钮跑的那一个 extension_svc.Install（只是不弹安装确认框——
+// ext dev 自己的审批弹窗已经问过），dev 与 prod 的加载路径由构造相同，而不是靠两套
+// 宿主维持一致。
 type ExtDevInstaller interface {
 	// InstalledExtensionVersion 报告同名扩展是否已安装（启用或停用）及其版本，
 	// 供确认弹窗说明这次安装会不会覆盖它。
@@ -60,6 +59,7 @@ type Opsctl struct {
 	authToken       string
 	extExecutor     ExtToolExecutor
 	extDevInstaller ExtDevInstaller
+	extStore        ExtStore
 	// extDevApprove 把一次 ext dev 安装交给用户确认；New 接到 requestSingleApproval
 	// （既有的 opsctl 审批弹窗），测试替换它以免触达 Wails 事件。
 	extDevApprove   func(approval.ApprovalRequest) approval.ApprovalResponse
@@ -69,11 +69,6 @@ type Opsctl struct {
 	mfa                    *mfaBroker
 	// emit 把事件推给前端；New 接到 Wails 事件，测试替换它以驱动审批弹窗。
 	emit func(name string, payload map[string]any)
-
-	// pageRunID 是本次桌面端运行的标识，扩展页面的 grant 会话由它与资产共同派生
-	// （pageGrantSessionID）：页面"始终允许"与 AI 会话 / opsctl 会话一样有边界，
-	// 只在本次运行内有效，而不是永久挂在资产上。
-	pageRunID string
 }
 
 type pendingOpsctlApproval struct {
@@ -98,10 +93,9 @@ func New(
 	window WindowActivator,
 ) *Opsctl {
 	o := &Opsctl{
-		appCtx:    appCtx,
-		lang:      lang,
-		window:    window,
-		pageRunID: uuid.NewString(),
+		appCtx: appCtx,
+		lang:   lang,
+		window: window,
 	}
 	o.extDevApprove = o.requestSingleApproval
 	o.emit = func(name string, payload map[string]any) {

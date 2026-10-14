@@ -54,14 +54,10 @@ export function createExtensionAPI(): ExtActionAPI {
       assetId?: number,
       options?: ExtCallOptions
     ): Promise<unknown> {
-      // A call scoped to an asset now clears the desktop's policy/approval gate
-      // (internal/app/opsctl's RunPageToolCall) instead of dialing the plugin
-      // directly. The invocation id is this call's own correlation token — the
-      // same per-call convention startAction already uses, reused here rather
-      // than inventing a second one — not the identity an "always allow" grant
-      // persists under; the backend derives that from the asset (for the current
-      // desktop run) so a grant outlives the one call that requested it. It is
-      // also what cancel names.
+      // A call scoped to an asset runs directly on the backend (no approval or
+      // audit; see CallExtensionTool). The invocation id is this call's own
+      // correlation token — the same per-call convention startAction already uses,
+      // reused here rather than inventing a second one — and is what cancel names.
       const signal = options?.signal;
       signal?.throwIfAborted();
       const invocationId = newInvocationId();
@@ -70,8 +66,8 @@ export function createExtensionAPI(): ExtActionAPI {
       if (!signal) return parseResult(await call);
 
       // Abort settles the promise with the signal's reason once the backend has
-      // taken the cancel — not when the canceled call finally unwinds, which a
-      // pending approval dialog can hold up. A failed cancel is what the caller
+      // taken the cancel — not when the canceled call finally unwinds, which waits
+      // for the guest to be interrupted and return. A failed cancel is what the caller
       // sees instead, rather than an abort that silently did nothing.
       let onAbort: () => void = () => undefined;
       const aborted = new Promise<never>((_resolve, reject) => {

@@ -19,6 +19,7 @@ import { OpsctlApprovalDialog } from "@/components/approval/OpsctlApprovalDialog
 import { CommandReviewConfigErrorListener } from "@/components/settings/CommandReviewConfigErrorListener";
 import { openGroupDetail, openInfoTab } from "@/lib/infoTab";
 import { OpsctlMFADialog } from "@/components/approval/OpsctlMFADialog";
+import { ExtensionInstallConfirmDialog } from "@/extension";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ActiveTasksQuitDialog, type QuitActivity } from "@/components/ActiveTasksQuitDialog";
 
@@ -516,6 +517,7 @@ function App() {
           <OpsctlApprovalDialog suspended={quitActivities !== null} />
           <CommandReviewConfigErrorListener />
           <OpsctlMFADialog />
+          <ExtensionInstallConfirmDialog />
           <ActiveTasksQuitDialog
             open={quitActivities !== null}
             activities={quitActivities ?? []}

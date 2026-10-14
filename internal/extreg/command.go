@@ -85,23 +85,26 @@ func parseCommand(m *extension.Manifest, command string) (string, []byte, error)
 // --json 逃生口）是取值 flag。parseCommand 读、canonicalCommand 写都用它，规范串才能
 // 被原样解析回同一组参数。
 func flagGrammar(m *extension.Manifest) cmdline.Option {
-	return cmdline.WithValueFlags(func(verb, name string) bool {
-		if name == "json" {
-			// 逃生口永远带一个值，空格分隔式与其它取值 flag 一致。
-			return true
-		}
-		def, ok := toolDef(m, verb)
-		if !ok {
-			return false
-		}
-		props, _ := def.Parameters["properties"].(map[string]any)
-		prop, ok := props[name].(map[string]any)
-		if !ok {
-			return false
-		}
-		typ, _ := prop["type"].(string)
-		return typ != "boolean"
-	})
+	return cmdline.WithValueFlags(func(verb, name string) bool { return flagTakesValue(m, verb, name) })
+}
+
+// flagTakesValue reports whether a bare `--name` of verb consumes the next word.
+func flagTakesValue(m *extension.Manifest, verb, name string) bool {
+	if name == "json" {
+		// 逃生口永远带一个值，空格分隔式与其它取值 flag 一致。
+		return true
+	}
+	def, ok := toolDef(m, verb)
+	if !ok {
+		return false
+	}
+	props, _ := def.Parameters["properties"].(map[string]any)
+	prop, ok := props[name].(map[string]any)
+	if !ok {
+		return false
+	}
+	typ, _ := prop["type"].(string)
+	return typ != "boolean"
 }
 
 // canonicalCommand 把一条命令还原为规范形式：工具名 + 按名称排序的 flag。策略匹配、
@@ -164,6 +167,20 @@ func toolNames(m *extension.Manifest) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// ValidateToolArgs is the entry an extension page's tool call takes into the
+// schema check: raw is the JSON object the page passed for tool, and the result is
+// its canonical form. A page has no command line, so it never goes through
+// parseCommand — but it must be held to the same declaration, which is what keeps
+// unknown keys (and the opsctl-only `<flag>-file` spelling) out of the guest.
+func ValidateToolArgs(m *extension.Manifest, tool string, raw []byte) ([]byte, error) {
+	def, ok := toolDef(m, tool)
+	if !ok {
+		return nil, fmt.Errorf("extension %s has no tool %q (available: %s)",
+			m.Name, tool, strings.Join(toolNames(m), ", "))
+	}
+	return validateToolArgs(m.Name, def, raw)
 }
 
 // validateToolArgs applies the manifest's supported JSON-schema subset at call time.

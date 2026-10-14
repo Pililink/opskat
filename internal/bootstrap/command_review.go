@@ -69,7 +69,9 @@ func (r *loadedExtensionReviewer) Identity() (string, string, string) {
 func (r *loadedExtensionReviewer) Limits() (int, int) {
 	return r.active.MaxItems, r.active.MaxCommandLen
 }
-func (r *loadedExtensionReviewer) Questions() []string { return r.active.Questions }
+func (r *loadedExtensionReviewer) Questions() []extension.ReviewQuestion {
+	return r.active.Questions
+}
 func (r *loadedExtensionReviewer) Review(ctx context.Context, items []extension.ReviewItem) ([]extension.ReviewCommandResult, error) {
 	return r.active.Plugin.ReviewCommands(ctx, items, 0)
 }

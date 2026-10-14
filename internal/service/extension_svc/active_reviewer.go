@@ -14,7 +14,7 @@ type ActiveReviewer struct {
 	SettingsHash  string
 	MaxItems      int
 	MaxCommandLen int
-	Questions     []string
+	Questions     []extension.ReviewQuestion
 	Plugin        *extension.Plugin
 }
 
@@ -43,17 +43,13 @@ func (s *Service) ActiveCommandReviewer(ctx context.Context, name string) (*Acti
 		return nil, err
 	}
 	rev := ext.Manifest.Reviewer
-	ids := make([]string, len(rev.Questions))
-	for i, q := range rev.Questions {
-		ids[i] = q.ID
-	}
 	return &ActiveReviewer{
 		Name:          ext.Name,
 		Version:       ext.Manifest.Version,
 		SettingsHash:  hash,
 		MaxItems:      rev.MaxItems,
 		MaxCommandLen: rev.MaxCommandLen,
-		Questions:     ids,
+		Questions:     rev.Questions,
 		Plugin:        ext.Plugin,
 	}, nil
 }

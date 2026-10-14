@@ -12,4 +12,9 @@ type ReviewInfo struct {
 	DurationMs int64              `json:"duration_ms,omitempty"`
 	Cached     bool               `json:"cached,omitempty"`
 	Attempts   int                `json:"attempts,omitempty"` // 调用模型的次数，超时或连接出错时会重试
+	// Extension / Version 是做出判断的审核扩展；内置审核为空。
+	Extension string `json:"extension,omitempty"`
+	Version   string `json:"version,omitempty"`
+	// FailedNames 是审核扩展为未通过的题目声明的名称（题目 id → 语言 → 名称）。
+	FailedNames map[string]map[string]string `json:"failed_names,omitempty"`
 }

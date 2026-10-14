@@ -131,6 +131,8 @@ type Result struct {
 	// Extension / Version 是做出这次判断的审核扩展。内置 TypeSafe 审核为空。
 	Extension string `json:"extension,omitempty"`
 	Version   string `json:"version,omitempty"`
+	// FailedNames 是审核扩展为 Failed 里每道题声明的各语言名称（题目 id → 语言 → 名称）。内置审核为空。
+	FailedNames map[string]map[string]string `json:"failed_names,omitempty"`
 }
 
 // ExtensionReviewer 是当前生效的扩展审核器。没有选中时返回 nil，审核走内置 TypeSafe。
@@ -139,7 +141,8 @@ type ExtensionReviewer interface {
 	Identity() (name, version, settingsHash string)
 	// Limits 是 describe() 声明的单批条数和单条命令最大长度。
 	Limits() (maxItems, maxCommandLen int)
-	Questions() []string
+	// Questions 是 describe() 声明的题目，结果里只回题目 id，宿主按这里的名称显示。
+	Questions() []extension.ReviewQuestion
 	Review(ctx context.Context, items []extension.ReviewItem) ([]extension.ReviewCommandResult, error)
 }
 
@@ -475,17 +478,12 @@ func (s *service) reviewWithExtension(ctx context.Context, rev ExtensionReviewer
 	cfg := s.config()
 	name, version, settingsHash := rev.Identity()
 	maxItems, maxLen := rev.Limits()
-	if maxItems <= 0 {
-		maxItems = 1
-	}
-	if maxLen <= 0 {
-		maxLen = cfg.MaxCommandLen
-	}
+	questions := rev.Questions()
 	results := make([]Result, len(ins))
 	type pendingExt struct {
-		idx     int
-		item    extension.ReviewItem
-		key     string
+		idx  int
+		item extension.ReviewItem
+		key  string
 	}
 	var pending []pendingExt
 	for i, in := range ins {
@@ -540,7 +538,11 @@ func (s *service) reviewWithExtension(ctx context.Context, rev ExtensionReviewer
 		}
 		s.recordSuccess()
 		for i, p := range batch {
-			r := extensionResult(name, version, out[i], elapsed)
+			r := extensionResult(name, version, questions, out[i], elapsed)
+			if r.Outcome == OutcomeFail {
+				results[p.idx] = s.recordFailure(r)
+				continue
+			}
 			if err := s.cache.Put(ctx, p.key, r, cacheTTL); err != nil {
 				logger.Ctx(ctx).Warn("write command review cache", zap.String("extension", name), zap.Error(err))
 			}
@@ -550,7 +552,8 @@ func (s *service) reviewWithExtension(ctx context.Context, rev ExtensionReviewer
 	return results
 }
 
-func extensionResult(name, version string, r extension.ReviewCommandResult, elapsed time.Duration) Result {
+// extensionResult 把审核扩展的回答落成宿主的结果：error 是"没能得到判断"，按审核失败处理。
+func extensionResult(name, version string, questions []extension.ReviewQuestion, r extension.ReviewCommandResult, elapsed time.Duration) Result {
 	out := Result{
 		Outcome:   Outcome(r.Outcome),
 		Reason:    r.Reason,
@@ -559,6 +562,19 @@ func extensionResult(name, version string, r extension.ReviewCommandResult, elap
 		Version:   version,
 		Duration:  elapsed,
 		Attempts:  1,
+	}
+	if r.Outcome == extension.ReviewOutcomeError {
+		out.Outcome = OutcomeFail
+	}
+	if len(r.Failed) > 0 {
+		names := make(map[string]map[string]string, len(questions))
+		for _, q := range questions {
+			names[q.ID] = q.I18n.Name
+		}
+		out.FailedNames = make(map[string]map[string]string, len(r.Failed))
+		for _, id := range r.Failed {
+			out.FailedNames[id] = names[id]
+		}
 	}
 	if r.Score != nil {
 		out.Scores = map[string]float64{}

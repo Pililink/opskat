@@ -61,16 +61,19 @@ func applyReviews(ctx context.Context, reqs []PermissionRequest, results []aictx
 // applyReview 把一条审核结果按模式落成权限结果。
 func applyReview(ctx context.Context, req PermissionRequest, mode string, result aictx.CheckResult, r command_review_svc.Result) aictx.CheckResult {
 	info := &aictx.ReviewInfo{
-		Mode:       mode,
-		Outcome:    string(r.Outcome),
-		Reason:     r.Reason,
-		Failed:     r.Failed,
-		Model:      r.Model,
-		Scores:     r.Scores,
-		Threshold:  r.Threshold,
-		DurationMs: r.Duration.Milliseconds(),
-		Cached:     r.Cached,
-		Attempts:   r.Attempts,
+		Mode:        mode,
+		Outcome:     string(r.Outcome),
+		Reason:      r.Reason,
+		Failed:      r.Failed,
+		Model:       r.Model,
+		Scores:      r.Scores,
+		Threshold:   r.Threshold,
+		DurationMs:  r.Duration.Milliseconds(),
+		Cached:      r.Cached,
+		Attempts:    r.Attempts,
+		Extension:   r.Extension,
+		Version:     r.Version,
+		FailedNames: r.FailedNames,
 	}
 	logger.Ctx(ctx).Info("permission review applied",
 		zap.Int64("assetID", req.AssetID), zap.String("assetType", req.AssetType),
@@ -185,7 +188,7 @@ func ReviewSummary(ctx context.Context, info *aictx.ReviewInfo) string {
 	case string(command_review_svc.OutcomeReject):
 		labels := make([]string, 0, len(info.Failed))
 		for _, q := range info.Failed {
-			labels = append(labels, reviewQuestionLabel(ctx, q))
+			labels = append(labels, reviewQuestionLabel(ctx, q, info.FailedNames[q]))
 		}
 		return policy.PolicyFmt(ctx, "Model review did not pass (%s)", "模型审核未通过（%s）",
 			strings.Join(labels, policy.PolicyMsg(ctx, ", ", "、")))
@@ -194,7 +197,17 @@ func ReviewSummary(ctx context.Context, info *aictx.ReviewInfo) string {
 	}
 }
 
-func reviewQuestionLabel(ctx context.Context, question string) string {
+// reviewQuestionLabel 是题目的显示名：审核扩展声明了名称时按策略语言取（没有这种语言时用英文），
+// 否则是内置题目的名称，都没有就显示题目 id。
+func reviewQuestionLabel(ctx context.Context, question string, names map[string]string) string {
+	if len(names) > 0 {
+		if policy.IsZh(ctx) && names["zh-CN"] != "" {
+			return names["zh-CN"]
+		}
+		if names["en"] != "" {
+			return names["en"]
+		}
+	}
 	switch question {
 	case command_review_svc.QuestionDestructive:
 		return policy.PolicyMsg(ctx, "may destroy or irreversibly change data", "可能破坏或不可恢复地修改数据")

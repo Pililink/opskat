@@ -15,7 +15,7 @@ import (
 type fakeExtensionReviewer struct {
 	name, version, settingsHash string
 	maxItems, maxCommandLen     int
-	questions                   []string
+	questions                   []extension.ReviewQuestion
 	calls                       [][]extension.ReviewItem
 	reply                       func(items []extension.ReviewItem) ([]extension.ReviewCommandResult, error)
 }
@@ -23,18 +23,59 @@ type fakeExtensionReviewer struct {
 func (f *fakeExtensionReviewer) Identity() (string, string, string) {
 	return f.name, f.version, f.settingsHash
 }
-func (f *fakeExtensionReviewer) Limits() (int, int) { return f.maxItems, f.maxCommandLen }
-func (f *fakeExtensionReviewer) Questions() []string { return f.questions }
+func (f *fakeExtensionReviewer) Limits() (int, int)                    { return f.maxItems, f.maxCommandLen }
+func (f *fakeExtensionReviewer) Questions() []extension.ReviewQuestion { return f.questions }
 func (f *fakeExtensionReviewer) Review(_ context.Context, items []extension.ReviewItem) ([]extension.ReviewCommandResult, error) {
 	cp := append([]extension.ReviewItem(nil), items...)
 	f.calls = append(f.calls, cp)
 	return f.reply(items)
 }
 
+var destructiveQuestion = []extension.ReviewQuestion{{
+	ID:   "destructive",
+	I18n: extension.I18nNames{Name: map[string]string{"en": "Destroys data", "zh-CN": "破坏数据"}},
+}}
+
+// 审核扩展的 error 是"没能得到判断"，宿主按审核失败处理，也不能缓存——否则一次限流会让同一条命令 24 小时内都审核失败。
+func TestExtensionReviewerErrorIsFailureAndNotCached(t *testing.T) {
+	rev := &fakeExtensionReviewer{
+		name: "rev", version: "1.0.0", maxItems: 8, maxCommandLen: 100, questions: destructiveQuestion,
+		reply: func(items []extension.ReviewItem) ([]extension.ReviewCommandResult, error) {
+			return []extension.ReviewCommandResult{{Outcome: extension.ReviewOutcomeError, Reason: "rate_limited"}}, nil
+		},
+	}
+	s, cache := newTestService(&fakeEvaluator{}, enabledConfig())
+	s.extension = func(context.Context) (ExtensionReviewer, error) { return rev, nil }
+
+	r := s.Review(context.Background(), Input{AssetType: "ssh", Command: "ls"})
+	assert.Equal(t, OutcomeFail, r.Outcome)
+	assert.Equal(t, "rate_limited", r.Reason)
+	assert.Empty(t, cache.m, "审核失败不进缓存")
+
+	s.Review(context.Background(), Input{AssetType: "ssh", Command: "ls"})
+	assert.Len(t, rev.calls, 2)
+}
+
+// 未通过的题目带上扩展声明的各语言名称，审批提示和审计据此显示。
+func TestExtensionReviewerRejectCarriesQuestionNames(t *testing.T) {
+	rev := &fakeExtensionReviewer{
+		name: "rev", version: "1.0.0", maxItems: 8, maxCommandLen: 100, questions: destructiveQuestion,
+		reply: func(items []extension.ReviewItem) ([]extension.ReviewCommandResult, error) {
+			return []extension.ReviewCommandResult{{Outcome: extension.ReviewOutcomeReject, Failed: []string{"destructive"}}}, nil
+		},
+	}
+	s, _ := newTestService(&fakeEvaluator{}, enabledConfig())
+	s.extension = func(context.Context) (ExtensionReviewer, error) { return rev, nil }
+
+	r := s.Review(context.Background(), Input{AssetType: "ssh", Command: "rm -rf /data"})
+	assert.Equal(t, OutcomeReject, r.Outcome)
+	assert.Equal(t, map[string]map[string]string{"destructive": {"en": "Destroys data", "zh-CN": "破坏数据"}}, r.FailedNames)
+}
+
 func TestExtensionReviewerSplitsBatchesAndRejectsOverlong(t *testing.T) {
 	rev := &fakeExtensionReviewer{
 		name: "rev", version: "1.2.0", settingsHash: "abc",
-		maxItems: 2, maxCommandLen: 4, questions: []string{"destructive"},
+		maxItems: 2, maxCommandLen: 4, questions: destructiveQuestion,
 		reply: func(items []extension.ReviewItem) ([]extension.ReviewCommandResult, error) {
 			out := make([]extension.ReviewCommandResult, len(items))
 			for i := range items {

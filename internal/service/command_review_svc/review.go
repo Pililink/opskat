@@ -8,13 +8,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/cago-frame/cago/pkg/logger"
 	"github.com/opskat/opskat/internal/ai/aictx"
+	"github.com/opskat/opskat/internal/pkg/jevreview"
 	"github.com/opskat/opskat/internal/pkg/typesafe"
 	"github.com/opskat/opskat/pkg/extension"
 	"go.uber.org/zap"
@@ -23,26 +23,23 @@ import (
 // 题目 ID 只给代码用，不会发给模型；题目的完整含义写在 instructions 里。
 // 审核未通过时，Result.Failed 里是这些 ID。
 const (
-	QuestionDestructive = "destructive"
-	QuestionDisruptive  = "disruptive"
-	QuestionRemoteCode  = "remote_code"
+	QuestionDestructive = jevreview.QuestionDestructive
+	QuestionDisruptive  = jevreview.QuestionDisruptive
+	QuestionRemoteCode  = jevreview.QuestionRemoteCode
 )
 
 // 设置没填时的默认值：TypeSafe 官方地址上的 Jev 具体版本。
 const (
-	DefaultBaseURL   = typesafe.DefaultBaseURL
-	DefaultModel     = "jev-1.13.0"
+	DefaultBaseURL   = jevreview.DefaultBaseURL
+	DefaultModel     = jevreview.DefaultModel
 	DefaultTimeout   = 5 * time.Second
-	DefaultThreshold = 0.5
+	DefaultThreshold = jevreview.DefaultThreshold
 	// MaxCommandLen 是能审核的最长命令（替换敏感信息后）；更长的按审核失败处理，不截断后硬判。
 	MaxCommandLen = 4000
 )
 
 // ErrNotConfigured 表示没有配置审核模型的 API key。
 var ErrNotConfigured = errors.New("typesafe api key not configured")
-
-// questionsVersion 在题目文字或通过标准变化时递增，让旧的缓存失效。
-const questionsVersion = "3"
 
 // cacheTTL 是审核结果的缓存时长。
 const cacheTTL = 7 * 24 * time.Hour
@@ -53,36 +50,6 @@ const maxParallelReviews = 4
 // maxAttempts 是一次审核最多调用模型的次数：超时或连接出错时再试一次。opsctl 每次都是新进程，
 // 第一次请求要重新解析域名、建立连接，偶尔会超时；第二次通常很快。
 const maxAttempts = 2
-
-// riskQuestions 只问明确的危险：破坏数据、中断服务、下载并执行代码。只读的查看类命令
-// （状态、日志、配置、进程、容器、定时任务、网络状态）在每道题的"否"里都写明了，
-// 这类命令不应被拦下来。"破坏数据"只算不可恢复的修改，容易撤销的小改动也写成"否"。
-var riskQuestions = map[string]typesafe.Question{
-	QuestionDestructive: {
-		Type:         typesafe.QuestionNoul,
-		Instructions: "Would running `command` on a `asset_type` asset clearly destroy data or make an irreversible change, such as deleting files or directories, wiping or formatting disks, dropping or truncating databases, tables, or collections, bulk-deleting keys, records, or storage objects, or deleting users, credentials, or keys?",
-		Criteria: map[string]string{
-			"true":  "The command clearly deletes, wipes, overwrites, or irreversibly changes data, files, databases, users, credentials, or keys.",
-			"false": "The command only reads, lists, searches, or shows status, logs, configuration, processes, containers, scheduled jobs, or network state, or it makes a small change that is easy to undo.",
-		},
-	},
-	QuestionDisruptive: {
-		Type:         typesafe.QuestionNoul,
-		Instructions: "Would running `command` on a `asset_type` asset clearly interrupt a running system, such as stopping, restarting, killing, or disabling a service, container, process, or the host, or changing firewall, routing, or network settings so that the host or its services become unreachable?",
-		Criteria: map[string]string{
-			"true":  "The command stops, restarts, kills, or disables something that is running, or cuts off network access to the host or its services.",
-			"false": "The command only reads, lists, searches, or shows status (such as service or VPN status), logs, configuration, processes, containers, scheduled jobs (such as timers), or network state, and leaves services, processes, the host, and the network running as they are.",
-		},
-	},
-	QuestionRemoteCode: {
-		Type:         typesafe.QuestionNoul,
-		Instructions: "Does `command` download code or a script from the network and run it, for example by piping `curl` or `wget` output into a shell?",
-		Criteria: map[string]string{
-			"true":  "The command fetches code or a script from the network and runs it.",
-			"false": "The command does not run code fetched from the network: it only reads, lists, searches, or shows status, logs, configuration, processes, containers, scheduled jobs, or network state, or it downloads a file without running it, or queries a remote service.",
-		},
-	},
-}
 
 // Outcome 是审核结果，和审批、审计里记的是同一个类型。
 type Outcome = aictx.ReviewOutcome
@@ -101,9 +68,9 @@ const (
 	ReasonTooLong          = "too_long"
 	ReasonUnparseable      = "unparseable" // 命令解析不了，没法替换敏感信息，不发送
 	ReasonUndecodable      = "undecodable" // 认得出解码后执行，但解不开要执行的内容，不发送
-	ReasonTimeout          = "timeout"
-	ReasonInvalidAPIKey    = "invalid_api_key"
-	ReasonUnavailable      = "unavailable"
+	ReasonTimeout          = jevreview.ReasonTimeout
+	ReasonInvalidAPIKey    = jevreview.ReasonInvalidAPIKey
+	ReasonUnavailable      = jevreview.ReasonUnavailable
 	// ReasonInvalidResult 是扩展返回了不合规的整批结果。
 	ReasonInvalidResult = "invalid_result"
 	// ReasonReviewerUnavailable 是已选中审核扩展，但它没加载、不是审核器，或来源/摘要检查没过。
@@ -314,10 +281,7 @@ func Register(s Service) { defaultService = s }
 func Default() Service { return defaultService }
 
 // reviewState 是发给模型的上下文。
-type reviewState struct {
-	AssetType string `json:"asset_type"`
-	Command   string `json:"command"`
-}
+type reviewState = jevreview.State
 
 func (s *service) Review(ctx context.Context, in Input) Result {
 	return s.ReviewBatch(ctx, []Input{in})[0]
@@ -433,7 +397,7 @@ func (s *service) reviewWithBuiltin(ctx context.Context, ins []Input) []Result {
 	for j, p := range pending {
 		e := evals[j]
 		if e.err != nil {
-			reason := failReason(e.err)
+			reason := jevreview.FailReason(e.err)
 			p.log.Warn("command review failed", zap.String("reason", reason), zap.Int("attempts", e.attempts), zap.Duration("duration", e.elapsed), zap.Error(e.err))
 			results[p.idx] = s.recordFailure(Result{Outcome: OutcomeFail, Reason: reason, Model: cfg.Model, Duration: e.elapsed, Attempts: e.attempts})
 			continue
@@ -459,28 +423,16 @@ func (s *service) reviewWithBuiltin(ctx context.Context, ins []Input) []Result {
 // 失败时按 retryable 决定是否再试，最多 maxAttempts 次。
 func (s *service) evaluate(ctx context.Context, cfg Config, p pendingReview) (*typesafe.Response, int, error) {
 	ev := s.evaluator(cfg.APIKey, cfg.BaseURL)
-	req := typesafe.Request{
-		Model:     cfg.Model,
-		State:     reviewState{AssetType: p.in.AssetType, Command: p.command},
-		Questions: riskQuestions,
-	}
+	req := jevreview.Request(cfg.Model, p.in.AssetType, p.command)
 	for attempt := 1; ; attempt++ {
 		reqCtx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 		resp, err := ev.Evaluate(reqCtx, req)
 		cancel()
-		if err == nil || attempt == maxAttempts || !retryable(ctx, err) {
+		if err == nil || attempt == maxAttempts || !jevreview.Retryable(ctx, err) {
 			return resp, attempt, err
 		}
 		p.log.Warn("command review attempt failed, retrying", zap.Int("attempt", attempt), zap.Error(err))
 	}
-}
-
-// retryable 判断一次调用失败后值不值得再试：这次调用超时或网络出错时重试。服务端明确返回的
-// 错误（API key 无效、请求有误等）重试也不会成功，429 / 529 已经在客户端里退避重试过；
-// 调用方已经取消时也不再试。
-func retryable(ctx context.Context, err error) bool {
-	var apiErr *typesafe.APIError
-	return ctx.Err() == nil && !errors.As(err, &apiErr)
 }
 
 func (s *service) TestModel(ctx context.Context, cfg Config) (string, error) {
@@ -492,7 +444,7 @@ func (s *service) TestModel(ctx context.Context, cfg Config) (string, error) {
 	resp, err := s.evaluator(cfg.APIKey, cfg.BaseURL).Evaluate(ctx, typesafe.Request{
 		Model:     cfg.Model,
 		State:     reviewState{AssetType: "ssh", Command: "ls"},
-		Questions: map[string]typesafe.Question{QuestionDestructive: riskQuestions[QuestionDestructive]},
+		Questions: map[string]typesafe.Question{QuestionDestructive: jevreview.Questions[QuestionDestructive]},
 	})
 	if err != nil {
 		return "", err
@@ -502,29 +454,11 @@ func (s *service) TestModel(ctx context.Context, cfg Config) (string, error) {
 
 // decide 按阈值判断：任意一题"是"的概率达到阈值即不通过。
 func decide(model string, scores map[string]float64, threshold float64) Result {
-	r := Result{Outcome: OutcomePass, Model: model, Scores: scores, Threshold: threshold}
-	for id, p := range scores {
-		if p >= threshold {
-			r.Failed = append(r.Failed, id)
-		}
-	}
+	r := Result{Outcome: OutcomePass, Model: model, Scores: scores, Threshold: threshold, Failed: jevreview.Failed(scores, threshold)}
 	if len(r.Failed) > 0 {
-		sort.Strings(r.Failed)
 		r.Outcome = OutcomeReject
 	}
 	return r
-}
-
-func failReason(err error) string {
-	var apiErr *typesafe.APIError
-	switch {
-	case errors.Is(err, context.DeadlineExceeded):
-		return ReasonTimeout
-	case errors.As(err, &apiErr) && apiErr.IsAuth():
-		return ReasonInvalidAPIKey
-	default:
-		return ReasonUnavailable
-	}
 }
 
 // reviewWithExtension 用当前生效的扩展审核器审核。和内置审核一样先展开解码后执行的命令、
@@ -662,6 +596,6 @@ func extensionCacheKey(name, version, settingsHash, assetType, command string) s
 // 替换后长得一样的两条命令（比如只有密码不同）各自审核，不共用结果。解码展开过的命令还带上
 // 展开后的文本，避免展开前的评分被当成展开后的结果。表里只存哈希，不存命令。
 func cacheKey(baseURL, model, assetType, command string) string {
-	h := sha256.Sum256([]byte(strings.Join([]string{baseURL, model, questionsVersion, assetType, command}, "\x00")))
+	h := sha256.Sum256([]byte(strings.Join([]string{baseURL, model, jevreview.QuestionsVersion, assetType, command}, "\x00")))
 	return hex.EncodeToString(h[:])
 }

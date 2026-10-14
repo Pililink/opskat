@@ -8,7 +8,7 @@ const t = ((key: string, opts?: Record<string, unknown>) =>
 
 describe("reviewWithMode", () => {
   it("在审核结果前写上触发审核的权限模式", () => {
-    expect(reviewWithMode(t, { mode: "autopilot", outcome: "pass" })).toBe(
+    expect(reviewWithMode(t, { mode: "autopilot", outcome: "pass" }, "zh-CN")).toBe(
       "commandReview.withMode(commandReview.mode.autopilot|commandReview.summary.pass)"
     );
   });
@@ -16,11 +16,11 @@ describe("reviewWithMode", () => {
 
 describe("reviewSummary", () => {
   it("审核通过", () => {
-    expect(reviewSummary(t, { mode: "assisted", outcome: "pass" })).toBe("commandReview.summary.pass");
+    expect(reviewSummary(t, { mode: "assisted", outcome: "pass" }, "zh-CN")).toBe("commandReview.summary.pass");
   });
 
   it("审核未通过时列出没满足的题目", () => {
-    expect(reviewSummary(t, { mode: "assisted", outcome: "reject", failed: ["disruptive", "remote_code"] })).toBe(
+    expect(reviewSummary(t, { mode: "assisted", outcome: "reject", failed: ["disruptive", "remote_code"] }, "zh-CN")).toBe(
       "commandReview.summary.reject(commandReview.question.disruptive" +
         "commandReview.listSeparator" +
         "commandReview.question.remote_code)"
@@ -28,11 +28,33 @@ describe("reviewSummary", () => {
   });
 
   it("审核失败时写明原因，未知原因按服务不可用显示", () => {
-    expect(reviewSummary(t, { mode: "assisted", outcome: "fail", reason: "timeout" })).toBe(
+    expect(reviewSummary(t, { mode: "assisted", outcome: "fail", reason: "timeout" }, "zh-CN")).toBe(
       "commandReview.summary.fail(commandReview.reason.timeout)"
     );
-    expect(reviewSummary(t, { mode: "assisted", outcome: "fail", reason: "something_new" })).toBe(
+    expect(reviewSummary(t, { mode: "assisted", outcome: "fail", reason: "something_new" }, "zh-CN")).toBe(
       "commandReview.summary.fail(commandReview.reason.unavailable)"
+    );
+  });
+});
+
+describe("reviewSummary with an extension reviewer", () => {
+  const review = {
+    mode: "autopilot" as const,
+    outcome: "reject",
+    failed: ["data_loss"],
+    extension: "command-review",
+    version: "1.2.0",
+    failed_names: { data_loss: { en: "Loses data", "zh-CN": "丢失数据" } },
+  };
+
+  it("用扩展声明的题目名称，按界面语言取", () => {
+    expect(reviewSummary(t, review, "zh-CN")).toBe("commandReview.summary.reject(丢失数据)");
+    expect(reviewSummary(t, review, "en")).toBe("commandReview.summary.reject(Loses data)");
+  });
+
+  it("扩展没给当前语言的名称时用英文", () => {
+    expect(reviewSummary(t, { ...review, failed_names: { data_loss: { en: "Loses data" } } }, "zh-CN")).toBe(
+      "commandReview.summary.reject(Loses data)"
     );
   });
 });

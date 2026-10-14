@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { cn } from "@opskat/ui";
 import { ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react";
-import { REVIEW_QUESTIONS, reviewSummary, reviewWithMode, type ReviewInfo } from "@/lib/commandReview";
+import { questionLabel, REVIEW_QUESTIONS, reviewSummary, reviewWithMode, type ReviewInfo } from "@/lib/commandReview";
 
 function reviewIcon(outcome: string) {
   if (outcome === "pass") return { Icon: ShieldCheck, tone: "text-success" };
@@ -22,21 +22,21 @@ export function ReviewNotice({
   withMode?: boolean;
   className?: string;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { Icon, tone } = reviewIcon(review.outcome);
   return (
     <div data-testid="review-notice" className={cn("flex items-start gap-1.5 text-xs", className)}>
       <Icon aria-hidden className={cn("mt-0.5 h-3.5 w-3.5 shrink-0", tone)} />
-      <span className="text-foreground">{withMode ? reviewWithMode(t, review) : reviewSummary(t, review)}</span>
+      <span className="text-foreground">{withMode ? reviewWithMode(t, review, i18n.language) : reviewSummary(t, review, i18n.language)}</span>
     </div>
   );
 }
 
 /** 列表里的审核标志：只有图标，悬停看到"Autopilot · 模型审核通过"这样的说明。 */
 export function ReviewMark({ review }: { review: ReviewInfo }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { Icon, tone } = reviewIcon(review.outcome);
-  const label = reviewWithMode(t, review);
+  const label = reviewWithMode(t, review, i18n.language);
   return (
     <span data-testid="review-mark" role="img" aria-label={label} title={label} className="inline-flex align-middle">
       <Icon aria-hidden className={cn("h-3.5 w-3.5", tone)} />
@@ -46,7 +46,7 @@ export function ReviewMark({ review }: { review: ReviewInfo }) {
 
 /** 每道题的评分（回答"是"的概率）和当时的阈值，审计详情里用；达到阈值的题标出来。 */
 export function ReviewScores({ review }: { review: ReviewInfo }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { scores } = review;
   if (!scores) return null;
   const failed = new Set(review.failed ?? []);
@@ -67,7 +67,11 @@ export function ReviewScores({ review }: { review: ReviewInfo }) {
             data-failed={failed.has(q)}
             className={cn(failed.has(q) ? "font-medium text-warning" : "text-foreground")}
           >
-            {REVIEW_QUESTIONS.includes(q) ? t(`commandReview.scoreName.${q}`) : q}{" "}
+            {review.failed_names?.[q]
+              ? questionLabel(t, review, q, i18n.language)
+              : REVIEW_QUESTIONS.includes(q)
+                ? t(`commandReview.scoreName.${q}`)
+                : q}{" "}
             <span className="font-mono">{scores[q].toFixed(2)}</span>
           </li>
         ))}

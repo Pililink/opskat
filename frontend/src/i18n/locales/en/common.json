@@ -2917,6 +2917,7 @@
     "disableSuccess": "Extension disabled",
     "detail": "Details",
     "credentialsReadWarning": "This extension can read every password stored in its assets in plaintext (credentials: read). Keep it only if you trust its author.",
+    "commandReviewWarning": "This extension can let commands run without asking: under Assisted approval and Autopilot, a command it passes is executed directly. Only install review extensions you trust.",
     "installConfirm": {
       "title": "Install extension?",
       "titleUpdate": "Update extension?",
@@ -3395,6 +3396,7 @@
     "scores": "Scores",
     "scoreThreshold": "threshold {{threshold}}",
     "retried": "Retried automatically: {{attempts}} requests in total",
+    "reviewedBy": "Judged by review extension {{name}} {{version}}",
     "scoreName": {
       "destructive": "Destroys data",
       "disruptive": "Interrupts services",

@@ -20,6 +20,9 @@ export interface ReviewInfo {
   duration_ms?: number;
   cached?: boolean;
   attempts?: number; // 调用模型的次数，超时或连接出错时会重试
+  extension?: string; // 做出判断的审核扩展；内置审核为空
+  version?: string;
+  failed_names?: Record<string, Record<string, string>>; // 审核扩展为未通过的题目声明的名称：题目 id → 语言 → 名称
 }
 
 /** 审核题目，顺序即界面上的显示顺序。与后端 command_review_svc 的题目 ID 一致。 */
@@ -35,12 +38,25 @@ const REVIEW_FAIL_REASONS: readonly string[] = [
   "reviewer_unavailable",
 ];
 
-/** 把审核结果写成一句话，例如"模型审核未通过（可能中断服务）"。 */
-export function reviewSummary(t: TFunction, review: ReviewInfo): string {
+/**
+ * 题目的显示名：审核扩展声明了名称时按界面语言取（没有这种语言时用英文，与后端 reviewQuestionLabel 一致），
+ * 否则是内置题目的名称，都没有就显示题目 id。
+ */
+export function questionLabel(t: TFunction, review: ReviewInfo, question: string, lang: string): string {
+  const names = review.failed_names?.[question];
+  if (names) {
+    if (lang.startsWith("zh") && names["zh-CN"]) return names["zh-CN"];
+    if (names.en) return names.en;
+  }
+  return REVIEW_QUESTIONS.includes(question) ? t(`commandReview.question.${question}`) : question;
+}
+
+/** 把审核结果写成一句话，例如"模型审核未通过（可能中断服务）"。lang 是界面语言，用来取审核扩展声明的题目名称。 */
+export function reviewSummary(t: TFunction, review: ReviewInfo, lang: string): string {
   if (review.outcome === "pass") return t("commandReview.summary.pass");
   if (review.outcome === "reject") {
     const detail = (review.failed ?? [])
-      .map((q) => (REVIEW_QUESTIONS.includes(q) ? t(`commandReview.question.${q}`) : q))
+      .map((q) => questionLabel(t, review, q, lang))
       .join(t("commandReview.listSeparator"));
     return t("commandReview.summary.reject", { detail });
   }
@@ -48,10 +64,10 @@ export function reviewSummary(t: TFunction, review: ReviewInfo): string {
 }
 
 /** 在审核结果前写上触发审核的权限模式，例如"Autopilot · 模型审核通过"，审计里用来区分是哪种模式审的。 */
-export function reviewWithMode(t: TFunction, review: ReviewInfo): string {
+export function reviewWithMode(t: TFunction, review: ReviewInfo, lang: string): string {
   return t("commandReview.withMode", {
     mode: t(`commandReview.mode.${review.mode}`),
-    summary: reviewSummary(t, review),
+    summary: reviewSummary(t, review, lang),
   });
 }
 

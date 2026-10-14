@@ -48,6 +48,11 @@ function AuditReview({ raw }: { raw: string }) {
     <div className="space-y-1.5">
       <ReviewNotice review={review} withMode className="text-sm" />
       <ReviewScores review={review} />
+      {review.extension && (
+        <p data-testid="review-reviewer" className="text-xs text-muted-foreground">
+          {t("commandReview.reviewedBy", { name: review.extension, version: review.version })}
+        </p>
+      )}
       {review.attempts !== undefined && review.attempts > 1 && (
         <p data-testid="review-attempts" className="text-xs text-muted-foreground">
           {t("commandReview.retried", { attempts: review.attempts })}

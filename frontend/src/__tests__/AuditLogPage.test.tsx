@@ -139,6 +139,44 @@ describe("AuditLogPage result status", () => {
     expect(screen.getByTestId("review-attempts")).toHaveTextContent("commandReview.retried");
   });
 
+  it("shows which review extension judged the command, with its question names", async () => {
+    vi.mocked(ListAuditLogs).mockResolvedValue({
+      items: [
+        {
+          ID: 4,
+          Source: "opsctl",
+          ToolName: "ext-reviewed-tool",
+          AssetID: 9,
+          AssetName: "web-01",
+          Command: "rm -rf /data",
+          Request: "{}",
+          Result: "",
+          Error: "command denied by policy",
+          Success: 0,
+          ConversationID: 0,
+          GrantSessionID: "",
+          SessionID: "s",
+          Decision: "deny",
+          DecisionSource: "autopilot_deny",
+          MatchedPattern: "",
+          Review:
+            '{"mode":"autopilot","outcome":"reject","failed":["data_loss"],"scores":{"data_loss":0.9},' +
+            '"extension":"command-review","version":"1.2.0","failed_names":{"data_loss":{"en":"Loses data"}}}',
+          Createtime: 1,
+        },
+      ],
+      total: 1,
+    } as never);
+
+    const user = userEvent.setup();
+    render(<AuditLogPage />);
+
+    const tool = await screen.findByText("ext-reviewed-tool");
+    await user.click(within(tool.closest("tr") as HTMLTableRowElement).getByRole("button"));
+    expect(screen.getByTestId("review-reviewer")).toHaveTextContent("commandReview.reviewedBy");
+    expect(within(screen.getByTestId("review-scores")).getByText(/Loses data/)).toBeInTheDocument();
+  });
+
   // 辅助审批审核没通过、转人工的记录，决策来源是 user_allow，列表里要靠审核标志看出它被模型审过。
   it("marks every model-reviewed row in the list, including ones a human decided", async () => {
     const row = (id: number, tool: string, source: string, review: string) => ({

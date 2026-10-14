@@ -111,7 +111,8 @@ type CommandReviewerInfo struct {
 
 // ListCommandReviewers 列出已加载的审核扩展及其能否使用，供设置页选择。
 func (s *Service) ListCommandReviewers(ctx context.Context, lang string) []CommandReviewerInfo {
-	var out []CommandReviewerInfo
+	// 没有审核扩展时也是空数组：它会经 IPC 交给前端，nil 切片编码成 null，前端遍历时就报错。
+	out := []CommandReviewerInfo{}
 	for _, ext := range s.manager.ListExtensions() {
 		if !ext.Manifest.IsCommandReviewer() {
 			continue

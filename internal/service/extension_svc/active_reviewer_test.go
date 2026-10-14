@@ -2,6 +2,7 @@ package extension_svc
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -249,4 +250,14 @@ func TestCommandReviewStateTellsWhichReviewerIsInUse(t *testing.T) {
 	empty := &Service{manager: extension.NewManager(t.TempDir(), func(string) extension.HostProvider { return nil }, nopLogger()), stateRepo: repo, logger: nopLogger()}
 	st = empty.CommandReviewState(ctx, "en", "")
 	assert.Equal(t, "no_reviewer", st.Problem)
+}
+
+// 没有审核扩展（都停用、或一个都没装）时 reviewers 是空数组，不是 null：前端直接遍历它。
+func TestCommandReviewStateWithoutReviewersEncodesAnEmptyList(t *testing.T) {
+	repo := &memStateRepo{rows: map[string]*extension_state_entity.ExtensionState{}}
+	svc := &Service{manager: extension.NewManager(t.TempDir(), func(string) extension.HostProvider { return nil }, nopLogger()), stateRepo: repo, logger: nopLogger()}
+
+	data, err := json.Marshal(svc.CommandReviewState(context.Background(), "en", ""))
+	require.NoError(t, err)
+	assert.Contains(t, string(data), `"reviewers":[]`)
 }

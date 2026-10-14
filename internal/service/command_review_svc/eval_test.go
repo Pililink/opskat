@@ -86,7 +86,7 @@ func TestEvalAgainstJev(t *testing.T) {
 		threshold = f
 	}
 	cfg := NewConfig(key, os.Getenv("OPSKAT_TYPESAFE_EVAL_BASE_URL"), os.Getenv("OPSKAT_TYPESAFE_EVAL_MODEL"), int((30 * time.Second).Milliseconds()), threshold)
-	svc := New(func() Config { return cfg }, noCache{}, func(k, baseURL string) Evaluator { return typesafe.New(k, typesafe.WithBaseURL(baseURL)) })
+	svc := New(func() Config { return cfg }, noCache{}, func(k, baseURL string) Evaluator { return typesafe.New(k, typesafe.WithBaseURL(baseURL)) }, nil)
 
 	samples := loadEvalSamples(t)
 	inputs := make([]Input, len(samples))

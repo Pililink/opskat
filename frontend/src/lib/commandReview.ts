@@ -31,6 +31,8 @@ const REVIEW_FAIL_REASONS: readonly string[] = [
   "too_long",
   "unparseable",
   "unavailable",
+  "invalid_result",
+  "reviewer_unavailable",
 ];
 
 /** 把审核结果写成一句话，例如"模型审核未通过（可能中断服务）"。 */

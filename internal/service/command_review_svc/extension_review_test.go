@@ -44,7 +44,7 @@ func TestExtensionReviewerSplitsBatchesAndRejectsOverlong(t *testing.T) {
 		},
 	}
 	s, _ := newTestService(&fakeEvaluator{}, enabledConfig())
-	s.extension = func() ExtensionReviewer { return rev }
+	s.extension = func(context.Context) (ExtensionReviewer, error) { return rev, nil }
 
 	got := s.ReviewBatch(context.Background(), []Input{
 		{AssetType: "ssh", Command: "ls", Syntax: SyntaxText},
@@ -73,7 +73,7 @@ func TestExtensionReviewerInvalidResultFailsTheBatch(t *testing.T) {
 		},
 	}
 	s, _ := newTestService(&fakeEvaluator{}, enabledConfig())
-	s.extension = func() ExtensionReviewer { return rev }
+	s.extension = func(context.Context) (ExtensionReviewer, error) { return rev, nil }
 
 	got := s.ReviewBatch(context.Background(), []Input{
 		{AssetType: "ssh", Command: "ls"},
@@ -97,7 +97,7 @@ func TestExtensionReviewerCacheKeyIncludesIdentity(t *testing.T) {
 		},
 	}
 	s, cache := newTestService(&fakeEvaluator{}, enabledConfig())
-	s.extension = func() ExtensionReviewer { return rev }
+	s.extension = func(context.Context) (ExtensionReviewer, error) { return rev, nil }
 
 	first := s.Review(context.Background(), Input{AssetType: "ssh", Command: "ls"})
 	assert.False(t, first.Cached)
@@ -114,10 +114,24 @@ func TestExtensionReviewerCacheKeyIncludesIdentity(t *testing.T) {
 	assert.NotEmpty(t, cache.m)
 }
 
+// 选中了审核器但这次解析失败（未加载、摘要不符）时整批失败，不退回内置审核。
+func TestSelectedReviewerUnavailableFailsInsteadOfBuiltin(t *testing.T) {
+	ev := &fakeEvaluator{nouls: map[string]float64{}}
+	s, _ := newTestService(ev, enabledConfig())
+	s.extension = func(context.Context) (ExtensionReviewer, error) {
+		return nil, ErrReviewerUnavailable
+	}
+
+	r := s.Review(context.Background(), Input{AssetType: "ssh", Command: "ls"})
+	assert.Equal(t, OutcomeFail, r.Outcome)
+	assert.Equal(t, ReasonReviewerUnavailable, r.Reason)
+	assert.Equal(t, 0, ev.calls, "选中的审核器不可用时不能改问内置模型")
+}
+
 func TestNoExtensionReviewerKeepsBuiltin(t *testing.T) {
 	ev := &fakeEvaluator{nouls: map[string]float64{}}
 	s, _ := newTestService(ev, enabledConfig())
-	s.extension = func() ExtensionReviewer { return nil }
+	s.extension = func(context.Context) (ExtensionReviewer, error) { return nil, nil }
 
 	r := s.Review(context.Background(), Input{AssetType: "ssh", Command: "ls"})
 	assert.Equal(t, OutcomePass, r.Outcome)
@@ -135,7 +149,7 @@ func TestExtensionReviewerTimeout(t *testing.T) {
 	cfg := enabledConfig()
 	cfg.Timeout = 5 * time.Millisecond
 	s, _ := newTestService(&fakeEvaluator{}, cfg)
-	s.extension = func() ExtensionReviewer { return rev }
+	s.extension = func(context.Context) (ExtensionReviewer, error) { return rev, nil }
 
 	r := s.Review(context.Background(), Input{AssetType: "ssh", Command: "ls"})
 	assert.Equal(t, OutcomeFail, r.Outcome)

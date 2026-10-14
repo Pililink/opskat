@@ -300,9 +300,11 @@ func (s *Service) commit(ctx context.Context, staged *extension.StagedInstall, a
 
 	sum, err := extension.PackageSHA256(staged.Extension().Dir, manifest.Backend.Binary)
 	if err != nil {
-		s.logger.Warn("hash installed extension wasm", zap.String("name", manifest.Name), zap.Error(err))
+		return nil, fmt.Errorf("install extension: %w", err)
 	}
-	s.recordProvenance(ctx, manifest.Name, origin, sum, true)
+	if err := s.recordProvenance(ctx, manifest.Name, origin, sum, true); err != nil {
+		return nil, fmt.Errorf("install extension: %w", err)
+	}
 	s.notifyReload()
 	return manifest, nil
 }

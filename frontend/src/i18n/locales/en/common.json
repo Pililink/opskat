@@ -3327,7 +3327,9 @@
       "timeout": "timed out",
       "too_long": "command too long",
       "unparseable": "the command cannot be parsed",
-      "unavailable": "service unavailable"
+      "unavailable": "service unavailable",
+      "invalid_result": "the review extension returned an invalid result",
+      "reviewer_unavailable": "the selected review extension is unavailable, or its package digest does not match"
     },
     "settings": {
       "title": "Command review",

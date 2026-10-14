@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 
 	"github.com/cago-frame/cago/pkg/logger"
@@ -23,19 +24,14 @@ func registerCommandReview() {
 	transport.DialContext = netdial.Default().DialContext
 	httpClient := &http.Client{Transport: transport}
 
-	svc := command_review_svc.New(
+	command_review_svc.Register(command_review_svc.New(
 		CommandReviewConfig,
 		command_review_svc.NewRepoCache(command_review_repo.CommandReview()),
 		func(apiKey, baseURL string) command_review_svc.Evaluator {
 			return typesafe.New(apiKey, typesafe.WithBaseURL(baseURL), typesafe.WithHTTPClient(httpClient))
 		},
-	)
-	if withExt, ok := svc.(interface {
-		SetExtensionReviewer(func() command_review_svc.ExtensionReviewer)
-	}); ok {
-		withExt.SetExtensionReviewer(activeExtensionReviewer)
-	}
-	command_review_svc.Register(svc)
+		activeExtensionReviewer,
+	))
 }
 
 // extensionService 由扩展系统初始化后注入。没有注入时审核继续用内置 TypeSafe。
@@ -44,19 +40,23 @@ var extensionService *extension_svc.Service
 // SetExtensionService 注入扩展服务，供审核查找当前生效的审核器。
 func SetExtensionService(svc *extension_svc.Service) { extensionService = svc }
 
-// activeExtensionReviewer 读取设置里选中的审核扩展。没选、未加载或资格不符时返回 nil，
-// 审核退回内置 TypeSafe，而不是因为选不中就放行。
-func activeExtensionReviewer() command_review_svc.ExtensionReviewer {
+// activeExtensionReviewer 读取设置里选中的审核扩展。
+// 没选时返回 (nil, nil)，审核用内置 TypeSafe。
+// 选中了但未加载、不是审核器或来源/摘要不符时返回 ErrReviewerUnavailable，审核失败，不退回内置。
+func activeExtensionReviewer(ctx context.Context) (command_review_svc.ExtensionReviewer, error) {
 	name := GetConfig().CommandReviewExtension
-	if name == "" || extensionService == nil {
-		return nil
+	if name == "" {
+		return nil, nil
 	}
-	active, err := extensionService.ActiveCommandReviewer(context.Background(), name)
+	if extensionService == nil {
+		return nil, fmt.Errorf("%w: extension system is not initialized", command_review_svc.ErrReviewerUnavailable)
+	}
+	active, err := extensionService.ActiveCommandReviewer(ctx, name)
 	if err != nil {
-		logger.Default().Warn("active command reviewer unavailable", zap.String("extension", name), zap.Error(err))
-		return nil
+		logger.Ctx(ctx).Warn("active command reviewer unavailable", zap.String("extension", name), zap.Error(err))
+		return nil, fmt.Errorf("%w: %s", command_review_svc.ErrReviewerUnavailable, err.Error())
 	}
-	return &loadedExtensionReviewer{active: active}
+	return &loadedExtensionReviewer{active: active}, nil
 }
 
 type loadedExtensionReviewer struct {

@@ -17,6 +17,7 @@ func TestActiveCommandReviewerRequiresLoadedReviewer(t *testing.T) {
 	extDir := filepath.Join(dir, "rev")
 	require.NoError(t, os.MkdirAll(extDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(extDir, "main.wasm"), []byte("wasm"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(extDir, "manifest.json"), []byte(`{"name":"rev"}`), 0o600))
 	sum, err := extension.PackageSHA256(extDir, "main.wasm")
 	require.NoError(t, err)
 

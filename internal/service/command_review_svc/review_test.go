@@ -61,7 +61,7 @@ func (c *memCache) Put(_ context.Context, key string, r Result, _ time.Duration)
 
 func newTestService(ev *fakeEvaluator, cfg Config) (*service, *memCache) {
 	cache := &memCache{m: map[string]Result{}}
-	s := New(func() Config { return cfg }, cache, func(string, string) Evaluator { return ev }).(*service)
+	s := New(func() Config { return cfg }, cache, func(string, string) Evaluator { return ev }, nil).(*service)
 	return s, cache
 }
 
@@ -201,7 +201,7 @@ func TestCacheDoesNotMixCommandsThatOnlyDifferInSecrets(t *testing.T) {
 func TestCachedScoresAreJudgedWithCurrentThreshold(t *testing.T) {
 	ev := &fakeEvaluator{nouls: map[string]float64{QuestionDisruptive: 0.3}}
 	cfg := enabledConfig()
-	s := New(func() Config { return cfg }, &memCache{m: map[string]Result{}}, func(string, string) Evaluator { return ev })
+	s := New(func() Config { return cfg }, &memCache{m: map[string]Result{}}, func(string, string) Evaluator { return ev }, nil)
 	in := Input{AssetType: "ssh", Command: "systemctl list-timers"}
 
 	first := s.Review(context.Background(), in)
@@ -248,7 +248,7 @@ func TestTestModelUsesGivenConfig(t *testing.T) {
 	s := New(func() Config { return saved }, &memCache{m: map[string]Result{}}, func(key, baseURL string) Evaluator {
 		gotKey, gotURL = key, baseURL
 		return ev
-	})
+	}, nil)
 
 	trial := NewConfig("new-key", "http://10.0.0.5:8080", "jev-latest", 3000, 0.2)
 	model, err := s.TestModel(context.Background(), trial)
@@ -279,7 +279,7 @@ func TestReviewCallsConfiguredService(t *testing.T) {
 	s := New(func() Config { return cfg }, &memCache{m: map[string]Result{}}, func(_, baseURL string) Evaluator {
 		gotURL = baseURL
 		return &fakeEvaluator{}
-	})
+	}, nil)
 
 	s.Review(context.Background(), Input{AssetType: "ssh", Command: "ls"})
 	assert.Equal(t, "http://10.0.0.5:8080", gotURL)
@@ -360,7 +360,7 @@ func (e *slowEvaluator) Evaluate(ctx context.Context, req typesafe.Request) (*ty
 func TestReviewBatchRunsModelCallsInParallelAndKeepsOrder(t *testing.T) {
 	ev := &slowEvaluator{delay: 50 * time.Millisecond, byCmd: map[string]float64{"rm -rf /data": 0.99}}
 	cache := &memCache{m: map[string]Result{}}
-	s := New(func() Config { return enabledConfig() }, cache, func(string, string) Evaluator { return ev }).(*service)
+	s := New(func() Config { return enabledConfig() }, cache, func(string, string) Evaluator { return ev }, nil).(*service)
 
 	ins := []Input{
 		{AssetType: "ssh", Command: "ls"},
@@ -432,7 +432,7 @@ func TestReviewRetriesOnceOnTimeoutOrNetworkError(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			cfg := enabledConfig()
 			cfg.Timeout = 20 * time.Millisecond
-			s := New(func() Config { return cfg }, &memCache{m: map[string]Result{}}, func(string, string) Evaluator { return c.ev })
+			s := New(func() Config { return cfg }, &memCache{m: map[string]Result{}}, func(string, string) Evaluator { return c.ev }, nil)
 
 			r := s.Review(context.Background(), Input{AssetType: "ssh", Command: "ls"})
 

@@ -102,7 +102,13 @@ const (
 	ReasonUnavailable   = "unavailable"
 	// ReasonInvalidResult 是扩展返回了不合规的整批结果。
 	ReasonInvalidResult = "invalid_result"
+	// ReasonReviewerUnavailable 是已选中审核扩展，但它没加载、不是审核器，或来源/摘要检查没过。
+	// 这时审核失败，不改用内置审核。
+	ReasonReviewerUnavailable = "reviewer_unavailable"
 )
+
+// ErrReviewerUnavailable 是选中的审核扩展这次不可用。Review 把它记成 ReasonReviewerUnavailable。
+var ErrReviewerUnavailable = errors.New("selected command reviewer is unavailable")
 
 // Input 是一次审核的输入。Syntax 决定怎样找出命令里的敏感信息（见 RedactSensitive）。
 type Input struct {
@@ -183,8 +189,10 @@ type service struct {
 	config    func() Config
 	cache     Cache
 	evaluator func(apiKey, baseURL string) Evaluator
-	// extension 每次审核时读取当前生效的扩展审核器。nil 函数表示没有接扩展。
-	extension func() ExtensionReviewer
+	// extension 每次审核时读取当前生效的扩展审核器。
+	// 返回 (nil, nil) 表示没有选中扩展，走内置 TypeSafe。
+	// 返回 ErrReviewerUnavailable 表示选中了但这次不可用，整批审核失败，不退回内置。
+	extension func(ctx context.Context) (ExtensionReviewer, error)
 
 	mu       sync.Mutex
 	status   Status
@@ -211,13 +219,13 @@ func NewConfig(apiKey, baseURL, model string, timeoutMs int, threshold float64) 
 }
 
 // New 创建审核服务。config 每次审核时读取，设置修改后立即生效。
-func New(config func() Config, cache Cache, evaluator func(apiKey, baseURL string) Evaluator) Service {
-	return &service{config: config, cache: cache, evaluator: evaluator, notified: map[string]bool{}}
-}
+// ExtensionReviewerFunc 读取当前生效的扩展审核器。
+// (nil, nil) 表示没有选中；ErrReviewerUnavailable 表示选中了但不可用。
+type ExtensionReviewerFunc func(ctx context.Context) (ExtensionReviewer, error)
 
-// SetExtensionReviewer 安装“当前生效审核器”的读取函数。选中的扩展变化后下次审核即生效。
-func (s *service) SetExtensionReviewer(fn func() ExtensionReviewer) {
-	s.extension = fn
+// New 创建审核服务。extension 可为 nil，表示这个进程不接扩展审核器。
+func New(config func() Config, cache Cache, evaluator func(apiKey, baseURL string) Evaluator, extension ExtensionReviewerFunc) Service {
+	return &service{config: config, cache: cache, evaluator: evaluator, extension: extension, notified: map[string]bool{}}
 }
 
 func (s *service) Status() Status {
@@ -287,7 +295,20 @@ type pendingReview struct {
 // 只有调用模型这一步并行，最多 maxParallelReviews 条同时进行。
 func (s *service) ReviewBatch(ctx context.Context, ins []Input) []Result {
 	if s.extension != nil {
-		if rev := s.extension(); rev != nil {
+		rev, err := s.extension(ctx)
+		if err != nil {
+			reason := ReasonUnavailable
+			if errors.Is(err, ErrReviewerUnavailable) {
+				reason = ReasonReviewerUnavailable
+			}
+			logger.Ctx(ctx).Warn("selected command reviewer unavailable", zap.String("reason", reason), zap.Error(err))
+			results := make([]Result, len(ins))
+			for i := range ins {
+				results[i] = s.recordFailure(Result{Outcome: OutcomeFail, Reason: reason})
+			}
+			return results
+		}
+		if rev != nil {
 			return s.reviewWithExtension(ctx, rev, ins)
 		}
 	}

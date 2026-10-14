@@ -3327,7 +3327,9 @@
       "timeout": "超时",
       "too_long": "命令过长",
       "unparseable": "命令无法解析",
-      "unavailable": "服务不可用"
+      "unavailable": "服务不可用",
+      "invalid_result": "审核扩展返回了无效结果",
+      "reviewer_unavailable": "选中的审核扩展不可用，或安装包摘要不符"
     },
     "settings": {
       "title": "命令审核",

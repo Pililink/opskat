@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	"github.com/opskat/opskat/internal/model/entity/extension_state_entity"
@@ -15,6 +16,7 @@ func nopLogger() *zap.Logger { return zap.NewNop() }
 
 type memStateRepo struct {
 	rows map[string]*extension_state_entity.ExtensionState
+	fail bool
 }
 
 func (m *memStateRepo) Find(_ context.Context, name string) (*extension_state_entity.ExtensionState, error) {
@@ -31,12 +33,18 @@ func (m *memStateRepo) FindAll(context.Context) ([]*extension_state_entity.Exten
 }
 
 func (m *memStateRepo) Create(_ context.Context, state *extension_state_entity.ExtensionState) error {
+	if m.fail {
+		return errNotFound
+	}
 	cp := *state
 	m.rows[state.Name] = &cp
 	return nil
 }
 
 func (m *memStateRepo) Update(_ context.Context, state *extension_state_entity.ExtensionState) error {
+	if m.fail {
+		return errNotFound
+	}
 	cp := *state
 	m.rows[state.Name] = &cp
 	return nil
@@ -90,7 +98,7 @@ func TestRecordProvenanceKeepsSourceAcrossEnable(t *testing.T) {
 	svc := &Service{stateRepo: repo, logger: nopLogger()}
 	ctx := context.Background()
 
-	svc.recordProvenance(ctx, "rev", InstallOriginStore, "deadbeef", true)
+	require.NoError(t, svc.recordProvenance(ctx, "rev", InstallOriginStore, "deadbeef", true))
 	got := repo.rows["rev"]
 	assert.Equal(t, InstallOriginStore, got.Source)
 	assert.Equal(t, "deadbeef", got.PackageSHA256)
@@ -100,7 +108,14 @@ func TestRecordProvenanceKeepsSourceAcrossEnable(t *testing.T) {
 	assert.Equal(t, InstallOriginStore, repo.rows["rev"].Source, "启用/停用不能清掉来源")
 	assert.Equal(t, "deadbeef", repo.rows["rev"].PackageSHA256)
 
-	svc.recordProvenance(ctx, "rev", InstallOriginLocal, "cafebabe", true)
+	require.NoError(t, svc.recordProvenance(ctx, "rev", InstallOriginLocal, "cafebabe", true))
 	assert.Equal(t, InstallOriginLocal, repo.rows["rev"].Source)
 	assert.Equal(t, "cafebabe", repo.rows["rev"].PackageSHA256)
+}
+
+func TestRecordProvenanceReturnsRepoError(t *testing.T) {
+	repo := &memStateRepo{rows: map[string]*extension_state_entity.ExtensionState{}, fail: true}
+	svc := &Service{stateRepo: repo, logger: nopLogger()}
+	err := svc.recordProvenance(context.Background(), "rev", InstallOriginStore, "abc", true)
+	assert.Error(t, err)
 }

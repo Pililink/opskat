@@ -11,7 +11,9 @@ import (
 	"github.com/opskat/opskat/internal/approval"
 	"github.com/opskat/opskat/internal/bootstrap"
 	"github.com/opskat/opskat/internal/extreg"
+	"github.com/opskat/opskat/internal/repository/extension_data_repo"
 	"github.com/opskat/opskat/internal/repository/extension_state_repo"
+	"github.com/opskat/opskat/internal/service/credential_svc"
 	"github.com/opskat/opskat/internal/service/extension_svc"
 	"github.com/opskat/opskat/pkg/extension"
 
@@ -154,9 +156,11 @@ func scanExtensionDirs() ([]scannedExtension, error) {
 // is reported the same way — it is a real, fixable degradation ("load it once in the
 // desktop app"), not something to swallow into a later "unknown asset type".
 func registerExtensionAssetTypes() {
-	// 审核器的来源与摘要检查需要扩展服务。这里不加载 WASM；真正实例化留给审核调用。
-	mgr := extension.NewManager(extensionsDirFn(), func(string) extension.HostProvider { return nil }, logger.Default())
-	bootstrap.SetExtensionService(extension_svc.New(mgr, extension_state_repo.ExtensionState(), nil, nil, logger.Default(), nil, nil))
+	// 审核器的来源与摘要检查、设置读取都走这个服务。WASM 只在下面加载选中的审核器时编译。
+	mgr := extension.NewManager(extensionsDirFn(), opsctlReviewerHost, logger.Default())
+	svc := extension_svc.New(mgr, extension_state_repo.ExtensionState(), extension_data_repo.ExtensionData(), nil, logger.Default(), nil, nil)
+	bootstrap.SetExtensionService(svc)
+	opsctlReviewerService = svc
 	scanned, err := scanExtensionDirs()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
@@ -171,6 +175,77 @@ func registerExtensionAssetTypes() {
 			fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 		}
 	}
+}
+
+// opsctlReviewerService 是 opsctl 进程里的扩展服务，只为加载选中的审核器。
+var opsctlReviewerService *extension_svc.Service
+
+// reviewerLoader 加载一个扩展目录。测试替换它，避免编译 WASM。
+var reviewerLoader = func(ctx context.Context, dir string) error {
+	if opsctlReviewerService == nil {
+		return fmt.Errorf("extension service is not initialized")
+	}
+	_, err := opsctlReviewerService.Manager().LoadExtension(ctx, dir)
+	return err
+}
+
+// loadActiveReviewer 只编译并实例化 name 这一个扩展。name 为空时什么都不加载。
+// 其余扩展仍走上面的 describe-only 注册。目录不存在或加载失败时返回错误，调用方按审核失败处理。
+func loadActiveReviewer(ctx context.Context, extDir, name string, loader func(context.Context, string) error) error {
+	if name == "" {
+		return nil
+	}
+	dir := filepath.Join(extDir, name)
+	info, err := os.Stat(dir)
+	if err != nil || !info.IsDir() {
+		return fmt.Errorf("command reviewer %q is not installed: %w", name, err)
+	}
+	if err := loader(ctx, dir); err != nil {
+		return fmt.Errorf("load command reviewer %q: %w", name, err)
+	}
+	return nil
+}
+
+// loadSelectedReviewer 按设置加载当前生效的审核扩展，失败写到 stderr。
+func loadSelectedReviewer(ctx context.Context) {
+	cfg := bootstrap.GetConfig()
+	if cfg == nil || cfg.CommandReviewExtension == "" {
+		return
+	}
+	if err := loadActiveReviewer(ctx, extensionsDirFn(), cfg.CommandReviewExtension, reviewerLoader); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+	}
+}
+
+// opsctlReviewerHost 是审核器在 opsctl 里的 host：设置与密钥读共享数据库，HTTP 走 netdial。
+// 没有资产配置、文件对话框和动作事件，审核器也不使用它们。
+func opsctlReviewerHost(extName string) extension.HostProvider {
+	return extension.NewDefaultHostProvider(extension.DefaultHostConfig{
+		Logger:        logger.Default(),
+		Settings:      &opsctlSettings{name: extName},
+		ExtensionName: extName,
+	})
+}
+
+// opsctlSettings 用 opsctl 进程里的扩展服务读设置。密钥用本进程的 credential_svc 解密。
+type opsctlSettings struct{ name string }
+
+func (s *opsctlSettings) Get() (map[string]string, error) {
+	if opsctlReviewerService == nil {
+		return map[string]string{}, nil
+	}
+	return opsctlReviewerService.PublicSettings(context.Background(), s.name)
+}
+
+func (s *opsctlSettings) Secrets(fields []string) (map[string]string, error) {
+	if opsctlReviewerService == nil {
+		return map[string]string{}, nil
+	}
+	decrypt := func(v string) (string, error) { return v, nil }
+	if c := credential_svc.Default(); c != nil {
+		decrypt = c.Decrypt
+	}
+	return opsctlReviewerService.SettingSecrets(context.Background(), s.name, fields, decrypt)
 }
 
 // disabledExtensionNames reads the persisted enabled/disabled state. An unreadable DB

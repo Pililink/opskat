@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"github.com/opskat/opskat/pkg/extension"
 )
@@ -19,7 +20,7 @@ func (m *memDataRepo) key(ext, k string) string { return ext + "\x00" + k }
 func (m *memDataRepo) Get(_ context.Context, extName, key string) ([]byte, error) {
 	v, ok := m.rows[m.key(extName, key)]
 	if !ok {
-		return nil, errNotFound
+		return nil, gorm.ErrRecordNotFound
 	}
 	return append([]byte(nil), v...), nil
 }
@@ -80,6 +81,35 @@ func TestSaveExtensionSettingsEncryptsPasswords(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "s3cret", secrets["token"])
 
-	err = svc.SaveExtensionSettings(context.Background(), "rev", map[string]string{"model": "m"}, nil)
+	err = svc.SaveExtensionSettings(context.Background(), "rev", map[string]string{"model": "m"}, func(plain string) (string, error) { return "enc:" + plain, nil })
 	assert.Error(t, err, "缺必填字段要失败")
+}
+
+// 设置表单读回时密钥只显示"已设置"，用户不改密钥再保存时提交的是空值，不能因此清掉已存的密钥。
+func TestSaveExtensionSettingsKeepsSecretWhenLeftBlank(t *testing.T) {
+	svc := settingsService(t)
+	ctx := context.Background()
+	encrypt := func(plain string) (string, error) { return "enc:" + plain, nil }
+	decrypt := func(v string) (string, error) { return v[len("enc:"):], nil }
+
+	require.NoError(t, svc.SaveExtensionSettings(ctx, "rev", map[string]string{
+		"endpoint": "https://review.example.com", "token": "s3cret",
+	}, encrypt))
+	require.NoError(t, svc.SaveExtensionSettings(ctx, "rev", map[string]string{
+		"endpoint": "https://review2.example.com", "token": "",
+	}, encrypt))
+
+	secrets, err := svc.SettingSecrets(ctx, "rev", []string{"token"}, decrypt)
+	require.NoError(t, err)
+	assert.Equal(t, "s3cret", secrets["token"])
+	pub, err := svc.PublicSettings(ctx, "rev")
+	require.NoError(t, err)
+	assert.Equal(t, "https://review2.example.com", pub["endpoint"])
+
+	require.NoError(t, svc.SaveExtensionSettings(ctx, "rev", map[string]string{
+		"endpoint": "https://review2.example.com", "token": "n3w",
+	}, encrypt))
+	secrets, err = svc.SettingSecrets(ctx, "rev", []string{"token"}, decrypt)
+	require.NoError(t, err)
+	assert.Equal(t, "n3w", secrets["token"])
 }

@@ -182,6 +182,18 @@ func (c *capHost) substituteSettings(params *IOOpenParams) error {
 		return err
 	}
 	params.Headers = replaced
+	// net/http 重定向到别的主机时只去掉 Authorization、Cookie 这类头，X-API-Key 之类的自定义头
+	// 会原样带过去，所以带着密钥的请求只能在声明地址之内重定向。
+	prev := params.RedirectGuard
+	params.RedirectGuard = func(target *url.URL) error {
+		if !urlMatchesEndpoints(target, endpoints) {
+			return fmt.Errorf("http redirect denied: a request carrying a settings secret may only be redirected to a declared endpoint, not %s://%s", target.Scheme, target.Host)
+		}
+		if prev != nil {
+			return prev(target)
+		}
+		return nil
+	}
 	return nil
 }
 

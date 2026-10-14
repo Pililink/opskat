@@ -18,8 +18,8 @@ type ExtensionSettings struct {
 	Values map[string]string `json:"values"`
 }
 
-// SaveExtensionSettings 按 describe() 的 settingsSchema 校验并保存。
-// 密码字段用 encrypt 加密后入库；encrypt 为空时密码原样保存（测试用）。
+// SaveExtensionSettings 按 describe() 的 settingsSchema 校验并保存，密码字段用 encrypt 加密后入库。
+// 设置表单读回时密钥只显示"已设置"，所以提交的密码字段为空表示不修改，保留已存的密文。
 func (s *Service) SaveExtensionSettings(ctx context.Context, name string, values map[string]string, encrypt func(string) (string, error)) error {
 	ext := s.manager.GetExtension(name)
 	if ext == nil || ext.Manifest.SettingsSchema == nil {
@@ -32,21 +32,31 @@ func (s *Service) SaveExtensionSettings(ctx context.Context, name string, values
 	if err := extension.ValidateSettings(ext.Manifest.SettingsSchema, raw); err != nil {
 		return err
 	}
+	existing, _, err := s.loadSettings(ctx, name)
+	if err != nil {
+		return err
+	}
 	secrets := map[string]struct{}{}
 	for _, f := range extension.PasswordFieldsFromSchema(ext.Manifest.SettingsSchema) {
 		secrets[f] = struct{}{}
 	}
 	stored := make(map[string]string, len(values))
 	for k, v := range values {
-		if _, secret := secrets[k]; secret && v != "" && encrypt != nil {
-			enc, err := encrypt(v)
-			if err != nil {
-				return fmt.Errorf("encrypt settings field %q: %w", k, err)
-			}
-			stored[k] = enc
+		if _, secret := secrets[k]; !secret {
+			stored[k] = v
 			continue
 		}
-		stored[k] = v
+		if v == "" {
+			if prev, ok := existing[k]; ok {
+				stored[k] = prev
+			}
+			continue
+		}
+		enc, err := encrypt(v)
+		if err != nil {
+			return fmt.Errorf("encrypt settings field %q: %w", k, err)
+		}
+		stored[k] = enc
 	}
 	payload, err := json.Marshal(ExtensionSettings{Values: stored})
 	if err != nil {
@@ -75,7 +85,7 @@ func (s *Service) PublicSettings(ctx context.Context, name string) (map[string]s
 	return out, nil
 }
 
-// SettingSecrets 解密指定密钥字段。decrypt 由调用方提供。
+// SettingSecrets 用 decrypt 解密指定密钥字段。
 func (s *Service) SettingSecrets(ctx context.Context, name string, fields []string, decrypt func(string) (string, error)) (map[string]string, error) {
 	stored, _, err := s.loadSettings(ctx, name)
 	if err != nil || stored == nil {
@@ -87,15 +97,11 @@ func (s *Service) SettingSecrets(ctx context.Context, name string, fields []stri
 		if !ok || v == "" {
 			continue
 		}
-		if decrypt != nil {
-			plain, err := decrypt(v)
-			if err != nil {
-				return nil, fmt.Errorf("decrypt settings field %q: %w", f, err)
-			}
-			out[f] = plain
-			continue
+		plain, err := decrypt(v)
+		if err != nil {
+			return nil, fmt.Errorf("decrypt settings field %q: %w", f, err)
 		}
-		out[f] = v
+		out[f] = plain
 	}
 	return out, nil
 }

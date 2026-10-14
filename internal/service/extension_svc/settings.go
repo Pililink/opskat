@@ -65,7 +65,8 @@ func (s *Service) SaveExtensionSettings(ctx context.Context, name string, values
 	return s.dataRepo.Set(ctx, name, settingsKVKey, payload)
 }
 
-// PublicSettings 返回非密钥设置。密码字段不出现。
+// PublicSettings 是 settings_get 给扩展的设置：非密钥字段给值；已设置的密钥字段只给它的占位
+// {{setting.<field>}}（扩展拿它写请求头，宿主发出前替换），没设置的不出现，扩展据此知道还没配置。
 func (s *Service) PublicSettings(ctx context.Context, name string) (map[string]string, error) {
 	stored, schema, err := s.loadSettings(ctx, name)
 	if err != nil || stored == nil {
@@ -78,6 +79,9 @@ func (s *Service) PublicSettings(ctx context.Context, name string) (map[string]s
 	out := map[string]string{}
 	for k, v := range stored {
 		if _, secret := secrets[k]; secret {
+			if v != "" {
+				out[k] = extension.SettingPlaceholder(k)
+			}
 			continue
 		}
 		out[k] = v

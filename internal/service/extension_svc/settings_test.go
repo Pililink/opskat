@@ -72,8 +72,7 @@ func TestSaveExtensionSettingsEncryptsPasswords(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "https://review.example.com", pub["endpoint"])
 	assert.Equal(t, "m", pub["model"])
-	_, has := pub["token"]
-	assert.False(t, has, "密钥字段不能出现在 settings_get")
+	assert.Equal(t, "{{setting.token}}", pub["token"], "已设置的密钥只给占位符，扩展拿它写请求头，拿不到明文")
 
 	secrets, err := svc.SettingSecrets(context.Background(), "rev", []string{"token"}, func(v string) (string, error) {
 		return v[len("enc:"):], nil
@@ -129,4 +128,17 @@ func TestSettingsViewHidesSecrets(t *testing.T) {
 	assert.False(t, has)
 	assert.Equal(t, []string{"token"}, view.SecretsSet)
 	assert.NotNil(t, view.Schema)
+}
+
+// 没设置的密钥字段不出现在 settings_get 里，扩展据此知道"还没配置"。
+func TestPublicSettingsOmitsUnsetSecrets(t *testing.T) {
+	svc := settingsService(t)
+	require.NoError(t, svc.SaveExtensionSettings(context.Background(), "rev", map[string]string{
+		"endpoint": "https://review.example.com",
+	}, func(plain string) (string, error) { return "enc:" + plain, nil }))
+
+	pub, err := svc.PublicSettings(context.Background(), "rev")
+	require.NoError(t, err)
+	_, has := pub["token"]
+	assert.False(t, has)
 }

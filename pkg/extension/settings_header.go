@@ -6,8 +6,9 @@ import (
 	"strings"
 )
 
-// settingPlaceholder 是密钥字段在请求头里的占位。扩展拿不到明文。
-func settingPlaceholder(field string) string {
+// SettingPlaceholder 是密钥字段在请求头里的占位。扩展拿不到明文，只拿这个占位写进请求头，
+// 宿主发出请求前替换成密钥。
+func SettingPlaceholder(field string) string {
 	return "{{setting." + field + "}}"
 }
 
@@ -54,7 +55,7 @@ func SubstituteSettingHeaders(rawURL string, headers, secrets map[string]string,
 	for k, v := range out {
 		replaced := v
 		for field, secret := range secrets {
-			replaced = strings.ReplaceAll(replaced, settingPlaceholder(field), secret)
+			replaced = strings.ReplaceAll(replaced, SettingPlaceholder(field), secret)
 		}
 		if strings.Contains(replaced, "{{setting.") {
 			return nil, fmt.Errorf("substitute settings header: %s still contains an unknown {{setting.*}} placeholder", k)

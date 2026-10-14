@@ -32,3 +32,8 @@ func KVGet(key string) ([]byte, error) {
 func KVSet(key string, value []byte) error {
 	return hostKVSet(key, value)
 }
+
+// Settings 返回该扩展的非密钥设置。密钥字段不在其中，只能以 {{setting.<field>}} 写在请求头里。
+func Settings() (map[string]string, error) {
+	return hostSettingsGet()
+}

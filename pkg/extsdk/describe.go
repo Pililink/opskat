@@ -21,7 +21,8 @@ type descriptor struct {
 	Policies   descPolicies    `json:"policies"`
 	Frontend   *descFrontend   `json:"frontend,omitempty"`
 	Snippets   *descSnippets   `json:"snippets,omitempty"`
-	Reviewer   *descReviewer   `json:"reviewer,omitempty"`
+	Reviewer       *descReviewer  `json:"reviewer,omitempty"`
+	SettingsSchema map[string]any `json:"settingsSchema,omitempty"`
 }
 
 type descI18n struct {
@@ -186,6 +187,8 @@ func dispatchDescribe() (json.RawMessage, error) {
 		}
 		d.Frontend = fe
 	}
+
+	d.SettingsSchema = settingsSchema
 
 	if commandReviewer != nil {
 		rev := &descReviewer{MaxItems: commandReviewer.maxItems, MaxCommandLen: commandReviewer.maxCommandLen}

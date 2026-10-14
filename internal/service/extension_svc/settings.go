@@ -1,0 +1,142 @@
+package extension_svc
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"sort"
+
+	"github.com/opskat/opskat/pkg/extension"
+)
+
+const settingsKVKey = "ext.settings"
+
+// ExtensionSettings 是保存后的扩展设置。密码字段以密文存放。
+type ExtensionSettings struct {
+	Values map[string]string `json:"values"`
+}
+
+// SaveExtensionSettings 按 describe() 的 settingsSchema 校验并保存。
+// 密码字段用 encrypt 加密后入库；encrypt 为空时密码原样保存（测试用）。
+func (s *Service) SaveExtensionSettings(ctx context.Context, name string, values map[string]string, encrypt func(string) (string, error)) error {
+	ext := s.manager.GetExtension(name)
+	if ext == nil || ext.Manifest.SettingsSchema == nil {
+		return fmt.Errorf("extension %q has no settings schema", name)
+	}
+	raw := make(map[string]any, len(values))
+	for k, v := range values {
+		raw[k] = v
+	}
+	if err := extension.ValidateSettings(ext.Manifest.SettingsSchema, raw); err != nil {
+		return err
+	}
+	secrets := map[string]struct{}{}
+	for _, f := range extension.PasswordFieldsFromSchema(ext.Manifest.SettingsSchema) {
+		secrets[f] = struct{}{}
+	}
+	stored := make(map[string]string, len(values))
+	for k, v := range values {
+		if _, secret := secrets[k]; secret && v != "" && encrypt != nil {
+			enc, err := encrypt(v)
+			if err != nil {
+				return fmt.Errorf("encrypt settings field %q: %w", k, err)
+			}
+			stored[k] = enc
+			continue
+		}
+		stored[k] = v
+	}
+	payload, err := json.Marshal(ExtensionSettings{Values: stored})
+	if err != nil {
+		return err
+	}
+	return s.dataRepo.Set(ctx, name, settingsKVKey, payload)
+}
+
+// PublicSettings 返回非密钥设置。密码字段不出现。
+func (s *Service) PublicSettings(ctx context.Context, name string) (map[string]string, error) {
+	stored, schema, err := s.loadSettings(ctx, name)
+	if err != nil || stored == nil {
+		return map[string]string{}, err
+	}
+	secrets := map[string]struct{}{}
+	for _, f := range extension.PasswordFieldsFromSchema(schema) {
+		secrets[f] = struct{}{}
+	}
+	out := map[string]string{}
+	for k, v := range stored {
+		if _, secret := secrets[k]; secret {
+			continue
+		}
+		out[k] = v
+	}
+	return out, nil
+}
+
+// SettingSecrets 解密指定密钥字段。decrypt 由调用方提供。
+func (s *Service) SettingSecrets(ctx context.Context, name string, fields []string, decrypt func(string) (string, error)) (map[string]string, error) {
+	stored, _, err := s.loadSettings(ctx, name)
+	if err != nil || stored == nil {
+		return map[string]string{}, err
+	}
+	out := map[string]string{}
+	for _, f := range fields {
+		v, ok := stored[f]
+		if !ok || v == "" {
+			continue
+		}
+		if decrypt != nil {
+			plain, err := decrypt(v)
+			if err != nil {
+				return nil, fmt.Errorf("decrypt settings field %q: %w", f, err)
+			}
+			out[f] = plain
+			continue
+		}
+		out[f] = v
+	}
+	return out, nil
+}
+
+// SettingsHash 是全部已存设置（含密文）的哈希，供审核缓存键使用。
+func (s *Service) SettingsHash(ctx context.Context, name string) (string, error) {
+	stored, _, err := s.loadSettings(ctx, name)
+	if err != nil || len(stored) == 0 {
+		return "", err
+	}
+	keys := make([]string, 0, len(stored))
+	for k := range stored {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	h := sha256.New()
+	for _, k := range keys {
+		_, _ = h.Write([]byte(k))
+		_, _ = h.Write([]byte{0})
+		_, _ = h.Write([]byte(stored[k]))
+		_, _ = h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func (s *Service) loadSettings(ctx context.Context, name string) (map[string]string, map[string]any, error) {
+	ext := s.manager.GetExtension(name)
+	var schema map[string]any
+	if ext != nil {
+		schema = ext.Manifest.SettingsSchema
+	}
+	if s.dataRepo == nil {
+		return nil, schema, nil
+	}
+	payload, err := s.GetHostKV(ctx, name, settingsKVKey)
+	if err != nil || len(payload) == 0 {
+		return nil, schema, err
+	}
+	var stored ExtensionSettings
+	if err := json.Unmarshal(payload, &stored); err != nil {
+		return nil, schema, fmt.Errorf("parse extension settings: %w", err)
+	}
+	return stored.Values, schema, nil
+}

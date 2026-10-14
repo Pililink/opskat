@@ -24,6 +24,14 @@ func (r *recordingHost) OpenIO(_ context.Context, _ *AssetRef, params IOOpenPara
 	return &IOResource{}, nil
 }
 
+func (r *recordingHost) SettingsGet() (map[string]string, error) {
+	return map[string]string{}, nil
+}
+
+func (r *recordingHost) SettingSecrets([]string) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+
 // TestCapHostTCPPassthrough pins that an extension which does not declare
 // network.assetEndpoint keeps today's ungated TCP (first-party Kafka builds on
 // it); declaring the capability puts TCP under the endpoint gate below.

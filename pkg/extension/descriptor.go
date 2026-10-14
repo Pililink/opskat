@@ -29,6 +29,8 @@ type Descriptor struct {
 	Snippets   SnippetsDef    `json:"snippets"`
 	// Reviewer is present only when the guest registered a command reviewer.
 	Reviewer *ReviewerDef `json:"reviewer,omitempty"`
+	// SettingsSchema 是扩展级设置的 JSON Schema。空表示该扩展没有设置。
+	SettingsSchema map[string]any `json:"settingsSchema,omitempty"`
 }
 
 // ParseDescriptor decodes and validates a describe() payload.
@@ -353,6 +355,7 @@ func (m *Manifest) apply(d *Descriptor) {
 	m.Frontend = d.Frontend
 	m.Snippets = d.Snippets
 	m.Reviewer = d.Reviewer
+	m.SettingsSchema = d.SettingsSchema
 }
 
 func policyActions(tools []ToolDef) []string {

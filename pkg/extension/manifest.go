@@ -104,6 +104,8 @@ type Manifest struct {
 	// guest reports one; together with Capabilities.CommandReview it makes the
 	// extension a reviewer (see validateReviewer).
 	Reviewer *ReviewerDef `json:"reviewer,omitempty"`
+	// SettingsSchema 是扩展级设置，来自 describe()。
+	SettingsSchema map[string]any `json:"settingsSchema,omitempty"`
 }
 
 // manifestFile is what manifest.json is allowed to say.

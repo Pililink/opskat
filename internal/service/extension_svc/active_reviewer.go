@@ -31,6 +31,10 @@ func (s *Service) ActiveCommandReviewer(ctx context.Context, name string) (*Acti
 	if err := s.CheckReviewerProvenance(ctx, name, ext.Dir, ext.Manifest.Backend.Binary); err != nil {
 		return nil, err
 	}
+	hash, err := s.SettingsHash(ctx, name)
+	if err != nil {
+		return nil, err
+	}
 	rev := ext.Manifest.Reviewer
 	ids := make([]string, len(rev.Questions))
 	for i, q := range rev.Questions {
@@ -39,6 +43,7 @@ func (s *Service) ActiveCommandReviewer(ctx context.Context, name string) (*Acti
 	return &ActiveReviewer{
 		Name:          ext.Name,
 		Version:       ext.Manifest.Version,
+		SettingsHash:  hash,
 		MaxItems:      rev.MaxItems,
 		MaxCommandLen: rev.MaxCommandLen,
 		Questions:     ids,

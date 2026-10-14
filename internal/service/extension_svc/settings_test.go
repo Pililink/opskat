@@ -142,3 +142,27 @@ func TestPublicSettingsOmitsUnsetSecrets(t *testing.T) {
 	_, has := pub["token"]
 	assert.False(t, has)
 }
+
+// 已存过密钥后再保存，表单可以不带密钥字段（留空表示不修改）：必填检查认已存的密钥，
+// 不能因此报"必填"。从没存过的必填密钥照样要求填写。
+func TestSaveExtensionSettingsRequiredSecretCanBeKept(t *testing.T) {
+	svc := settingsService(t)
+	schema := svc.manager.GetExtension("rev").Manifest.SettingsSchema
+	schema["required"] = []any{"endpoint", "token"}
+	ctx := context.Background()
+	encrypt := func(plain string) (string, error) { return "enc:" + plain, nil }
+
+	err := svc.SaveExtensionSettings(ctx, "rev", map[string]string{"endpoint": "https://review.example.com"}, encrypt)
+	require.Error(t, err, "第一次保存没填必填的密钥要报错")
+
+	require.NoError(t, svc.SaveExtensionSettings(ctx, "rev", map[string]string{
+		"endpoint": "https://review.example.com", "token": "s3cret",
+	}, encrypt))
+	require.NoError(t, svc.SaveExtensionSettings(ctx, "rev", map[string]string{
+		"endpoint": "https://review2.example.com",
+	}, encrypt), "已存过密钥，不带密钥字段也能保存")
+
+	secrets, err := svc.SettingSecrets(ctx, "rev", []string{"token"}, func(v string) (string, error) { return v[len("enc:"):], nil })
+	require.NoError(t, err)
+	assert.Equal(t, "s3cret", secrets["token"])
+}

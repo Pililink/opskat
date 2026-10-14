@@ -2816,6 +2816,7 @@
   },
   "extension": {
     "settings": {
+      "required": "Required",
       "title": "Settings",
       "save": "Save settings",
       "saved": "Extension settings saved"

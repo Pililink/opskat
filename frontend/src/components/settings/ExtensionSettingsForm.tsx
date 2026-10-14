@@ -27,6 +27,7 @@ export function ExtensionSettingsForm({ extensionName }: { extensionName: string
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [value, setValue] = useState<Record<string, unknown>>({});
   const [saving, setSaving] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const apply = useCallback((view: extension_svc.ExtensionSettingsView) => {
     const schema = view.schema as ExtensionConfigSchema;
@@ -42,6 +43,17 @@ export function ExtensionSettingsForm({ extensionName }: { extensionName: string
   }, [extensionName, apply]);
 
   const save = async () => {
+    if (!loaded) return;
+    // 必填项先在表单里拦下，标在字段下面；已存过的密钥留空表示不修改，算已填。
+    const missing: Record<string, string> = {};
+    for (const field of loaded.schema.required ?? []) {
+      const v = value[field];
+      if ((v === undefined || v === null || String(v) === "") && !loaded.withheld[field]) {
+        missing[field] = t("extension.settings.required");
+      }
+    }
+    setFieldErrors(missing);
+    if (Object.keys(missing).length > 0) return;
     setSaving(true);
     try {
       // 设置统一按字符串保存（与 SaveExtensionSettings 的入参一致）；没填的字段不提交。
@@ -73,6 +85,7 @@ export function ExtensionSettingsForm({ extensionName }: { extensionName: string
         value={value}
         onChange={setValue}
         withheldSecrets={loaded.withheld}
+        fieldErrors={fieldErrors}
       />
       <Button onClick={save} disabled={saving} variant="outline" className="gap-1">
         {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}

@@ -25,13 +25,6 @@ func (s *Service) SaveExtensionSettings(ctx context.Context, name string, values
 	if ext == nil || ext.Manifest.SettingsSchema == nil {
 		return fmt.Errorf("extension %q has no settings schema", name)
 	}
-	raw := make(map[string]any, len(values))
-	for k, v := range values {
-		raw[k] = v
-	}
-	if err := extension.ValidateSettings(ext.Manifest.SettingsSchema, raw); err != nil {
-		return err
-	}
 	existing, _, err := s.loadSettings(ctx, name)
 	if err != nil {
 		return err
@@ -40,6 +33,8 @@ func (s *Service) SaveExtensionSettings(ctx context.Context, name string, values
 	for _, f := range extension.PasswordFieldsFromSchema(ext.Manifest.SettingsSchema) {
 		secrets[f] = struct{}{}
 	}
+	// stored 是保存后的全部设置：密钥字段留空或没带时沿用已存的密文，没存过就不出现，
+	// 必填检查按它做——留空不改的密钥算已填，从没填过的必填密钥照样报错。
 	stored := make(map[string]string, len(values))
 	for k, v := range values {
 		if _, secret := secrets[k]; !secret {
@@ -47,9 +42,6 @@ func (s *Service) SaveExtensionSettings(ctx context.Context, name string, values
 			continue
 		}
 		if v == "" {
-			if prev, ok := existing[k]; ok {
-				stored[k] = prev
-			}
 			continue
 		}
 		enc, err := encrypt(v)
@@ -57,6 +49,18 @@ func (s *Service) SaveExtensionSettings(ctx context.Context, name string, values
 			return fmt.Errorf("encrypt settings field %q: %w", k, err)
 		}
 		stored[k] = enc
+	}
+	for k := range secrets {
+		if _, set := stored[k]; !set && existing[k] != "" {
+			stored[k] = existing[k]
+		}
+	}
+	raw := make(map[string]any, len(stored))
+	for k, v := range stored {
+		raw[k] = v
+	}
+	if err := extension.ValidateSettings(ext.Manifest.SettingsSchema, raw); err != nil {
+		return err
 	}
 	payload, err := json.Marshal(ExtensionSettings{Values: stored})
 	if err != nil {

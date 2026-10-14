@@ -2816,6 +2816,7 @@
   },
   "extension": {
     "settings": {
+      "required": "请填写",
       "title": "设置",
       "save": "保存设置",
       "saved": "扩展设置已保存"

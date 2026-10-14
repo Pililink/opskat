@@ -38,4 +38,35 @@ describe("ExtensionSettingsForm", () => {
     });
     expect(SaveExtensionSettings).toHaveBeenCalledWith("command-review", { endpoint: "https://review.example.com" });
   });
+
+  it("必填项没填时在字段下提示、不提交；已存过的密钥留空不算没填", async () => {
+    vi.mocked(GetExtensionSettings).mockResolvedValue({
+      ...view,
+      schema: { ...view.schema, required: ["endpoint", "token"] },
+      values: { endpoint: "" },
+      secretsSet: [],
+    } as never);
+    await act(async () => {
+      render(<ExtensionSettingsForm extensionName="command-review" />);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "extension.settings.save" }));
+    });
+    expect(SaveExtensionSettings).not.toHaveBeenCalled();
+    expect(screen.getAllByText("extension.settings.required")).toHaveLength(2);
+  });
+
+  it("已存过的必填密钥留空可以保存", async () => {
+    vi.mocked(GetExtensionSettings).mockResolvedValue({
+      ...view,
+      schema: { ...view.schema, required: ["endpoint", "token"] },
+    } as never);
+    await act(async () => {
+      render(<ExtensionSettingsForm extensionName="command-review" />);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "extension.settings.save" }));
+    });
+    expect(SaveExtensionSettings).toHaveBeenCalledWith("command-review", { endpoint: "https://review.example.com" });
+  });
 });

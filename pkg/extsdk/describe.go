@@ -14,15 +14,15 @@ import "encoding/json"
 // tags in step with pkg/extension/descriptor.go.
 
 type descriptor struct {
-	Icon       string          `json:"icon,omitempty"`
-	I18n       descI18n        `json:"i18n"`
-	AssetTypes []descAssetType `json:"assetTypes"`
-	Tools      []descTool      `json:"tools"`
-	Policies   descPolicies    `json:"policies"`
-	Frontend   *descFrontend   `json:"frontend,omitempty"`
-	Snippets   *descSnippets   `json:"snippets,omitempty"`
-	Reviewer       *descReviewer  `json:"reviewer,omitempty"`
-	SettingsSchema map[string]any `json:"settingsSchema,omitempty"`
+	Icon           string          `json:"icon,omitempty"`
+	I18n           descI18n        `json:"i18n"`
+	AssetTypes     []descAssetType `json:"assetTypes"`
+	Tools          []descTool      `json:"tools"`
+	Policies       descPolicies    `json:"policies"`
+	Frontend       *descFrontend   `json:"frontend,omitempty"`
+	Snippets       *descSnippets   `json:"snippets,omitempty"`
+	Reviewer       *descReviewer   `json:"reviewer,omitempty"`
+	SettingsSchema map[string]any  `json:"settingsSchema,omitempty"`
 }
 
 type descI18n struct {

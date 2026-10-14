@@ -3,9 +3,12 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { PermissionModeCard } from "../PermissionModeCard";
 import { useAssetStore } from "@/stores/assetStore";
 import { useTabStore } from "@/stores/tabStore";
+import { toast } from "sonner";
 import { GetCommandReviewSettings } from "../../../../wailsjs/go/system/System";
 import { GetCommandReviewer } from "../../../../wailsjs/go/extension/Extension";
 import { group_entity } from "../../../../wailsjs/go/models";
+
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), warning: vi.fn(), info: vi.fn(), success: vi.fn() } }));
 
 const group = (ID: number, Name: string, ParentID: number, permissionMode = "") =>
   new group_entity.Group({ ID, Name, ParentID, Icon: "", SortOrder: ID, Status: 1, permissionMode });
@@ -40,6 +43,34 @@ describe("PermissionModeCard", () => {
       groups: [group(1, "生产", 0, "autopilot"), group(2, "数据库", 1), group(3, "测试", 0)],
     });
     useTabStore.setState({ tabs: [], activeTabId: null });
+  });
+
+  it("保存过程中显示“保存中”，不是“已保存”，也不能再切换", async () => {
+    const onChange = vi.fn(() => new Promise<void>(() => {}));
+    await act(async () => {
+      render(<PermissionModeCard value="autopilot" subject="asset" parentGroupId={0} onChange={onChange} />);
+    });
+    await act(async () => {
+      fireEvent.click(option("default"));
+    });
+
+    expect(onChange).toHaveBeenCalledWith("default");
+    expect(screen.getByText("action.saving")).toBeInTheDocument();
+    expect(screen.queryByText(/settings\.saved/)).toBeNull();
+    expect(option("assisted")).toBeDisabled();
+  });
+
+  it("保存失败时提示错误", async () => {
+    const onChange = vi.fn().mockRejectedValue(new Error("db locked"));
+    await act(async () => {
+      render(<PermissionModeCard value="autopilot" subject="asset" parentGroupId={0} onChange={onChange} />);
+    });
+    await act(async () => {
+      fireEvent.click(option("default"));
+    });
+
+    expect(toast.error).toHaveBeenCalledWith("db locked");
+    expect(screen.queryByText("action.saving")).toBeNull();
   });
 
   it("切回默认不需要确认，直接保存", async () => {

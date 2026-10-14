@@ -29,10 +29,12 @@ export interface ReviewInfo {
 export const REVIEW_QUESTIONS: readonly string[] = ["destructive", "disruptive", "remote_code"];
 const REVIEW_FAIL_REASONS: readonly string[] = [
   "not_configured",
+  "api_key_unreadable",
   "invalid_api_key",
   "timeout",
   "too_long",
   "unparseable",
+  "undecodable",
   "unavailable",
   "invalid_result",
   "reviewer_unavailable",

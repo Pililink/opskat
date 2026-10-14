@@ -33,6 +33,9 @@ describe("reviewSummary", () => {
     expect(reviewSummary(t, { mode: "assisted", outcome: "fail", reason: "timeout" }, "zh-CN")).toBe(
       "commandReview.summary.fail(commandReview.reason.timeout)"
     );
+    expect(reviewSummary(t, { mode: "assisted", outcome: "fail", reason: "undecodable" }, "zh-CN")).toBe(
+      "commandReview.summary.fail(commandReview.reason.undecodable)"
+    );
     expect(reviewSummary(t, { mode: "assisted", outcome: "fail", reason: "something_new" }, "zh-CN")).toBe(
       "commandReview.summary.fail(commandReview.reason.unavailable)"
     );

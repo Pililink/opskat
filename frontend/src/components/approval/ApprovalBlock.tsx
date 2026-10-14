@@ -22,8 +22,8 @@ import type { ContentBlock } from "@/stores/aiStore";
 import { hasApprovalCommandEdits } from "@/lib/approval";
 import { ApprovalClassification } from "./ApprovalClassification";
 import { ExtensionRequestDetail } from "./ExtensionRequestDetail";
-import { TruncatedText } from "./TruncatedText";
 import { ReviewNotice } from "./ReviewNotice";
+import { TruncatedText } from "./TruncatedText";
 import { RememberPatternEditor } from "./RememberPatternEditor";
 import { hasRememberPatternErrors, rememberPrefill } from "./rememberPattern";
 

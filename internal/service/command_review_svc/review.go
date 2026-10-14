@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/cago-frame/cago/pkg/logger"
+	"github.com/opskat/opskat/internal/ai/aictx"
 	"github.com/opskat/opskat/internal/pkg/typesafe"
 	"github.com/opskat/opskat/pkg/extension"
 	"go.uber.org/zap"
@@ -32,7 +33,7 @@ const (
 	DefaultBaseURL   = typesafe.DefaultBaseURL
 	DefaultModel     = "jev-1.13.0"
 	DefaultTimeout   = 5 * time.Second
-	DefaultThreshold = 0.2
+	DefaultThreshold = 0.5
 	// MaxCommandLen 是能审核的最长命令（替换敏感信息后）；更长的按审核失败处理，不截断后硬判。
 	MaxCommandLen = 4000
 )
@@ -41,7 +42,7 @@ const (
 var ErrNotConfigured = errors.New("typesafe api key not configured")
 
 // questionsVersion 在题目文字或通过标准变化时递增，让旧的缓存失效。
-const questionsVersion = "2"
+const questionsVersion = "3"
 
 // cacheTTL 是审核结果的缓存时长。
 const cacheTTL = 7 * 24 * time.Hour
@@ -54,8 +55,8 @@ const maxParallelReviews = 4
 const maxAttempts = 2
 
 // riskQuestions 只问明确的危险：破坏数据、中断服务、下载并执行代码。只读的查看类命令
-// （状态、日志、配置、进程、容器、定时任务、网络连接）在每道题里都明确写成"否"，
-// 这类命令不应被拦下来。
+// （状态、日志、配置、进程、容器、定时任务、网络状态）在每道题的"否"里都写明了，
+// 这类命令不应被拦下来。"破坏数据"只算不可恢复的修改，容易撤销的小改动也写成"否"。
 var riskQuestions = map[string]typesafe.Question{
 	QuestionDestructive: {
 		Type:         typesafe.QuestionNoul,
@@ -70,7 +71,7 @@ var riskQuestions = map[string]typesafe.Question{
 		Instructions: "Would running `command` on a `asset_type` asset clearly interrupt a running system, such as stopping, restarting, killing, or disabling a service, container, process, or the host, or changing firewall, routing, or network settings so that the host or its services become unreachable?",
 		Criteria: map[string]string{
 			"true":  "The command stops, restarts, kills, or disables something that is running, or cuts off network access to the host or its services.",
-			"false": "The command only inspects state, such as service status, timers, containers, connections, or VPN status, and leaves services, processes, the host, and the network running as they are.",
+			"false": "The command only reads, lists, searches, or shows status (such as service or VPN status), logs, configuration, processes, containers, scheduled jobs (such as timers), or network state, and leaves services, processes, the host, and the network running as they are.",
 		},
 	},
 	QuestionRemoteCode: {
@@ -78,28 +79,31 @@ var riskQuestions = map[string]typesafe.Question{
 		Instructions: "Does `command` download code or a script from the network and run it, for example by piping `curl` or `wget` output into a shell?",
 		Criteria: map[string]string{
 			"true":  "The command fetches code or a script from the network and runs it.",
-			"false": "The command does not run code fetched from the network; downloading a file without running it, or querying a remote service, does not count.",
+			"false": "The command does not run code fetched from the network: it only reads, lists, searches, or shows status, logs, configuration, processes, containers, scheduled jobs, or network state, or it downloads a file without running it, or queries a remote service.",
 		},
 	},
 }
 
-// Outcome 是审核结果。
-type Outcome string
+// Outcome 是审核结果，和审批、审计里记的是同一个类型。
+type Outcome = aictx.ReviewOutcome
 
 const (
-	OutcomePass   Outcome = "pass"   // 审核通过
-	OutcomeReject Outcome = "reject" // 审核未通过
-	OutcomeFail   Outcome = "fail"   // 审核失败：没能得到判断
+	OutcomePass   = aictx.ReviewPass   // 审核通过
+	OutcomeReject = aictx.ReviewReject // 审核未通过
+	OutcomeFail   = aictx.ReviewFail   // 审核失败：没能得到判断
 )
 
 // 审核失败的原因。
 const (
 	ReasonNotConfigured = "not_configured"
-	ReasonTooLong       = "too_long"
-	ReasonUnparseable   = "unparseable" // 命令解析不了，没法替换敏感信息，不发送
-	ReasonTimeout       = "timeout"
-	ReasonInvalidAPIKey = "invalid_api_key"
-	ReasonUnavailable   = "unavailable"
+	// 保存过 API key，但读不出来（如换了主密钥解不开）
+	ReasonAPIKeyUnreadable = "api_key_unreadable" // #nosec G101 -- 失败原因的名字，不是凭据。
+	ReasonTooLong          = "too_long"
+	ReasonUnparseable      = "unparseable" // 命令解析不了，没法替换敏感信息，不发送
+	ReasonUndecodable      = "undecodable" // 认得出解码后执行，但解不开要执行的内容，不发送
+	ReasonTimeout          = "timeout"
+	ReasonInvalidAPIKey    = "invalid_api_key"
+	ReasonUnavailable      = "unavailable"
 	// ReasonInvalidResult 是扩展返回了不合规的整批结果。
 	ReasonInvalidResult = "invalid_result"
 	// ReasonReviewerUnavailable 是已选中审核扩展，但它没加载、不是审核器，或来源/摘要检查没过。
@@ -109,6 +113,12 @@ const (
 
 // ErrReviewerUnavailable 是选中的审核扩展这次不可用。Review 把它记成 ReasonReviewerUnavailable。
 var ErrReviewerUnavailable = errors.New("selected command reviewer is unavailable")
+
+// isConfigError 判断审核失败是不是设置有问题：只有用户改设置才能恢复，要提醒用户。
+func isConfigError(reason string) bool {
+	return reason == ReasonNotConfigured || reason == ReasonAPIKeyUnreadable || reason == ReasonInvalidAPIKey ||
+		reason == ReasonReviewerUnavailable
+}
 
 // Input 是一次审核的输入。Syntax 决定怎样找出命令里的敏感信息（见 RedactSensitive）。
 type Input struct {
@@ -146,6 +156,25 @@ type ExtensionReviewer interface {
 	Review(ctx context.Context, items []extension.ReviewItem) ([]extension.ReviewCommandResult, error)
 }
 
+// Info 是这次审核在审批和审计里记的样子；mode 是触发审核的权限模式。
+func (r Result) Info(mode string) *aictx.ReviewInfo {
+	return &aictx.ReviewInfo{
+		Mode:        mode,
+		Outcome:     r.Outcome,
+		Reason:      r.Reason,
+		Failed:      r.Failed,
+		Model:       r.Model,
+		Scores:      r.Scores,
+		Threshold:   r.Threshold,
+		DurationMs:  r.Duration.Milliseconds(),
+		Cached:      r.Cached,
+		Attempts:    r.Attempts,
+		Extension:   r.Extension,
+		Version:     r.Version,
+		FailedNames: r.FailedNames,
+	}
+}
+
 // Config 是审核设置。APIKey 为空表示没有配置。
 type Config struct {
 	APIKey        string
@@ -175,10 +204,10 @@ type Service interface {
 	// TestModel 用给定的设置（可以是设置页上还没保存的值）发一次最小请求，
 	// 检查地址、API key 和模型是否可用，返回服务端实际作答的模型版本。
 	TestModel(ctx context.Context, cfg Config) (string, error)
-	// Status 返回本进程内最近一次审核失败的情况；之后审核成功过则为空。
+	// Status 返回本进程启动以来最近一次审核失败的情况，没失败过则为空。
 	Status() Status
-	// SetConfigErrorListener 注册配置错误（未配置 / API key 无效）的通知，同一种错误只通知一次，
-	// 审核恢复成功后再出错会重新通知。
+	// SetConfigErrorListener 注册配置错误（未配置 / API key 读不出来 / API key 无效）的通知，
+	// 同一种错误只通知一次，审核恢复成功后再出错会重新通知。
 	SetConfigErrorListener(fn func(reason string))
 }
 
@@ -189,7 +218,7 @@ type Status struct {
 }
 
 type service struct {
-	config    func() Config
+	config    func() (Config, error)
 	cache     Cache
 	evaluator func(apiKey, baseURL string) Evaluator
 	// extension 每次审核时读取当前生效的扩展审核器。
@@ -203,9 +232,18 @@ type service struct {
 	notified map[string]bool
 }
 
-// NewConfig 按设置值生成 Config，没填（零值）的项用默认值。
-func NewConfig(apiKey, baseURL, model string, timeoutMs int, threshold float64) Config {
-	cfg := Config{APIKey: apiKey, BaseURL: baseURL, Model: model, Threshold: threshold, Timeout: time.Duration(timeoutMs) * time.Millisecond, MaxCommandLen: MaxCommandLen}
+// Settings 是用户填的审核设置，没填的项为零值。
+type Settings struct {
+	APIKey    string
+	BaseURL   string
+	Model     string
+	TimeoutMs int
+	Threshold float64
+}
+
+// NewConfig 按设置生成 Config，没填（零值）的项用默认值。
+func NewConfig(s Settings) Config {
+	cfg := Config{APIKey: s.APIKey, BaseURL: s.BaseURL, Model: s.Model, Threshold: s.Threshold, Timeout: time.Duration(s.TimeoutMs) * time.Millisecond, MaxCommandLen: MaxCommandLen}
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = DefaultBaseURL
 	}
@@ -221,13 +259,14 @@ func NewConfig(apiKey, baseURL, model string, timeoutMs int, threshold float64) 
 	return cfg
 }
 
-// New 创建审核服务。config 每次审核时读取，设置修改后立即生效。
 // ExtensionReviewerFunc 读取当前生效的扩展审核器。
 // (nil, nil) 表示没有选中；ErrReviewerUnavailable 表示选中了但不可用。
 type ExtensionReviewerFunc func(ctx context.Context) (ExtensionReviewer, error)
 
-// New 创建审核服务。extension 可为 nil，表示这个进程不接扩展审核器。
-func New(config func() Config, cache Cache, evaluator func(apiKey, baseURL string) Evaluator, extension ExtensionReviewerFunc) Service {
+// New 创建审核服务。config 每次审核时读取，设置修改后立即生效；它返回错误表示保存过的
+// API key 读不出来，这时内置审核失败（ReasonAPIKeyUnreadable），不会当成没配置。
+// extension 可为 nil，表示这个进程不接扩展审核器。
+func New(config func() (Config, error), cache Cache, evaluator func(apiKey, baseURL string) Evaluator, extension ExtensionReviewerFunc) Service {
 	return &service{config: config, cache: cache, evaluator: evaluator, extension: extension, notified: map[string]bool{}}
 }
 
@@ -248,7 +287,7 @@ func (s *service) recordFailure(r Result) Result {
 	s.mu.Lock()
 	s.status = Status{LastFailReason: r.Reason, LastFailAt: time.Now()}
 	var notify func(string)
-	if (r.Reason == ReasonNotConfigured || r.Reason == ReasonInvalidAPIKey) && !s.notified[r.Reason] {
+	if isConfigError(r.Reason) && !s.notified[r.Reason] {
 		s.notified[r.Reason] = true
 		notify = s.listener
 	}
@@ -259,11 +298,10 @@ func (s *service) recordFailure(r Result) Result {
 	return r
 }
 
-// recordSuccess 清掉失败状态，之后再出配置错误会重新通知。
+// recordSuccess 让之后再出的配置错误重新通知。最近一次失败留着，设置页照样显示。
 func (s *service) recordSuccess() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.status = Status{}
 	s.notified = map[string]bool{}
 }
 
@@ -319,15 +357,32 @@ func (s *service) ReviewBatch(ctx context.Context, ins []Input) []Result {
 }
 
 func (s *service) reviewWithBuiltin(ctx context.Context, ins []Input) []Result {
-	cfg := s.config()
 	results := make([]Result, len(ins))
+	cfg, err := s.config()
+	if err != nil {
+		logger.Ctx(ctx).Error("read command review api key", zap.Error(err))
+		for i := range results {
+			results[i] = s.recordFailure(Result{Outcome: OutcomeFail, Reason: ReasonAPIKeyUnreadable})
+		}
+		return results
+	}
 	var pending []pendingReview
 	for i, in := range ins {
 		if cfg.APIKey == "" {
 			results[i] = s.recordFailure(Result{Outcome: OutcomeFail, Reason: ReasonNotConfigured})
 			continue
 		}
-		command, err := RedactSensitive(in.Syntax, in.Command)
+		reviewed, err := commandForReview(in)
+		if err != nil {
+			reason := ReasonUnparseable
+			if errors.Is(err, ErrUndecodable) {
+				reason = ReasonUndecodable
+			}
+			logger.Ctx(ctx).Warn("prepare command for review", zap.String("assetType", in.AssetType), zap.String("reason", reason), zap.Error(err))
+			results[i] = s.recordFailure(Result{Outcome: OutcomeFail, Reason: reason})
+			continue
+		}
+		command, err := RedactSensitive(in.Syntax, reviewed)
 		if err != nil {
 			logger.Ctx(ctx).Warn("redact command for review", zap.String("assetType", in.AssetType), zap.Error(err))
 			results[i] = s.recordFailure(Result{Outcome: OutcomeFail, Reason: ReasonUnparseable})
@@ -337,7 +392,7 @@ func (s *service) reviewWithBuiltin(ctx context.Context, ins []Input) []Result {
 			results[i] = s.recordFailure(Result{Outcome: OutcomeFail, Reason: ReasonTooLong})
 			continue
 		}
-		key := cacheKey(cfg.BaseURL, cfg.Model, in.AssetType, in.Command)
+		key := cacheKey(cfg.BaseURL, cfg.Model, in.AssetType, cacheKeyCommand(in.Command, reviewed))
 		log := logger.Ctx(ctx).With(zap.String("assetType", in.AssetType), zap.String("reviewKey", key[:12]))
 		if cached, err := s.cache.Get(ctx, key); err != nil {
 			log.Warn("read command review cache", zap.Error(err))
@@ -472,10 +527,12 @@ func failReason(err error) string {
 	}
 }
 
-// reviewWithExtension 用当前生效的扩展审核器审核。超长命令不送审，按该条失败；
-// 其余按 maxItems 拆成多次 review_commands。一次调用失败则该批全部失败。
+// reviewWithExtension 用当前生效的扩展审核器审核。和内置审核一样先展开解码后执行的命令、
+// 再替换敏感信息；超长命令不送审，按该条失败；其余按 maxItems 拆成多次 review_commands。
+// 一次调用失败则该批全部失败。扩展审核用不到内置审核的 API key，config 只读超时，
+// 所以 API key 解不开的错误在这里不影响审核。
 func (s *service) reviewWithExtension(ctx context.Context, rev ExtensionReviewer, ins []Input) []Result {
-	cfg := s.config()
+	cfg, _ := s.config()
 	name, version, settingsHash := rev.Identity()
 	maxItems, maxLen := rev.Limits()
 	questions := rev.Questions()
@@ -487,7 +544,17 @@ func (s *service) reviewWithExtension(ctx context.Context, rev ExtensionReviewer
 	}
 	var pending []pendingExt
 	for i, in := range ins {
-		command, err := RedactSensitive(in.Syntax, in.Command)
+		reviewed, err := commandForReview(in)
+		if err != nil {
+			reason := ReasonUnparseable
+			if errors.Is(err, ErrUndecodable) {
+				reason = ReasonUndecodable
+			}
+			logger.Ctx(ctx).Warn("prepare command for review", zap.String("assetType", in.AssetType), zap.String("reason", reason), zap.Error(err))
+			results[i] = s.recordFailure(Result{Outcome: OutcomeFail, Reason: reason, Extension: name, Version: version})
+			continue
+		}
+		command, err := RedactSensitive(in.Syntax, reviewed)
 		if err != nil {
 			logger.Ctx(ctx).Warn("redact command for review", zap.String("assetType", in.AssetType), zap.Error(err))
 			results[i] = s.recordFailure(Result{Outcome: OutcomeFail, Reason: ReasonUnparseable, Extension: name, Version: version})
@@ -497,7 +564,7 @@ func (s *service) reviewWithExtension(ctx context.Context, rev ExtensionReviewer
 			results[i] = s.recordFailure(Result{Outcome: OutcomeFail, Reason: ReasonTooLong, Extension: name, Version: version})
 			continue
 		}
-		key := extensionCacheKey(name, version, settingsHash, in.AssetType, in.Command)
+		key := extensionCacheKey(name, version, settingsHash, in.AssetType, cacheKeyCommand(in.Command, reviewed))
 		if cached, err := s.cache.Get(ctx, key); err != nil {
 			logger.Ctx(ctx).Warn("read command review cache", zap.String("extension", name), zap.Error(err))
 		} else if cached != nil {
@@ -585,14 +652,15 @@ func extensionResult(name, version string, questions []extension.ReviewQuestion,
 	return out
 }
 
-// extensionCacheKey 含扩展名、版本和设置哈希。用原始命令而不是替换后的。
+// extensionCacheKey 含扩展名、版本和设置哈希；命令部分同 cacheKey（原始命令，展开过的再带上展开后的文本）。
 func extensionCacheKey(name, version, settingsHash, assetType, command string) string {
 	h := sha256.Sum256([]byte(strings.Join([]string{name, version, settingsHash, assetType, command}, "\x00")))
 	return hex.EncodeToString(h[:])
 }
 
-// cacheKey 由服务地址、模型、题目版本、资产类型和原始命令算出。用原始命令而不是替换后的：
-// 替换后长得一样的两条命令（比如只有密码不同）各自审核，不共用结果。表里只存哈希，不存命令。
+// cacheKey 由服务地址、模型、题目版本、资产类型和命令算出。命令用原始命令而不是替换敏感信息后的：
+// 替换后长得一样的两条命令（比如只有密码不同）各自审核，不共用结果。解码展开过的命令还带上
+// 展开后的文本，避免展开前的评分被当成展开后的结果。表里只存哈希，不存命令。
 func cacheKey(baseURL, model, assetType, command string) string {
 	h := sha256.Sum256([]byte(strings.Join([]string{baseURL, model, questionsVersion, assetType, command}, "\x00")))
 	return hex.EncodeToString(h[:])

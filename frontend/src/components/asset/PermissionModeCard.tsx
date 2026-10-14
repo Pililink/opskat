@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { ConfirmDialog } from "@opskat/ui";
 import { AlertTriangle, Sparkles } from "lucide-react";
 import { toast } from "sonner";
+import { notifySuccess } from "@/lib/notify";
 import { Segmented, type SegmentedOption } from "@/components/asset/fields";
 import { resolveInheritedPermissionMode, type EffectivePermissionMode, type PermissionMode } from "@/lib/commandReview";
 import { openGroupDetail } from "@/lib/infoTab";
@@ -20,8 +21,8 @@ interface PermissionModeCardProps {
   subject: "asset" | "group";
   /** 从这个分组开始往上沿用：资产传所在分组，分组传上级分组；0 表示没有。 */
   parentGroupId: number;
-  saving?: boolean;
-  onChange: (mode: PermissionMode) => Promise<void> | void;
+  /** 保存新的设置；卡片负责保存中的状态和成功 / 失败提示。 */
+  onChange: (mode: PermissionMode) => Promise<void>;
 }
 
 /**
@@ -29,13 +30,26 @@ interface PermissionModeCardProps {
  * 沿用时写明沿用的是哪个分组，点分组名打开它的详情；
  * 切换后实际生效的模式会变成需要模型审核的模式时，先确认再保存。
  */
-export function PermissionModeCard({ value, subject, parentGroupId, saving, onChange }: PermissionModeCardProps) {
+export function PermissionModeCard({ value, subject, parentGroupId, onChange }: PermissionModeCardProps) {
   const { t } = useTranslation();
   const groups = useAssetStore((s) => s.groups);
   const { mode: inherited, from } = resolveInheritedPermissionMode(parentGroupId, groups);
   // 用内置审核却没配置 API key：开启审核后每条命令都会审核失败。选了审核扩展时不需要这个 key。
   const [missingApiKey, setMissingApiKey] = useState(false);
   const [pending, setPending] = useState<PermissionMode | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const save = async (mode: PermissionMode) => {
+    setSaving(true);
+    try {
+      await onChange(mode);
+      notifySuccess(t("commandReview.mode.saved"));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
 
   useEffect(() => {
     Promise.all([GetCommandReviewSettings(), GetCommandReviewer()])
@@ -68,7 +82,7 @@ export function PermissionModeCard({ value, subject, parentGroupId, saving, onCh
       setPending(mode);
       return;
     }
-    void onChange(mode);
+    void save(mode);
   };
 
   const pendingEffective: EffectivePermissionMode | null = pending === null ? null : pending || inherited;
@@ -80,7 +94,7 @@ export function PermissionModeCard({ value, subject, parentGroupId, saving, onCh
         <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           {t("commandReview.mode.title")}
         </h3>
-        {saving && <span className="ml-auto text-[10px] text-muted-foreground">{t("settings.saved")}...</span>}
+        {saving && <span className="ml-auto text-[10px] text-muted-foreground">{t("action.saving")}</span>}
       </div>
       <p className="mb-2 text-xs text-muted-foreground">{t("commandReview.mode.desc")}</p>
       <Segmented
@@ -136,7 +150,7 @@ export function PermissionModeCard({ value, subject, parentGroupId, saving, onCh
         onConfirm={() => {
           const mode = pending;
           setPending(null);
-          if (mode !== null) void onChange(mode);
+          if (mode !== null) void save(mode);
         }}
       />
     </div>

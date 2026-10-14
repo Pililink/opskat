@@ -99,9 +99,24 @@ func TestApplyReview(t *testing.T) {
 				r := CheckPermission(ctx, asset_entity.AssetTypeSSH, 1, cmd)
 				So(r.Decision, ShouldEqual, aictx.Allow)
 				So(r.DecisionSource, ShouldEqual, aictx.SourceAssistedAllow)
-				So(r.Review.Outcome, ShouldEqual, "pass")
+				So(r.Review.Outcome, ShouldEqual, aictx.ReviewPass)
 				// 按资产类型注册时声明的写法替换敏感信息
 				So(f.calls, ShouldResemble, []command_review_svc.Input{{AssetType: asset_entity.AssetTypeSSH, Command: cmd, Syntax: command_review_svc.SyntaxShell}})
+			})
+
+			Convey("按别名检查（opsctl exec 传审批类型 exec）时，交给模型和缓存的是规范资产类型", func() {
+				f := registerFakeReviewer(t, reviewPass)
+				r := CheckPermission(ctx, "exec", 1, cmd)
+				So(r.DecisionSource, ShouldEqual, aictx.SourceAssistedAllow)
+				So(f.calls, ShouldResemble, []command_review_svc.Input{{AssetType: asset_entity.AssetTypeSSH, Command: cmd, Syntax: command_review_svc.SyntaxShell}})
+			})
+
+			Convey("还会从管道读入内容：模型看不到那部分，不送审，照常问人", func() {
+				f := registerFakeReviewer(t, reviewPass)
+				r := CheckPermissions(ctx, []PermissionRequest{{AssetType: asset_entity.AssetTypeSSH, AssetID: 1, Command: cmd, PipedInput: true}})[0]
+				So(r.Decision, ShouldEqual, aictx.NeedConfirm)
+				So(r.Review, ShouldBeNil)
+				So(f.calls, ShouldBeEmpty)
 			})
 
 			Convey("审核未通过：仍然问人，保留规则提示并带上审核结果", func() {
@@ -109,7 +124,7 @@ func TestApplyReview(t *testing.T) {
 				r := CheckPermission(ctx, asset_entity.AssetTypeSSH, 1, cmd)
 				So(r.Decision, ShouldEqual, aictx.NeedConfirm)
 				So(r.HintRules, ShouldContain, "systemctl status *")
-				So(r.Review.Outcome, ShouldEqual, "reject")
+				So(r.Review.Outcome, ShouldEqual, aictx.ReviewReject)
 				So(r.Review.Failed, ShouldResemble, []string{"disruptive"})
 				So(r.Review.Mode, ShouldEqual, policyent.PermissionModeAssisted)
 			})
@@ -118,7 +133,7 @@ func TestApplyReview(t *testing.T) {
 				registerFakeReviewer(t, reviewFail)
 				r := CheckPermission(ctx, asset_entity.AssetTypeSSH, 1, cmd)
 				So(r.Decision, ShouldEqual, aictx.NeedConfirm)
-				So(r.Review.Outcome, ShouldEqual, "fail")
+				So(r.Review.Outcome, ShouldEqual, aictx.ReviewFail)
 				So(r.Review.Reason, ShouldEqual, command_review_svc.ReasonTimeout)
 			})
 		})
@@ -133,6 +148,24 @@ func TestApplyReview(t *testing.T) {
 				So(r.DecisionSource, ShouldEqual, aictx.SourceAutopilotAllow)
 			})
 
+			Convey("还会从管道读入内容：不送审，直接拒绝，告诉调用方怎么改", func() {
+				f := registerFakeReviewer(t, reviewPass)
+				r := CheckPermissions(aictx.WithPolicyLang(ctx, "zh-CN"), []PermissionRequest{{AssetType: asset_entity.AssetTypeSSH, AssetID: 1, Command: cmd, PipedInput: true}})[0]
+				So(r.Decision, ShouldEqual, aictx.Deny)
+				So(r.DecisionSource, ShouldEqual, aictx.SourceAutopilotDeny)
+				So(r.Message, ShouldContainSubstring, "管道")
+				So(r.Message, ShouldContainSubstring, "/dev/null")
+				So(f.calls, ShouldBeEmpty)
+			})
+
+			Convey("还会从管道读入内容，但规则已经放行：和原来一样放行", func() {
+				f := registerFakeReviewer(t, reviewReject)
+				r := CheckPermissions(ctx, []PermissionRequest{{AssetType: asset_entity.AssetTypeSSH, AssetID: 1, Command: "ls -la", PipedInput: true}})[0]
+				So(r.Decision, ShouldEqual, aictx.Allow)
+				So(r.DecisionSource, ShouldEqual, aictx.SourcePolicyAllow)
+				So(f.calls, ShouldBeEmpty)
+			})
+
 			Convey("审核未通过：直接拒绝，告诉调用方不要原样重试", func() {
 				registerFakeReviewer(t, reviewReject)
 				r := CheckPermission(aictx.WithPolicyLang(ctx, "zh-CN"), asset_entity.AssetTypeSSH, 1, cmd)
@@ -140,7 +173,7 @@ func TestApplyReview(t *testing.T) {
 				So(r.DecisionSource, ShouldEqual, aictx.SourceAutopilotDeny)
 				So(r.Message, ShouldContainSubstring, "模型审核未通过")
 				So(r.Message, ShouldContainSubstring, "不要原样重试")
-				So(r.Review.Outcome, ShouldEqual, "reject")
+				So(r.Review.Outcome, ShouldEqual, aictx.ReviewReject)
 				So(r.Review.Mode, ShouldEqual, policyent.PermissionModeAutopilot)
 			})
 
@@ -161,13 +194,38 @@ func TestApplyReview(t *testing.T) {
 				So(en.Message, ShouldContainSubstring, "Model review did not pass (Loses data)")
 			})
 
-			Convey("审核失败：直接拒绝，并写明原因", func() {
-				registerFakeReviewer(t, reviewFail)
-				r := CheckPermission(aictx.WithPolicyLang(ctx, "zh-CN"), asset_entity.AssetTypeSSH, 1, cmd)
-				So(r.Decision, ShouldEqual, aictx.Deny)
-				So(r.DecisionSource, ShouldEqual, aictx.SourceAutopilotDeny)
-				So(r.Message, ShouldContainSubstring, "模型审核失败")
-				So(r.Message, ShouldContainSubstring, "超时")
+			Convey("审核失败：直接拒绝，写明原因；只有临时性的失败才让调用方稍后重试", func() {
+				cases := []struct {
+					reason, want string
+					retryLater   bool
+				}{
+					{command_review_svc.ReasonTimeout, "超时", true},
+					{command_review_svc.ReasonUnavailable, "服务不可用", true},
+					// 原样重试结果一样，告诉调用方该怎么改
+					{command_review_svc.ReasonTooLong, "缩短或拆成几条", false},
+					{command_review_svc.ReasonUnparseable, "修正命令语法", false},
+					{command_review_svc.ReasonUndecodable, "直接写出来", false},
+					// 配置问题只有用户能修
+					{command_review_svc.ReasonNotConfigured, "留给用户", false},
+					{command_review_svc.ReasonAPIKeyUnreadable, "API key 无法读取", false},
+					{command_review_svc.ReasonInvalidAPIKey, "留给用户", false},
+					// 审核扩展的问题：选中的扩展不可用要用户处理，扩展答得不合规重试也一样
+					{command_review_svc.ReasonReviewerUnavailable, "留给用户", false},
+					{command_review_svc.ReasonInvalidResult, "审核扩展返回了无效的结果", false},
+				}
+				for _, c := range cases {
+					registerFakeReviewer(t, command_review_svc.Result{Outcome: command_review_svc.OutcomeFail, Reason: c.reason})
+					r := CheckPermission(aictx.WithPolicyLang(ctx, "zh-CN"), asset_entity.AssetTypeSSH, 1, cmd)
+					So(r.Decision, ShouldEqual, aictx.Deny)
+					So(r.DecisionSource, ShouldEqual, aictx.SourceAutopilotDeny)
+					So(r.Message, ShouldContainSubstring, "模型审核失败")
+					So(r.Message, ShouldContainSubstring, c.want)
+					if c.retryLater {
+						So(r.Message, ShouldContainSubstring, "稍后重试")
+					} else {
+						So(r.Message, ShouldNotContainSubstring, "稍后重试")
+					}
+				}
 			})
 		})
 
@@ -233,10 +291,10 @@ func TestApplyReview(t *testing.T) {
 
 			So(shown, ShouldHaveLength, 1)
 			So(shown[0].Review, ShouldNotBeNil)
-			So(shown[0].Review.Outcome, ShouldEqual, "reject")
+			So(shown[0].Review.Outcome, ShouldEqual, aictx.ReviewReject)
 			So(r.Decision, ShouldEqual, aictx.Allow)
 			So(r.DecisionSource, ShouldEqual, aictx.SourceUserAllow)
-			So(r.Review.Outcome, ShouldEqual, "reject")
+			So(r.Review.Outcome, ShouldEqual, aictx.ReviewReject)
 			// 人批准的记录里只看得到 user_allow，模式要靠审核结果自己带着，审计才看得出是辅助审批转过来的
 			So(r.Review.Mode, ShouldEqual, policyent.PermissionModeAssisted)
 		})

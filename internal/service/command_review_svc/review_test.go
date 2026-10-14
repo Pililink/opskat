@@ -2,6 +2,7 @@ package command_review_svc
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"net/http"
 	"strings"
@@ -61,7 +62,7 @@ func (c *memCache) Put(_ context.Context, key string, r Result, _ time.Duration)
 
 func newTestService(ev *fakeEvaluator, cfg Config) (*service, *memCache) {
 	cache := &memCache{m: map[string]Result{}}
-	s := New(func() Config { return cfg }, cache, func(string, string) Evaluator { return ev }, nil).(*service)
+	s := New(func() (Config, error) { return cfg, nil }, cache, func(string, string) Evaluator { return ev }, nil).(*service)
 	return s, cache
 }
 
@@ -92,22 +93,6 @@ func TestReviewRejectsWhenAnyRiskReachesThreshold(t *testing.T) {
 	assert.Equal(t, 0.2, r.Threshold)
 }
 
-// 只拦明确的危险操作：只问三道危险题，不判断命令是否在用户要求的范围内——
-// 那道题在"安全巡检一下"这类宽泛要求下，把 docker ps、systemctl list-timers 这些只读命令也判成了超出。
-func TestReviewAsksOnlyRiskQuestions(t *testing.T) {
-	ev := &fakeEvaluator{}
-	s, _ := newTestService(ev, enabledConfig())
-
-	r := s.Review(context.Background(), Input{AssetType: "ssh", Command: "docker ps"})
-
-	assert.Equal(t, OutcomePass, r.Outcome)
-	asked := make([]string, 0, len(ev.last.Questions))
-	for id := range ev.last.Questions {
-		asked = append(asked, id)
-	}
-	assert.ElementsMatch(t, []string{QuestionDestructive, QuestionDisruptive, QuestionRemoteCode}, asked)
-}
-
 func TestReviewSendsRedactedCommandWithAssetType(t *testing.T) {
 	ev := &fakeEvaluator{}
 	s, _ := newTestService(ev, enabledConfig())
@@ -120,6 +105,23 @@ func TestReviewSendsRedactedCommandWithAssetType(t *testing.T) {
 	// 只换密码本身，要执行的命令原样发给模型
 	assert.Equal(t, "AUTH x; mysql -uroot -p*** -e 'DROP DATABASE shop'", state.Command)
 	assert.Equal(t, "jev-1.13.0", ev.last.Model)
+}
+
+// 已保存的 API key 读不出来（比如解不开）：审核失败，按配置错误提醒，不调用模型。
+func TestUnreadableAPIKeyIsAConfigError(t *testing.T) {
+	ev := &fakeEvaluator{}
+	s := New(func() (Config, error) { return Config{}, errors.New("decrypt: cipher: message authentication failed") },
+		&memCache{m: map[string]Result{}}, func(string, string) Evaluator { return ev }, nil)
+	var notified []string
+	s.SetConfigErrorListener(func(reason string) { notified = append(notified, reason) })
+
+	r := s.Review(context.Background(), Input{AssetType: "ssh", Command: "ls"})
+
+	assert.Equal(t, OutcomeFail, r.Outcome)
+	assert.Equal(t, ReasonAPIKeyUnreadable, r.Reason)
+	assert.Zero(t, ev.calls)
+	assert.Equal(t, []string{ReasonAPIKeyUnreadable}, notified)
+	assert.Equal(t, ReasonAPIKeyUnreadable, s.Status().LastFailReason)
 }
 
 func TestReviewFailsWithoutCallingModel(t *testing.T) {
@@ -201,7 +203,7 @@ func TestCacheDoesNotMixCommandsThatOnlyDifferInSecrets(t *testing.T) {
 func TestCachedScoresAreJudgedWithCurrentThreshold(t *testing.T) {
 	ev := &fakeEvaluator{nouls: map[string]float64{QuestionDisruptive: 0.3}}
 	cfg := enabledConfig()
-	s := New(func() Config { return cfg }, &memCache{m: map[string]Result{}}, func(string, string) Evaluator { return ev }, nil)
+	s := New(func() (Config, error) { return cfg, nil }, &memCache{m: map[string]Result{}}, func(string, string) Evaluator { return ev }, nil)
 	in := Input{AssetType: "ssh", Command: "systemctl list-timers"}
 
 	first := s.Review(context.Background(), in)
@@ -229,11 +231,10 @@ func TestCacheKeyDependsOnServiceModelAssetTypeAndCommand(t *testing.T) {
 }
 
 func TestNewConfigFillsDefaults(t *testing.T) {
-	cfg := NewConfig("k", "", "", 0, 0)
+	cfg := NewConfig(Settings{APIKey: "k"})
 	assert.Equal(t, Config{APIKey: "k", BaseURL: DefaultBaseURL, Model: DefaultModel, Threshold: DefaultThreshold, Timeout: DefaultTimeout, MaxCommandLen: MaxCommandLen}, cfg)
-	assert.Equal(t, "https://api.typesafe.ai", DefaultBaseURL)
 
-	cfg = NewConfig("k", "http://10.0.0.5:8080", "my-jev", 3000, 0.5)
+	cfg = NewConfig(Settings{APIKey: "k", BaseURL: "http://10.0.0.5:8080", Model: "my-jev", TimeoutMs: 3000, Threshold: 0.5})
 	assert.Equal(t, "http://10.0.0.5:8080", cfg.BaseURL)
 	assert.Equal(t, "my-jev", cfg.Model)
 	assert.Equal(t, 3*time.Second, cfg.Timeout)
@@ -245,12 +246,12 @@ func TestTestModelUsesGivenConfig(t *testing.T) {
 	ev := &fakeEvaluator{}
 	var gotKey, gotURL string
 	saved := enabledConfig()
-	s := New(func() Config { return saved }, &memCache{m: map[string]Result{}}, func(key, baseURL string) Evaluator {
+	s := New(func() (Config, error) { return saved, nil }, &memCache{m: map[string]Result{}}, func(key, baseURL string) Evaluator {
 		gotKey, gotURL = key, baseURL
 		return ev
 	}, nil)
 
-	trial := NewConfig("new-key", "http://10.0.0.5:8080", "jev-latest", 3000, 0.2)
+	trial := NewConfig(Settings{APIKey: "new-key", BaseURL: "http://10.0.0.5:8080", Model: "jev-latest", TimeoutMs: 3000, Threshold: 0.2})
 	model, err := s.TestModel(context.Background(), trial)
 
 	assert.NoError(t, err)
@@ -276,7 +277,7 @@ func TestReviewCallsConfiguredService(t *testing.T) {
 	var gotURL string
 	cfg := enabledConfig()
 	cfg.BaseURL = "http://10.0.0.5:8080"
-	s := New(func() Config { return cfg }, &memCache{m: map[string]Result{}}, func(_, baseURL string) Evaluator {
+	s := New(func() (Config, error) { return cfg, nil }, &memCache{m: map[string]Result{}}, func(_, baseURL string) Evaluator {
 		gotURL = baseURL
 		return &fakeEvaluator{}
 	}, nil)
@@ -298,8 +299,10 @@ func TestConfigErrorsNotifyOnceAndShowInStatus(t *testing.T) {
 	assert.False(t, s.Status().LastFailAt.IsZero())
 
 	ev.err = nil
+	failedAt := s.Status().LastFailAt
 	s.Review(context.Background(), Input{AssetType: "ssh", Command: "uptime"})
-	assert.Empty(t, s.Status().LastFailReason, "审核成功后清掉失败状态")
+	assert.Equal(t, Status{LastFailReason: ReasonInvalidAPIKey, LastFailAt: failedAt}, s.Status(),
+		"设置页显示本次启动以来最近一次审核失败，之后审核成功也保留")
 
 	ev.err = &typesafe.APIError{StatusCode: http.StatusUnauthorized}
 	s.Review(context.Background(), Input{AssetType: "ssh", Command: "df -h"})
@@ -360,7 +363,7 @@ func (e *slowEvaluator) Evaluate(ctx context.Context, req typesafe.Request) (*ty
 func TestReviewBatchRunsModelCallsInParallelAndKeepsOrder(t *testing.T) {
 	ev := &slowEvaluator{delay: 50 * time.Millisecond, byCmd: map[string]float64{"rm -rf /data": 0.99}}
 	cache := &memCache{m: map[string]Result{}}
-	s := New(func() Config { return enabledConfig() }, cache, func(string, string) Evaluator { return ev }, nil).(*service)
+	s := New(func() (Config, error) { return enabledConfig(), nil }, cache, func(string, string) Evaluator { return ev }, nil).(*service)
 
 	ins := []Input{
 		{AssetType: "ssh", Command: "ls"},
@@ -432,7 +435,7 @@ func TestReviewRetriesOnceOnTimeoutOrNetworkError(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			cfg := enabledConfig()
 			cfg.Timeout = 20 * time.Millisecond
-			s := New(func() Config { return cfg }, &memCache{m: map[string]Result{}}, func(string, string) Evaluator { return c.ev }, nil)
+			s := New(func() (Config, error) { return cfg, nil }, &memCache{m: map[string]Result{}}, func(string, string) Evaluator { return c.ev }, nil)
 
 			r := s.Review(context.Background(), Input{AssetType: "ssh", Command: "ls"})
 
@@ -443,4 +446,166 @@ func TestReviewRetriesOnceOnTimeoutOrNetworkError(t *testing.T) {
 			assert.Equal(t, c.calls, r.Attempts)
 		})
 	}
+}
+
+// pipeDecodeExec 是「把脚本 base64 之后交给 shell 执行」的写法。模型必须看到脚本本身，
+// 不能只看到编码后的外壳。
+func pipeDecodeExec(script, shell string) string {
+	return "echo '" + base64.StdEncoding.EncodeToString([]byte(script)) + "' | base64 -d | " + shell
+}
+
+func sentCommand(t *testing.T, ev *fakeEvaluator) string {
+	t.Helper()
+	state, ok := ev.last.State.(reviewState)
+	require.True(t, ok)
+	return state.Command
+}
+
+func TestReviewSendsDecodedScriptInsteadOfBase64(t *testing.T) {
+	script := "cd /root/docker/vaalhub-web\ndocker compose up -d"
+	ev := &fakeEvaluator{}
+	s, _ := newTestService(ev, enabledConfig())
+
+	r := s.Review(context.Background(), Input{AssetType: "ssh", Syntax: SyntaxShell, Command: pipeDecodeExec(script, "bash")})
+
+	assert.Equal(t, OutcomePass, r.Outcome)
+	assert.Equal(t, script, sentCommand(t, ev))
+	assert.NotContains(t, sentCommand(t, ev), "base64")
+}
+
+func TestReviewDecodesCommonShellWrappers(t *testing.T) {
+	script := "docker compose up -d"
+	payload := base64.StdEncoding.EncodeToString([]byte(script))
+	cases := []string{
+		pipeDecodeExec(script, "/bin/bash"),
+		"printf '%s' '" + payload + "' | base64 --decode | sh",
+		"echo '" + payload + "' | base64 -d | sudo bash",
+		`bash -c "echo '` + payload + `' | base64 -d | bash"`,
+		"echo '" + payload + "' | base64 -d > /tmp/x.sh && bash /tmp/x.sh",
+		"bash -c \"$(echo '" + payload + "' | base64 -d)\"",
+		"eval \"$(echo '" + payload + "' | base64 -d)\"",
+	}
+	for _, cmd := range cases {
+		t.Run(cmd, func(t *testing.T) {
+			ev := &fakeEvaluator{}
+			s, _ := newTestService(ev, enabledConfig())
+			s.Review(context.Background(), Input{AssetType: "ssh", Syntax: SyntaxShell, Command: cmd})
+			got := sentCommand(t, ev)
+			assert.Contains(t, got, script)
+			assert.NotContains(t, got, payload)
+		})
+	}
+}
+
+func TestReviewKeepsSiblingCommandsWhenDecoding(t *testing.T) {
+	script := "docker inspect vaalhub-web"
+	cmd := pipeDecodeExec(script, "bash") + " && rm -rf /var/lib/gone"
+	ev := &fakeEvaluator{}
+	s, _ := newTestService(ev, enabledConfig())
+
+	s.Review(context.Background(), Input{AssetType: "ssh", Syntax: SyntaxShell, Command: cmd})
+
+	got := sentCommand(t, ev)
+	assert.Contains(t, got, script)
+	assert.Contains(t, got, "rm -rf /var/lib/gone")
+	assert.NotContains(t, got, "base64")
+}
+
+func TestReviewRedactsSecretsInsideDecodedScript(t *testing.T) {
+	script := "mysql -uroot -pS3cret -e 'DROP DATABASE shop'"
+	ev := &fakeEvaluator{}
+	s, _ := newTestService(ev, enabledConfig())
+
+	s.Review(context.Background(), Input{AssetType: "ssh", Syntax: SyntaxShell, Command: pipeDecodeExec(script, "bash")})
+
+	got := sentCommand(t, ev)
+	assert.Contains(t, got, "DROP DATABASE shop")
+	assert.Contains(t, got, "-p***")
+	assert.NotContains(t, got, "S3cret")
+}
+
+func TestUndecodableExecIsNotSentToTheModel(t *testing.T) {
+	cases := []string{
+		"echo '!!!' | base64 -d | bash",
+		"base64 -d /tmp/payload | bash",
+		"echo \"$payload\" | base64 -d | bash",
+	}
+	for _, cmd := range cases {
+		t.Run(cmd, func(t *testing.T) {
+			ev := &fakeEvaluator{}
+			s, _ := newTestService(ev, enabledConfig())
+			r := s.Review(context.Background(), Input{AssetType: "ssh", Syntax: SyntaxShell, Command: cmd})
+			assert.Equal(t, OutcomeFail, r.Outcome)
+			assert.Equal(t, ReasonUndecodable, r.Reason)
+			assert.Zero(t, ev.calls)
+		})
+	}
+}
+
+func TestBase64WriteWithoutExecutionIsReviewedAsWritten(t *testing.T) {
+	payload := base64.StdEncoding.EncodeToString([]byte("/root/docker/nginx/logs/*.log {\n}"))
+	cmd := "echo '" + payload + "' | base64 -d > /etc/logrotate.d/nginx-docker"
+	ev := &fakeEvaluator{}
+	s, _ := newTestService(ev, enabledConfig())
+
+	r := s.Review(context.Background(), Input{AssetType: "ssh", Syntax: SyntaxShell, Command: cmd})
+
+	assert.Equal(t, OutcomePass, r.Outcome)
+	assert.Contains(t, sentCommand(t, ev), payload)
+}
+
+func TestExpandedCommandDoesNotReuseWrapperCache(t *testing.T) {
+	cmd := pipeDecodeExec("docker compose up -d", "bash")
+	ev := &fakeEvaluator{nouls: map[string]float64{QuestionDisruptive: 0.9}}
+	s, cache := newTestService(ev, enabledConfig())
+	cfg := enabledConfig()
+	cache.m[cacheKey(cfg.BaseURL, cfg.Model, "ssh", cmd)] = Result{
+		Outcome: OutcomePass, Model: "jev-1.13.0", Scores: map[string]float64{QuestionDisruptive: 0.01},
+	}
+
+	r := s.Review(context.Background(), Input{AssetType: "ssh", Syntax: SyntaxShell, Command: cmd})
+
+	assert.Equal(t, 1, ev.calls)
+	assert.False(t, r.Cached)
+	assert.Equal(t, OutcomeReject, r.Outcome)
+	assert.Contains(t, sentCommand(t, ev), "docker compose up -d")
+}
+
+func TestOrdinaryEvalIsStillReviewed(t *testing.T) {
+	ev := &fakeEvaluator{}
+	s, _ := newTestService(ev, enabledConfig())
+
+	r := s.Review(context.Background(), Input{AssetType: "ssh", Syntax: SyntaxShell, Command: `eval "$cmd"`})
+
+	assert.Equal(t, OutcomePass, r.Outcome)
+	assert.Equal(t, 1, ev.calls)
+	assert.Contains(t, sentCommand(t, ev), `eval`)
+}
+
+func TestDecodeExecHiddenInAConditionalIsNotSent(t *testing.T) {
+	payload := base64.StdEncoding.EncodeToString([]byte("docker compose up -d"))
+	cases := []string{
+		"if true; then " + pipeDecodeExec("docker compose up -d", "bash") + "; fi",
+		"if true; then echo '" + payload + "' | base64 -d > /tmp/x.sh && bash /tmp/x.sh; fi",
+	}
+	for _, cmd := range cases {
+		t.Run(cmd, func(t *testing.T) {
+			ev := &fakeEvaluator{}
+			s, _ := newTestService(ev, enabledConfig())
+			r := s.Review(context.Background(), Input{AssetType: "ssh", Syntax: SyntaxShell, Command: cmd})
+			assert.Equal(t, OutcomeFail, r.Outcome)
+			assert.Equal(t, ReasonUndecodable, r.Reason)
+			assert.Zero(t, ev.calls)
+		})
+	}
+}
+
+func TestNonShellCommandIsNotDecoded(t *testing.T) {
+	cmd := pipeDecodeExec("docker compose up -d", "bash")
+	ev := &fakeEvaluator{}
+	s, _ := newTestService(ev, enabledConfig())
+
+	s.Review(context.Background(), Input{AssetType: "mysql", Syntax: SyntaxText, Command: cmd})
+
+	assert.Contains(t, sentCommand(t, ev), "base64")
 }

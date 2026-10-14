@@ -56,6 +56,16 @@ func TestRedactShellReplacesSensitiveValues(t *testing.T) {
 		{"private key", "echo '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaA\n-----END OPENSSH PRIVATE KEY-----' > k", "echo '-----BEGIN OPENSSH PRIVATE KEY-----***-----END OPENSSH PRIVATE KEY-----' > k"},
 		{"heredoc sql", "mysql <<'EOF'\nALTER USER app IDENTIFIED BY 'pw1';\nEOF", "mysql <<'EOF'\nALTER USER app IDENTIFIED BY '***';\nEOF"},
 		{"comment", "uptime # password=hunter2", "uptime # password=***"},
+		// 名字里有一段就叫 key 的变量和参数
+		{"key-named env", "ENCRYPTION_KEY=abc123 ./run.sh", "ENCRYPTION_KEY=*** ./run.sh"},
+		{"--key value", "tool --key abc123", "tool --key ***"},
+		{"--xxx-key=", "tool --encryption-key=abc123", "tool --encryption-key=***"},
+		{"key-named env in a remote command", "ssh web 'MASTER_KEY=abc123 ./run.sh'", "ssh web 'MASTER_KEY=*** ./run.sh'"},
+		// 值后面紧跟的重定向是命令结构，要留给模型看
+		{"value before a redirect in a remote command", "ssh web 'API_TOKEN=abc>/root/.ssh/authorized_keys'", "ssh web 'API_TOKEN=***>/root/.ssh/authorized_keys'"},
+		{"value before a redirect in double quotes", `bash -c "PASSWORD=x>/etc/passwd"`, `bash -c "PASSWORD=***>/etc/passwd"`},
+		{"flag value before a redirect in a remote command", "ssh web 'tool --token abc>/tmp/out'", "ssh web 'tool --token ***>/tmp/out'"},
+		{"mysql -p before a redirect in a remote command", "ssh web 'mysql -pRootPw</tmp/drop.sql'", "ssh web 'mysql -p***</tmp/drop.sql'"},
 	})
 }
 
@@ -90,6 +100,16 @@ func TestRedactShellLeavesOrdinaryCommandsAlone(t *testing.T) {
 		"docker ps",
 		"systemctl list-timers",
 		"tailscale status",
+		// key 只按名字里完整的最后一段认
+		"MONKEY=1 ./run.sh",
+		"KEYCLOAK_URL=https://sso.example.com ./run.sh",
+		"tool --keyboard us",
+		// 名字表示文件位置的，值是路径不是密钥：模型要看得到命令动的是哪里
+		"KEY_DIR=/ rm -rf $KEY_DIR/*",
+		"MYSQL_PASSWORD_FILE=/run/secrets/db docker-entrypoint.sh mysqld",
+		"TOKEN_PATH=/etc/app/token cat $TOKEN_PATH",
+		"ssh web 'KEY_DIR=/ rm -rf $KEY_DIR/*'",
+		"curl -d '{\"password_file\": \"/run/secrets/db\"}' http://x",
 	} {
 		got, err := RedactSensitive(SyntaxShell, in)
 		require.NoError(t, err, in)
@@ -131,6 +151,8 @@ func TestRedactTextReplacesSensitiveValues(t *testing.T) {
 		{"mongo createUser", `db.createUser({user: "app", pwd: "s3cr3t", roles: []})`, `db.createUser({user: "app", pwd: "***", roles: []})`},
 		{"connection string", "mongodb://root:rootpw@mongo:27017/admin", "mongodb://root:***@mongo:27017/admin"},
 		{"known format", "put /cfg/token sk-proj-abcdefghijklmnopqrstu", "put /cfg/token ***"},
+		// 纯文本不经过 shell，< > 不是重定向，是值的一部分
+		{"value with > in plain text", "put /app/cfg password=ab>cd", "put /app/cfg password=***"},
 	})
 	for _, in := range []string{
 		"SELECT id, name FROM users WHERE id = 1",

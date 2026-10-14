@@ -190,3 +190,26 @@ var errInvalid = errString("guest failed")
 type errString string
 
 func (e errString) Error() string { return string(e) }
+
+// 纯审核扩展：入口是 review_commands，不是对资产 exec，所以可以不声明资产类型和策略面；
+// 但它也就没有地方调用工具，声明工具要拒绝。
+func TestParseDescriptorReviewerOnly(t *testing.T) {
+	reviewer := `"reviewer":{"questions":[{"id":"a","i18n":{"name":{"en":"A"}}}],"maxItems":4,"maxCommandLen":100}`
+	Convey("只声明 reviewer 的描述符", t, func() {
+		Convey("没有资产类型和策略面也能加载", func() {
+			d, err := ParseDescriptor([]byte(`{` + reviewer + `}`))
+			So(err, ShouldBeNil)
+			So(d.Reviewer, ShouldNotBeNil)
+			So(d.AssetTypes, ShouldBeEmpty)
+		})
+		Convey("声明了工具就拒绝：没有资产，工具调不到", func() {
+			_, err := ParseDescriptor([]byte(`{` + reviewer + `,"tools":[{"name":"t","i18n":{"description":"d"},"parameters":{"type":"object"}}]}`))
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring, "assetTypes")
+		})
+		Convey("既没有资产类型也没有 reviewer 仍然拒绝", func() {
+			_, err := ParseDescriptor([]byte(`{"policies":{"type":"x"}}`))
+			So(err, ShouldNotBeNil)
+		})
+	})
+}

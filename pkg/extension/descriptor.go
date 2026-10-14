@@ -70,7 +70,17 @@ func (d *Descriptor) validate() error {
 // Extension tools travel the same exec / help / policy / grant path built-in types
 // do, and the entry to that path is an *asset*. A missing declaration is therefore not "an optional field left out"
 // but "this extension has no reachable entry point", and must be said at load time.
+//
+// The one exception is a reviewer-only extension: its entry point is review_commands,
+// which the host calls itself, so it needs no asset type and no policy face — and having
+// no asset, it can declare no tools either.
 func (d *Descriptor) validateAssetScope() error {
+	if len(d.AssetTypes) == 0 && d.Reviewer != nil {
+		if len(d.Tools) > 0 {
+			return fmt.Errorf("describe(): tools need assetTypes — extension tools are reached through exec on an asset, and a reviewer-only extension has none")
+		}
+		return nil
+	}
 	if len(d.AssetTypes) == 0 {
 		return fmt.Errorf("describe(): assetTypes must declare at least one asset type — extension tools are reached through exec on an asset")
 	}

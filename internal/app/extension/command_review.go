@@ -11,27 +11,24 @@ import (
 	"github.com/opskat/opskat/internal/service/extension_svc"
 )
 
-// ListCommandReviewers 列出已加载的审核扩展及其能否使用，供设置页选择生效的审核器。
-func (e *Extension) ListCommandReviewers() ([]extension_svc.CommandReviewerInfo, error) {
+// GetCommandReviewState 返回审核状态：已加载的审核扩展、设置里选的，以及实际在用的
+// （没选时启用中的只有一个就用它），没有可用的时说明原因。
+func (e *Extension) GetCommandReviewState() (*extension_svc.CommandReviewState, error) {
 	if e.service == nil {
 		return nil, fmt.Errorf("extension system not initialized")
 	}
-	return e.service.ListCommandReviewers(e.ctx, e.lang.Lang()), nil
+	st := e.service.CommandReviewState(e.ctx, e.lang.Lang(), bootstrap.GetConfig().CommandReviewExtension)
+	return &st, nil
 }
 
-// GetCommandReviewer 返回当前选中的审核扩展名；空表示用内置审核。
-func (e *Extension) GetCommandReviewer() string {
-	return bootstrap.GetConfig().CommandReviewExtension
-}
-
-// SetCommandReviewer 选择生效的审核扩展；name 为空表示改回内置审核。
+// SetCommandReviewer 选用审核扩展；name 为空表示不指定（启用中的只有一个时用它）。
 // 只能选现在能用的审核扩展：选一个用不了的，之后每次审核都会失败。
 func (e *Extension) SetCommandReviewer(name string) error {
 	if name != "" {
-		reviewers, err := e.ListCommandReviewers()
-		if err != nil {
-			return err
+		if e.service == nil {
+			return fmt.Errorf("extension system not initialized")
 		}
+		reviewers := e.service.ListCommandReviewers(e.ctx, e.lang.Lang())
 		if err := checkSelectableReviewer(reviewers, name); err != nil {
 			return err
 		}

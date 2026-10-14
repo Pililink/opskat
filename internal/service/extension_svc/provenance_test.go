@@ -29,7 +29,12 @@ func (m *memStateRepo) Find(_ context.Context, name string) (*extension_state_en
 }
 
 func (m *memStateRepo) FindAll(context.Context) ([]*extension_state_entity.ExtensionState, error) {
-	return nil, nil
+	out := make([]*extension_state_entity.ExtensionState, 0, len(m.rows))
+	for _, row := range m.rows {
+		cp := *row
+		out = append(out, &cp)
+	}
+	return out, nil
 }
 
 func (m *memStateRepo) Create(_ context.Context, state *extension_state_entity.ExtensionState) error {

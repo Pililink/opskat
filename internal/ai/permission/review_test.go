@@ -35,8 +35,8 @@ func (f *fakeReviewer) ReviewBatch(_ context.Context, ins []command_review_svc.I
 	return out
 }
 
-func (f *fakeReviewer) TestModel(context.Context, command_review_svc.Config) (string, error) {
-	return "", nil
+func (f *fakeReviewer) Test(context.Context) command_review_svc.Result {
+	return command_review_svc.Result{}
 }
 func (f *fakeReviewer) Status() command_review_svc.Status          { return command_review_svc.Status{} }
 func (f *fakeReviewer) SetConfigErrorListener(func(reason string)) {}
@@ -50,9 +50,10 @@ func registerFakeReviewer(t *testing.T, r command_review_svc.Result) *fakeReview
 }
 
 var (
-	reviewPass   = command_review_svc.Result{Outcome: command_review_svc.OutcomePass, Model: "jev-1.13.0"}
-	reviewReject = command_review_svc.Result{Outcome: command_review_svc.OutcomeReject, Failed: []string{"disruptive"}, Model: "jev-1.13.0"}
-	reviewFail   = command_review_svc.Result{Outcome: command_review_svc.OutcomeFail, Reason: command_review_svc.ReasonTimeout}
+	reviewPass   = command_review_svc.Result{Outcome: command_review_svc.OutcomePass, Extension: "command-review", Version: "1.0.0"}
+	reviewReject = command_review_svc.Result{Outcome: command_review_svc.OutcomeReject, Failed: []string{"disruptive"}, Extension: "command-review", Version: "1.0.0",
+		FailedNames: map[string]map[string]string{"disruptive": {"en": "may interrupt services", "zh-CN": "可能中断服务"}}}
+	reviewFail = command_review_svc.Result{Outcome: command_review_svc.OutcomeFail, Reason: command_review_svc.ReasonTimeout}
 )
 
 // sshAsset 的策略只放行 ls，所以 "systemctl restart nginx" 会落到"需要人确认"。
@@ -207,7 +208,7 @@ func TestApplyReview(t *testing.T) {
 					{command_review_svc.ReasonUndecodable, "直接写出来", false},
 					// 配置问题只有用户能修
 					{command_review_svc.ReasonNotConfigured, "留给用户", false},
-					{command_review_svc.ReasonAPIKeyUnreadable, "API key 无法读取", false},
+					{command_review_svc.ReasonNoReviewer, "没有可用的命令审核扩展", false},
 					{command_review_svc.ReasonInvalidAPIKey, "留给用户", false},
 					// 审核扩展的问题：选中的扩展不可用要用户处理，扩展答得不合规重试也一样
 					{command_review_svc.ReasonReviewerUnavailable, "留给用户", false},

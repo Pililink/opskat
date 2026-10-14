@@ -176,3 +176,77 @@ func TestActiveCommandReviewerAcceptsUnsignedOnNonRelease(t *testing.T) {
 	assert.False(t, list[0].Usable)
 	assert.NotEmpty(t, list[0].Reason)
 }
+
+// writeManifest 在 root 下装一个只有 manifest 的扩展目录；commandReview 决定它是不是审核扩展。
+func writeManifest(t *testing.T, root, name string, commandReview bool) {
+	t.Helper()
+	dir := filepath.Join(root, name)
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	caps := `{}`
+	if commandReview {
+		caps = `{"commandReview":true}`
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "manifest.json"),
+		[]byte(`{"name":"`+name+`","version":"1.0.0","hostABI":"2.3","backend":{"runtime":"wasm","binary":"main.wasm"},"capabilities":`+caps+`}`), 0o600))
+}
+
+// 没选审核扩展时：只装了一个启用中的就用它；一个都没有、或有好几个都要用户处理。
+func TestCommandReviewerNamePicksTheOnlyEnabledReviewer(t *testing.T) {
+	root := t.TempDir()
+	writeManifest(t, root, "notebook", false)
+	writeManifest(t, root, "rev-a", true)
+	writeManifest(t, root, "rev-off", true)
+	mgr := extension.NewManager(root, func(string) extension.HostProvider { return nil }, nopLogger())
+	repo := &memStateRepo{rows: map[string]*extension_state_entity.ExtensionState{
+		"rev-off": {Name: "rev-off", Enabled: false},
+	}}
+	svc := &Service{manager: mgr, stateRepo: repo, logger: nopLogger()}
+	ctx := context.Background()
+
+	name, err := svc.CommandReviewerName(ctx, "")
+	require.NoError(t, err)
+	assert.Equal(t, "rev-a", name)
+
+	name, err = svc.CommandReviewerName(ctx, "rev-off")
+	require.NoError(t, err)
+	assert.Equal(t, "rev-off", name, "选了哪个就用哪个，能不能用由加载时检查")
+
+	writeManifest(t, root, "rev-b", true)
+	_, err = svc.CommandReviewerName(ctx, "")
+	assert.ErrorIs(t, err, ErrSeveralCommandReviewers)
+
+	empty := &Service{manager: extension.NewManager(t.TempDir(), func(string) extension.HostProvider { return nil }, nopLogger()), stateRepo: repo, logger: nopLogger()}
+	_, err = empty.CommandReviewerName(ctx, "")
+	assert.ErrorIs(t, err, ErrNoCommandReviewer)
+}
+
+// 设置页和权限模式卡片看到的审核状态：实际在用哪个审核扩展，没有可用的时说明原因。
+func TestCommandReviewStateTellsWhichReviewerIsInUse(t *testing.T) {
+	root := t.TempDir()
+	sum := writeReviewerPackage(t, root, "rev")
+	mgr := extension.NewManager(root, func(string) extension.HostProvider { return nil }, nopLogger())
+	mgr.PutForTest(reviewerExtension("rev", mgr.ExtDir("rev")))
+	repo := &memStateRepo{rows: map[string]*extension_state_entity.ExtensionState{
+		"rev": {Name: "rev", Enabled: true, Source: InstallOriginStore, PackageSHA256: sum},
+	}}
+	svc := &Service{manager: mgr, stateRepo: repo, logger: nopLogger()}
+	ctx := context.Background()
+
+	st := svc.CommandReviewState(ctx, "en", "")
+	assert.Equal(t, "rev", st.Active, "没选、只有一个就用它")
+	assert.Empty(t, st.Problem)
+	require.Len(t, st.Reviewers, 1)
+
+	st = svc.CommandReviewState(ctx, "en", "gone")
+	assert.Empty(t, st.Active)
+	assert.Equal(t, "reviewer_unavailable", st.Problem, "选了一个不存在的")
+
+	repo.rows["rev"].PackageSHA256 = "dead"
+	st = svc.CommandReviewState(ctx, "en", "")
+	assert.Empty(t, st.Active)
+	assert.Equal(t, "reviewer_unavailable", st.Problem, "唯一的那个检查不过")
+
+	empty := &Service{manager: extension.NewManager(t.TempDir(), func(string) extension.HostProvider { return nil }, nopLogger()), stateRepo: repo, logger: nopLogger()}
+	st = empty.CommandReviewState(ctx, "en", "")
+	assert.Equal(t, "no_reviewer", st.Problem)
+}

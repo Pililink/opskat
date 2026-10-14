@@ -1,6 +1,6 @@
-// Package command_review_svc 用 Jev 格式（TypeSafe System One API）的模型审核命令：
-// 命令没被规则放行、原本要问人时，由它判断能不能自动执行。
-// 不区分资产类型：所有类型用同一组题目、同一个通过标准。
+// Package command_review_svc 是命令的模型审核：命令没被规则放行、原本要问人时，交给审核扩展
+// 判断能不能自动执行。宿主只负责和具体审核服务无关的部分——用哪个审核扩展、送审前的准备
+// （展开解码后执行的命令、替换敏感信息）、缓存、并发、超时重试和失败记录；判断本身由扩展做。
 package command_review_svc
 
 import (
@@ -13,42 +13,23 @@ import (
 	"time"
 
 	"github.com/cago-frame/cago/pkg/logger"
-	"github.com/opskat/opskat/internal/ai/aictx"
-	"github.com/opskat/opskat/internal/pkg/jevreview"
-	"github.com/opskat/opskat/internal/pkg/typesafe"
-	"github.com/opskat/opskat/pkg/extension"
 	"go.uber.org/zap"
+
+	"github.com/opskat/opskat/internal/ai/aictx"
+	"github.com/opskat/opskat/pkg/extension"
 )
 
-// 题目 ID 只给代码用，不会发给模型；题目的完整含义写在 instructions 里。
-// 审核未通过时，Result.Failed 里是这些 ID。
-const (
-	QuestionDestructive = jevreview.QuestionDestructive
-	QuestionDisruptive  = jevreview.QuestionDisruptive
-	QuestionRemoteCode  = jevreview.QuestionRemoteCode
-)
-
-// 设置没填时的默认值：TypeSafe 官方地址上的 Jev 具体版本。
-const (
-	DefaultBaseURL   = jevreview.DefaultBaseURL
-	DefaultModel     = jevreview.DefaultModel
-	DefaultTimeout   = 5 * time.Second
-	DefaultThreshold = jevreview.DefaultThreshold
-	// MaxCommandLen 是能审核的最长命令（替换敏感信息后）；更长的按审核失败处理，不截断后硬判。
-	MaxCommandLen = 4000
-)
-
-// ErrNotConfigured 表示没有配置审核模型的 API key。
-var ErrNotConfigured = errors.New("typesafe api key not configured")
+// DefaultTimeout 是每次调用审核扩展的默认超时。
+const DefaultTimeout = 5 * time.Second
 
 // cacheTTL 是审核结果的缓存时长。
 const cacheTTL = 7 * 24 * time.Hour
 
-// maxParallelReviews 是批量审核时同时调用模型的上限。
+// maxParallelReviews 是同时调用审核扩展的上限，与扩展的实例池大小一致。
 const maxParallelReviews = 4
 
-// maxAttempts 是一次审核最多调用模型的次数：超时或连接出错时再试一次。opsctl 每次都是新进程，
-// 第一次请求要重新解析域名、建立连接，偶尔会超时；第二次通常很快。
+// maxAttempts 是一次审核最多调用的次数：超时时再试一次。opsctl 每次都是新进程，
+// 审核扩展第一次请求要重新解析域名、建立连接，偶尔会超时；第二次通常很快。
 const maxAttempts = 2
 
 // Outcome 是审核结果，和审批、审计里记的是同一个类型。
@@ -60,31 +41,38 @@ const (
 	OutcomeFail   = aictx.ReviewFail   // 审核失败：没能得到判断
 )
 
-// 审核失败的原因。
+// 审核失败的原因。not_configured / invalid_api_key / timeout / unavailable 也是审核扩展
+// 回答 error 时用的原因名，宿主按同一套说明显示。
 const (
 	ReasonNotConfigured = "not_configured"
-	// 保存过 API key，但读不出来（如换了主密钥解不开）
-	ReasonAPIKeyUnreadable = "api_key_unreadable" // #nosec G101 -- 失败原因的名字，不是凭据。
-	ReasonTooLong          = "too_long"
-	ReasonUnparseable      = "unparseable" // 命令解析不了，没法替换敏感信息，不发送
-	ReasonUndecodable      = "undecodable" // 认得出解码后执行，但解不开要执行的内容，不发送
-	ReasonTimeout          = jevreview.ReasonTimeout
-	ReasonInvalidAPIKey    = jevreview.ReasonInvalidAPIKey
-	ReasonUnavailable      = jevreview.ReasonUnavailable
-	// ReasonInvalidResult 是扩展返回了不合规的整批结果。
+	ReasonInvalidAPIKey = "invalid_api_key"
+	ReasonTimeout       = "timeout"
+	ReasonUnavailable   = "unavailable"
+	ReasonTooLong       = "too_long"
+	ReasonUnparseable   = "unparseable" // 命令解析不了，没法替换敏感信息，不发送
+	ReasonUndecodable   = "undecodable" // 认得出解码后执行，但解不开要执行的内容，不发送
+	// ReasonInvalidResult 是审核扩展返回了不合规的整批结果。
 	ReasonInvalidResult = "invalid_result"
-	// ReasonReviewerUnavailable 是已选中审核扩展，但它没加载、不是审核器，或来源/摘要检查没过。
-	// 这时审核失败，不改用内置审核。
+	// ReasonNoReviewer 是没有可用的审核扩展：一个都没装（或都停用了），或装了多个却没选用哪个。
+	ReasonNoReviewer = "no_reviewer"
+	// ReasonReviewerUnavailable 是要用的审核扩展这次不可用：没加载、不是审核器，或来源/摘要检查没过。
 	ReasonReviewerUnavailable = "reviewer_unavailable"
 )
 
-// ErrReviewerUnavailable 是选中的审核扩展这次不可用。Review 把它记成 ReasonReviewerUnavailable。
-var ErrReviewerUnavailable = errors.New("selected command reviewer is unavailable")
+var (
+	// ErrNoReviewer 见 ReasonNoReviewer。
+	ErrNoReviewer = errors.New("no command reviewer extension is available")
+	// ErrReviewerUnavailable 见 ReasonReviewerUnavailable。
+	ErrReviewerUnavailable = errors.New("command reviewer is unavailable")
+)
 
 // isConfigError 判断审核失败是不是设置有问题：只有用户改设置才能恢复，要提醒用户。
 func isConfigError(reason string) bool {
-	return reason == ReasonNotConfigured || reason == ReasonAPIKeyUnreadable || reason == ReasonInvalidAPIKey ||
-		reason == ReasonReviewerUnavailable
+	switch reason {
+	case ReasonNotConfigured, ReasonInvalidAPIKey, ReasonNoReviewer, ReasonReviewerUnavailable:
+		return true
+	}
+	return false
 }
 
 // Input 是一次审核的输入。Syntax 决定怎样找出命令里的敏感信息（见 RedactSensitive）。
@@ -96,23 +84,38 @@ type Input struct {
 
 // Result 是一次审核的结果。
 type Result struct {
-	Outcome   Outcome            `json:"outcome"`
-	Reason    string             `json:"reason,omitempty"` // 审核失败的原因
-	Failed    []string           `json:"failed,omitempty"` // 审核未通过时，没满足条件的题目
-	Model     string             `json:"model,omitempty"`
-	Scores    map[string]float64 `json:"scores,omitempty"`    // 每道题回答"是"的概率
-	Threshold float64            `json:"threshold,omitempty"` // 判断用的阈值
-	Duration  time.Duration      `json:"duration,omitempty"`
-	Cached    bool               `json:"cached,omitempty"`
-	Attempts  int                `json:"attempts,omitempty"` // 调用模型的次数，超时或连接出错时会重试
-	// Extension / Version 是做出这次判断的审核扩展。内置 TypeSafe 审核为空。
+	Outcome  Outcome            `json:"outcome"`
+	Reason   string             `json:"reason,omitempty"` // 审核失败的原因
+	Failed   []string           `json:"failed,omitempty"` // 审核未通过时，没满足条件的题目
+	Scores   map[string]float64 `json:"scores,omitempty"` // 未通过的题目的评分
+	Duration time.Duration      `json:"duration,omitempty"`
+	Cached   bool               `json:"cached,omitempty"`
+	Attempts int                `json:"attempts,omitempty"` // 调用审核扩展的次数，超时时会重试
+	// Extension / Version 是做出这次判断的审核扩展。
 	Extension string `json:"extension,omitempty"`
 	Version   string `json:"version,omitempty"`
-	// FailedNames 是审核扩展为 Failed 里每道题声明的各语言名称（题目 id → 语言 → 名称）。内置审核为空。
+	// FailedNames 是审核扩展为 Failed 里每道题声明的各语言名称（题目 id → 语言 → 名称）。
 	FailedNames map[string]map[string]string `json:"failed_names,omitempty"`
 }
 
-// ExtensionReviewer 是当前生效的扩展审核器。没有选中时返回 nil，审核走内置 TypeSafe。
+// Info 是这次审核在审批和审计里记的样子；mode 是触发审核的权限模式。
+func (r Result) Info(mode string) *aictx.ReviewInfo {
+	return &aictx.ReviewInfo{
+		Mode:        mode,
+		Outcome:     r.Outcome,
+		Reason:      r.Reason,
+		Failed:      r.Failed,
+		Scores:      r.Scores,
+		DurationMs:  r.Duration.Milliseconds(),
+		Cached:      r.Cached,
+		Attempts:    r.Attempts,
+		Extension:   r.Extension,
+		Version:     r.Version,
+		FailedNames: r.FailedNames,
+	}
+}
+
+// ExtensionReviewer 是要用的审核扩展。
 type ExtensionReviewer interface {
 	// Identity 是扩展名、版本和设置哈希。设置哈希参与缓存键。
 	Identity() (name, version, settingsHash string)
@@ -123,39 +126,9 @@ type ExtensionReviewer interface {
 	Review(ctx context.Context, items []extension.ReviewItem) ([]extension.ReviewCommandResult, error)
 }
 
-// Info 是这次审核在审批和审计里记的样子；mode 是触发审核的权限模式。
-func (r Result) Info(mode string) *aictx.ReviewInfo {
-	return &aictx.ReviewInfo{
-		Mode:        mode,
-		Outcome:     r.Outcome,
-		Reason:      r.Reason,
-		Failed:      r.Failed,
-		Model:       r.Model,
-		Scores:      r.Scores,
-		Threshold:   r.Threshold,
-		DurationMs:  r.Duration.Milliseconds(),
-		Cached:      r.Cached,
-		Attempts:    r.Attempts,
-		Extension:   r.Extension,
-		Version:     r.Version,
-		FailedNames: r.FailedNames,
-	}
-}
-
-// Config 是审核设置。APIKey 为空表示没有配置。
-type Config struct {
-	APIKey        string
-	BaseURL       string // 兼容 TypeSafe System One API 的服务地址
-	Model         string
-	Threshold     float64       // 任意一题"是"的概率达到它就不通过
-	Timeout       time.Duration // 每次调用模型的超时；超时后会重试（见 maxAttempts）
-	MaxCommandLen int
-}
-
-// Evaluator 是模型调用，*typesafe.Client 实现了它。
-type Evaluator interface {
-	Evaluate(ctx context.Context, req typesafe.Request) (*typesafe.Response, error)
-}
+// ReviewerFunc 找出这次要用的审核扩展。没有可用的返回 ErrNoReviewer，
+// 要用的这次不可用返回 ErrReviewerUnavailable。
+type ReviewerFunc func(ctx context.Context) (ExtensionReviewer, error)
 
 // Cache 保存审核结果。Get 找不到时返回 (nil, nil)。
 type Cache interface {
@@ -166,15 +139,14 @@ type Cache interface {
 // Service 审核命令。
 type Service interface {
 	Review(ctx context.Context, in Input) Result
-	// ReviewBatch 审核多条命令，结果与输入一一对应；调用模型这一步并行。
+	// ReviewBatch 审核多条命令，结果与输入一一对应；调用审核扩展这一步并行。
 	ReviewBatch(ctx context.Context, ins []Input) []Result
-	// TestModel 用给定的设置（可以是设置页上还没保存的值）发一次最小请求，
-	// 检查地址、API key 和模型是否可用，返回服务端实际作答的模型版本。
-	TestModel(ctx context.Context, cfg Config) (string, error)
+	// Test 用要用的审核扩展审一条无害的命令，不读写缓存，设置页据此确认审核服务能不能用。
+	Test(ctx context.Context) Result
 	// Status 返回本进程启动以来最近一次审核失败的情况，没失败过则为空。
 	Status() Status
-	// SetConfigErrorListener 注册配置错误（未配置 / API key 读不出来 / API key 无效）的通知，
-	// 同一种错误只通知一次，审核恢复成功后再出错会重新通知。
+	// SetConfigErrorListener 注册设置问题（没有审核扩展、扩展没配置好等）的通知，
+	// 同一种问题只通知一次，审核恢复成功后再出错会重新通知。
 	SetConfigErrorListener(fn func(reason string))
 }
 
@@ -185,13 +157,9 @@ type Status struct {
 }
 
 type service struct {
-	config    func() (Config, error)
-	cache     Cache
-	evaluator func(apiKey, baseURL string) Evaluator
-	// extension 每次审核时读取当前生效的扩展审核器。
-	// 返回 (nil, nil) 表示没有选中扩展，走内置 TypeSafe。
-	// 返回 ErrReviewerUnavailable 表示选中了但这次不可用，整批审核失败，不退回内置。
-	extension func(ctx context.Context) (ExtensionReviewer, error)
+	timeout  func() time.Duration
+	cache    Cache
+	reviewer ReviewerFunc
 
 	mu       sync.Mutex
 	status   Status
@@ -199,42 +167,9 @@ type service struct {
 	notified map[string]bool
 }
 
-// Settings 是用户填的审核设置，没填的项为零值。
-type Settings struct {
-	APIKey    string
-	BaseURL   string
-	Model     string
-	TimeoutMs int
-	Threshold float64
-}
-
-// NewConfig 按设置生成 Config，没填（零值）的项用默认值。
-func NewConfig(s Settings) Config {
-	cfg := Config{APIKey: s.APIKey, BaseURL: s.BaseURL, Model: s.Model, Threshold: s.Threshold, Timeout: time.Duration(s.TimeoutMs) * time.Millisecond, MaxCommandLen: MaxCommandLen}
-	if cfg.BaseURL == "" {
-		cfg.BaseURL = DefaultBaseURL
-	}
-	if cfg.Model == "" {
-		cfg.Model = DefaultModel
-	}
-	if cfg.Threshold == 0 {
-		cfg.Threshold = DefaultThreshold
-	}
-	if cfg.Timeout == 0 {
-		cfg.Timeout = DefaultTimeout
-	}
-	return cfg
-}
-
-// ExtensionReviewerFunc 读取当前生效的扩展审核器。
-// (nil, nil) 表示没有选中；ErrReviewerUnavailable 表示选中了但不可用。
-type ExtensionReviewerFunc func(ctx context.Context) (ExtensionReviewer, error)
-
-// New 创建审核服务。config 每次审核时读取，设置修改后立即生效；它返回错误表示保存过的
-// API key 读不出来，这时内置审核失败（ReasonAPIKeyUnreadable），不会当成没配置。
-// extension 可为 nil，表示这个进程不接扩展审核器。
-func New(config func() (Config, error), cache Cache, evaluator func(apiKey, baseURL string) Evaluator, extension ExtensionReviewerFunc) Service {
-	return &service{config: config, cache: cache, evaluator: evaluator, extension: extension, notified: map[string]bool{}}
+// New 创建审核服务。timeout 是每次调用审核扩展的超时，每次审核时读取，设置修改后立即生效。
+func New(timeout func() time.Duration, cache Cache, reviewer ReviewerFunc) Service {
+	return &service{timeout: timeout, cache: cache, reviewer: reviewer, notified: map[string]bool{}}
 }
 
 func (s *service) Status() Status {
@@ -249,7 +184,7 @@ func (s *service) SetConfigErrorListener(fn func(reason string)) {
 	s.listener = fn
 }
 
-// recordFailure 记下审核失败；配置错误通知一次。
+// recordFailure 记下审核失败；设置问题通知一次。
 func (s *service) recordFailure(r Result) Result {
 	s.mu.Lock()
 	s.status = Status{LastFailReason: r.Reason, LastFailAt: time.Now()}
@@ -265,7 +200,7 @@ func (s *service) recordFailure(r Result) Result {
 	return r
 }
 
-// recordSuccess 让之后再出的配置错误重新通知。最近一次失败留着，设置页照样显示。
+// recordSuccess 让之后再出的设置问题重新通知。最近一次失败留着，设置页照样显示。
 func (s *service) recordSuccess() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -280,193 +215,54 @@ func Register(s Service) { defaultService = s }
 // Default 返回默认审核服务，没有注册时为 nil。
 func Default() Service { return defaultService }
 
-// reviewState 是发给模型的上下文。
-type reviewState = jevreview.State
-
 func (s *service) Review(ctx context.Context, in Input) Result {
 	return s.ReviewBatch(ctx, []Input{in})[0]
 }
 
-// pendingReview 是一条需要调用模型的审核。
-type pendingReview struct {
-	idx     int
-	key     string
-	command string
-	in      Input
-	log     *zap.Logger
-}
-
 // ReviewBatch 审核多条命令，结果与输入一一对应。读写缓存按顺序做（SQLite 不适合并发写），
-// 只有调用模型这一步并行，最多 maxParallelReviews 条同时进行。
+// 只有调用审核扩展这一步并行，最多 maxParallelReviews 路同时进行。
 func (s *service) ReviewBatch(ctx context.Context, ins []Input) []Result {
-	if s.extension != nil {
-		rev, err := s.extension(ctx)
-		if err != nil {
-			reason := ReasonUnavailable
-			if errors.Is(err, ErrReviewerUnavailable) {
-				reason = ReasonReviewerUnavailable
-			}
-			logger.Ctx(ctx).Warn("selected command reviewer unavailable", zap.String("reason", reason), zap.Error(err))
-			results := make([]Result, len(ins))
-			for i := range ins {
-				results[i] = s.recordFailure(Result{Outcome: OutcomeFail, Reason: reason})
-			}
-			return results
-		}
-		if rev != nil {
-			return s.reviewWithExtension(ctx, rev, ins)
-		}
+	rev, failed := s.resolve(ctx, len(ins))
+	if failed != nil {
+		return failed
 	}
-	return s.reviewWithBuiltin(ctx, ins)
+	return s.reviewWith(ctx, rev, ins, true)
 }
 
-func (s *service) reviewWithBuiltin(ctx context.Context, ins []Input) []Result {
-	results := make([]Result, len(ins))
-	cfg, err := s.config()
-	if err != nil {
-		logger.Ctx(ctx).Error("read command review api key", zap.Error(err))
-		for i := range results {
-			results[i] = s.recordFailure(Result{Outcome: OutcomeFail, Reason: ReasonAPIKeyUnreadable})
-		}
-		return results
-	}
-	var pending []pendingReview
-	for i, in := range ins {
-		if cfg.APIKey == "" {
-			results[i] = s.recordFailure(Result{Outcome: OutcomeFail, Reason: ReasonNotConfigured})
-			continue
-		}
-		reviewed, err := commandForReview(in)
-		if err != nil {
-			reason := ReasonUnparseable
-			if errors.Is(err, ErrUndecodable) {
-				reason = ReasonUndecodable
-			}
-			logger.Ctx(ctx).Warn("prepare command for review", zap.String("assetType", in.AssetType), zap.String("reason", reason), zap.Error(err))
-			results[i] = s.recordFailure(Result{Outcome: OutcomeFail, Reason: reason})
-			continue
-		}
-		command, err := RedactSensitive(in.Syntax, reviewed)
-		if err != nil {
-			logger.Ctx(ctx).Warn("redact command for review", zap.String("assetType", in.AssetType), zap.Error(err))
-			results[i] = s.recordFailure(Result{Outcome: OutcomeFail, Reason: ReasonUnparseable})
-			continue
-		}
-		if len(command) > cfg.MaxCommandLen {
-			results[i] = s.recordFailure(Result{Outcome: OutcomeFail, Reason: ReasonTooLong})
-			continue
-		}
-		key := cacheKey(cfg.BaseURL, cfg.Model, in.AssetType, cacheKeyCommand(in.Command, reviewed))
-		log := logger.Ctx(ctx).With(zap.String("assetType", in.AssetType), zap.String("reviewKey", key[:12]))
-		if cached, err := s.cache.Get(ctx, key); err != nil {
-			log.Warn("read command review cache", zap.Error(err))
-		} else if cached != nil {
-			// 缓存的是评分：按当前阈值重新判断，设置里改了阈值马上生效。
-			r := decide(cached.Model, cached.Scores, cfg.Threshold)
-			r.Cached = true
-			log.Info("command review cache hit", zap.String("outcome", string(r.Outcome)))
-			results[i] = r
-			continue
-		}
-		pending = append(pending, pendingReview{idx: i, key: key, command: command, in: in, log: log})
-	}
+// testCommand 是测试审核服务时送审的命令：只读、无害，正常的审核服务应当判它通过。
+var testCommand = Input{AssetType: "ssh", Command: "ls -la /tmp", Syntax: SyntaxShell}
 
-	type evaluation struct {
-		resp     *typesafe.Response
-		err      error
-		elapsed  time.Duration
-		attempts int
+func (s *service) Test(ctx context.Context) Result {
+	rev, failed := s.resolve(ctx, 1)
+	if failed != nil {
+		return failed[0]
 	}
-	evals := make([]evaluation, len(pending))
-	sem := make(chan struct{}, maxParallelReviews)
-	var wg sync.WaitGroup
-	for j, p := range pending {
-		wg.Add(1)
-		go func(j int, p pendingReview) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			p.log.Info("command review start", zap.String("model", cfg.Model))
-			start := time.Now()
-			resp, attempts, err := s.evaluate(ctx, cfg, p)
-			evals[j] = evaluation{resp: resp, err: err, elapsed: time.Since(start), attempts: attempts}
-		}(j, p)
-	}
-	wg.Wait()
-
-	for j, p := range pending {
-		e := evals[j]
-		if e.err != nil {
-			reason := jevreview.FailReason(e.err)
-			p.log.Warn("command review failed", zap.String("reason", reason), zap.Int("attempts", e.attempts), zap.Duration("duration", e.elapsed), zap.Error(e.err))
-			results[p.idx] = s.recordFailure(Result{Outcome: OutcomeFail, Reason: reason, Model: cfg.Model, Duration: e.elapsed, Attempts: e.attempts})
-			continue
-		}
-		s.recordSuccess()
-		scores := make(map[string]float64, len(e.resp.Answers))
-		for id, a := range e.resp.Answers {
-			scores[id] = a.Noul
-		}
-		r := decide(e.resp.Model, scores, cfg.Threshold)
-		r.Duration = e.elapsed
-		r.Attempts = e.attempts
-		p.log.Info("command review done", zap.String("outcome", string(r.Outcome)), zap.Strings("failed", r.Failed), zap.String("model", r.Model), zap.Int("attempts", e.attempts), zap.Duration("duration", e.elapsed))
-		if err := s.cache.Put(ctx, p.key, r, cacheTTL); err != nil {
-			p.log.Warn("write command review cache", zap.Error(err))
-		}
-		results[p.idx] = r
-	}
-	return results
+	return s.reviewWith(ctx, rev, []Input{testCommand}, false)[0]
 }
 
-// evaluate 为一条命令调用模型，返回结果和调用次数。每次调用的超时由设置控制，
-// 失败时按 retryable 决定是否再试，最多 maxAttempts 次。
-func (s *service) evaluate(ctx context.Context, cfg Config, p pendingReview) (*typesafe.Response, int, error) {
-	ev := s.evaluator(cfg.APIKey, cfg.BaseURL)
-	req := jevreview.Request(cfg.Model, p.in.AssetType, p.command)
-	for attempt := 1; ; attempt++ {
-		reqCtx, cancel := context.WithTimeout(ctx, cfg.Timeout)
-		resp, err := ev.Evaluate(reqCtx, req)
-		cancel()
-		if err == nil || attempt == maxAttempts || !jevreview.Retryable(ctx, err) {
-			return resp, attempt, err
-		}
-		p.log.Warn("command review attempt failed, retrying", zap.Int("attempt", attempt), zap.Error(err))
+// resolve 找出要用的审核扩展；找不到时返回 n 条同样的失败结果。
+func (s *service) resolve(ctx context.Context, n int) (ExtensionReviewer, []Result) {
+	rev, err := s.reviewer(ctx)
+	if err == nil {
+		return rev, nil
 	}
+	reason := ReasonReviewerUnavailable
+	if errors.Is(err, ErrNoReviewer) {
+		reason = ReasonNoReviewer
+	}
+	logger.Ctx(ctx).Warn("command reviewer unavailable", zap.String("reason", reason), zap.Error(err))
+	results := make([]Result, n)
+	for i := range results {
+		results[i] = s.recordFailure(Result{Outcome: OutcomeFail, Reason: reason})
+	}
+	return nil, results
 }
 
-func (s *service) TestModel(ctx context.Context, cfg Config) (string, error) {
-	if cfg.APIKey == "" {
-		return "", ErrNotConfigured
-	}
-	ctx, cancel := context.WithTimeout(ctx, cfg.Timeout)
-	defer cancel()
-	resp, err := s.evaluator(cfg.APIKey, cfg.BaseURL).Evaluate(ctx, typesafe.Request{
-		Model:     cfg.Model,
-		State:     reviewState{AssetType: "ssh", Command: "ls"},
-		Questions: map[string]typesafe.Question{QuestionDestructive: jevreview.Questions[QuestionDestructive]},
-	})
-	if err != nil {
-		return "", err
-	}
-	return resp.Model, nil
-}
-
-// decide 按阈值判断：任意一题"是"的概率达到阈值即不通过。
-func decide(model string, scores map[string]float64, threshold float64) Result {
-	r := Result{Outcome: OutcomePass, Model: model, Scores: scores, Threshold: threshold, Failed: jevreview.Failed(scores, threshold)}
-	if len(r.Failed) > 0 {
-		r.Outcome = OutcomeReject
-	}
-	return r
-}
-
-// reviewWithExtension 用当前生效的扩展审核器审核。和内置审核一样先展开解码后执行的命令、
-// 再替换敏感信息；超长命令不送审，按该条失败；其余按 maxItems 拆成多次 review_commands。
-// 一次调用失败则该批全部失败。扩展审核用不到内置审核的 API key，config 只读超时，
-// 所以 API key 解不开的错误在这里不影响审核。
-func (s *service) reviewWithExtension(ctx context.Context, rev ExtensionReviewer, ins []Input) []Result {
-	cfg, _ := s.config()
+// reviewWith 用审核扩展审核一批命令。先展开解码后执行的命令、再替换敏感信息；超长命令不送审，
+// 按该条失败；其余按 maxItems 拆成多次 review_commands。一次调用失败则该批全部失败。
+// useCache 为假时不读也不写缓存（测试审核服务用）。
+func (s *service) reviewWith(ctx context.Context, rev ExtensionReviewer, ins []Input, useCache bool) []Result {
+	timeout := s.timeout()
 	name, version, settingsHash := rev.Identity()
 	maxItems, maxLen := rev.Limits()
 	questions := rev.Questions()
@@ -499,14 +295,16 @@ func (s *service) reviewWithExtension(ctx context.Context, rev ExtensionReviewer
 			continue
 		}
 		key := extensionCacheKey(name, version, settingsHash, in.AssetType, cacheKeyCommand(in.Command, reviewed))
-		if cached, err := s.cache.Get(ctx, key); err != nil {
-			logger.Ctx(ctx).Warn("read command review cache", zap.String("extension", name), zap.Error(err))
-		} else if cached != nil {
-			cached.Cached = true
-			cached.Extension = name
-			cached.Version = version
-			results[i] = *cached
-			continue
+		if useCache {
+			if cached, err := s.cache.Get(ctx, key); err != nil {
+				logger.Ctx(ctx).Warn("read command review cache", zap.String("extension", name), zap.Error(err))
+			} else if cached != nil {
+				cached.Cached = true
+				cached.Extension = name
+				cached.Version = version
+				results[i] = *cached
+				continue
+			}
 		}
 		pending = append(pending, pendingExt{idx: i, key: key, item: extension.ReviewItem{AssetType: in.AssetType, Command: command, Syntax: string(in.Syntax)}})
 	}
@@ -539,7 +337,7 @@ func (s *service) reviewWithExtension(ctx context.Context, rev ExtensionReviewer
 			}
 			startAt := time.Now()
 			for attempt := 1; ; attempt++ {
-				reqCtx, cancel := context.WithTimeout(ctx, cfg.Timeout)
+				reqCtx, cancel := context.WithTimeout(ctx, timeout)
 				out, err := rev.Review(reqCtx, items)
 				cancel()
 				timedOut := errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil
@@ -566,11 +364,16 @@ func (s *service) reviewWithExtension(ctx context.Context, rev ExtensionReviewer
 			}
 			continue
 		}
-		s.recordSuccess()
 		for i, p := range batch {
 			r := extensionResult(name, version, questions, c.out[i], c.elapsed, c.attempts)
 			if r.Outcome == OutcomeFail {
 				results[p.idx] = s.recordFailure(r)
+				continue
+			}
+			// 扩展真的给出了判断才算恢复；只是调用成功、回答却是"API key 无效"之类不算。
+			s.recordSuccess()
+			if !useCache {
+				results[p.idx] = r
 				continue
 			}
 			if err := s.cache.Put(ctx, p.key, r, cacheTTL); err != nil {
@@ -615,16 +418,10 @@ func extensionResult(name, version string, questions []extension.ReviewQuestion,
 	return out
 }
 
-// extensionCacheKey 含扩展名、版本和设置哈希；命令部分同 cacheKey（原始命令，展开过的再带上展开后的文本）。
+// extensionCacheKey 由扩展名、版本、设置哈希、资产类型和命令算出：换了扩展、版本或设置都不命中
+// 旧结果。命令用原始命令而不是替换敏感信息后的——替换后长得一样的两条命令（比如只有密码不同）
+// 各自审核；解码展开过的再带上展开后的文本（cacheKeyCommand）。表里只存哈希，不存命令。
 func extensionCacheKey(name, version, settingsHash, assetType, command string) string {
 	h := sha256.Sum256([]byte(strings.Join([]string{name, version, settingsHash, assetType, command}, "\x00")))
-	return hex.EncodeToString(h[:])
-}
-
-// cacheKey 由服务地址、模型、题目版本、资产类型和命令算出。命令用原始命令而不是替换敏感信息后的：
-// 替换后长得一样的两条命令（比如只有密码不同）各自审核，不共用结果。解码展开过的命令还带上
-// 展开后的文本，避免展开前的评分被当成展开后的结果。表里只存哈希，不存命令。
-func cacheKey(baseURL, model, assetType, command string) string {
-	h := sha256.Sum256([]byte(strings.Join([]string{baseURL, model, jevreview.QuestionsVersion, assetType, command}, "\x00")))
 	return hex.EncodeToString(h[:])
 }

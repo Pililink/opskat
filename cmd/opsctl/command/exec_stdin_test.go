@@ -136,8 +136,8 @@ func (r *fakeReviewer) ReviewBatch(_ context.Context, ins []command_review_svc.I
 	return out
 }
 
-func (r *fakeReviewer) TestModel(context.Context, command_review_svc.Config) (string, error) {
-	return "", nil
+func (r *fakeReviewer) Test(context.Context) command_review_svc.Result {
+	return command_review_svc.Result{}
 }
 func (r *fakeReviewer) Status() command_review_svc.Status   { return command_review_svc.Status{} }
 func (r *fakeReviewer) SetConfigErrorListener(func(string)) {}

@@ -212,8 +212,8 @@ func ReviewSummary(ctx context.Context, info *aictx.ReviewInfo) string {
 	}
 }
 
-// reviewQuestionLabel 是题目的显示名：审核扩展声明了名称时按策略语言取（没有这种语言时用英文），
-// 否则是内置题目的名称，都没有就显示题目 id。
+// reviewQuestionLabel 是题目的显示名：按策略语言取审核扩展声明的名称（没有这种语言时用英文），
+// 都没有就显示题目 id。
 func reviewQuestionLabel(ctx context.Context, question string, names map[string]string) string {
 	if len(names) > 0 {
 		if policy.IsZh(ctx) && names["zh-CN"] != "" {
@@ -223,16 +223,7 @@ func reviewQuestionLabel(ctx context.Context, question string, names map[string]
 			return names["en"]
 		}
 	}
-	switch question {
-	case command_review_svc.QuestionDestructive:
-		return policy.PolicyMsg(ctx, "may destroy or irreversibly change data", "可能破坏或不可恢复地修改数据")
-	case command_review_svc.QuestionDisruptive:
-		return policy.PolicyMsg(ctx, "may interrupt services", "可能中断服务")
-	case command_review_svc.QuestionRemoteCode:
-		return policy.PolicyMsg(ctx, "downloads and runs code", "会下载并执行代码")
-	default:
-		return question
-	}
+	return question
 }
 
 func reviewFailReason(ctx context.Context, reason string) string {
@@ -258,11 +249,11 @@ var (
 // failReasons 是各种审核失败原因的说明和下一步。只有临时性的原因（超时、服务不可用）才让
 // 调用方稍后重试；命令过长、无法解析和设置问题原样重试结果一样，要告诉它该怎么改，或者留给用户。
 var failReasons = map[string]failReasonText{
-	command_review_svc.ReasonNotConfigured:    {bilingual{"the command review API key is not configured", "未配置命令审核的 API key"}, fixSettings},
-	command_review_svc.ReasonAPIKeyUnreadable: {bilingual{"the saved command review API key cannot be read", "已保存的命令审核 API key 无法读取"}, fixSettings},
-	command_review_svc.ReasonInvalidAPIKey:    {bilingual{"the command review API key is invalid", "命令审核的 API key 无效"}, fixSettings},
-	command_review_svc.ReasonTimeout:          {bilingual{"timed out", "超时"}, retryLater},
-	command_review_svc.ReasonUnavailable:      {bilingual{"service unavailable", "服务不可用"}, retryLater},
+	command_review_svc.ReasonNoReviewer:    {bilingual{"no command review extension is available", "没有可用的命令审核扩展"}, fixSettings},
+	command_review_svc.ReasonNotConfigured: {bilingual{"the command review extension is not configured", "命令审核扩展还没配置好"}, fixSettings},
+	command_review_svc.ReasonInvalidAPIKey: {bilingual{"the command review API key is invalid", "命令审核的 API key 无效"}, fixSettings},
+	command_review_svc.ReasonTimeout:       {bilingual{"timed out", "超时"}, retryLater},
+	command_review_svc.ReasonUnavailable:   {bilingual{"service unavailable", "服务不可用"}, retryLater},
 	command_review_svc.ReasonTooLong: {bilingual{"command too long", "命令过长"}, bilingual{
 		"Retrying it as-is gives the same result: shorten it or split it into several commands.",
 		"原样重试结果一样，把命令缩短或拆成几条再执行。",

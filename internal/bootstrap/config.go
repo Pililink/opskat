@@ -48,13 +48,9 @@ type AppConfig struct {
 	ExternalEditMaxReadFileSizeMB    int                    `json:"external_edit_max_read_file_size_mb,omitempty"`
 
 	// 命令的模型审核（辅助审批 / Autopilot）。桌面端和 opsctl 读同一份。
-	// 数值为 0 / 空时用 command_review_svc 的默认值。
-	CommandReviewAPIKey    string  `json:"command_review_api_key,omitempty"`  // 加密后的 API key
-	CommandReviewBaseURL   string  `json:"command_review_base_url,omitempty"` // 兼容 TypeSafe System One API 的服务地址，空为官方地址
-	CommandReviewModel     string  `json:"command_review_model,omitempty"`
-	CommandReviewTimeoutMs int     `json:"command_review_timeout_ms,omitempty"`
-	CommandReviewThreshold float64 `json:"command_review_threshold,omitempty"`
-	// CommandReviewExtension 是当前生效的审核扩展名。空表示用内置 TypeSafe 审核。
+	// CommandReviewTimeoutMs 是每次调用审核扩展的超时，0 为默认值。
+	CommandReviewTimeoutMs int `json:"command_review_timeout_ms,omitempty"`
+	// CommandReviewExtension 是选用的审核扩展名。空表示启用中的审核扩展只有一个时用它。
 	CommandReviewExtension string `json:"command_review_extension,omitempty"`
 }
 

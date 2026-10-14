@@ -26,13 +26,13 @@ func (r rejectReviewer) Review(ctx context.Context, in command_review_svc.Input)
 func (rejectReviewer) ReviewBatch(_ context.Context, ins []command_review_svc.Input) []command_review_svc.Result {
 	out := make([]command_review_svc.Result, len(ins))
 	for i := range out {
-		out[i] = command_review_svc.Result{Outcome: command_review_svc.OutcomeReject, Failed: []string{command_review_svc.QuestionDestructive}}
+		out[i] = command_review_svc.Result{Outcome: command_review_svc.OutcomeReject, Failed: []string{"destructive"}}
 	}
 	return out
 }
 
-func (rejectReviewer) TestModel(context.Context, command_review_svc.Config) (string, error) {
-	return "", nil
+func (rejectReviewer) Test(context.Context) command_review_svc.Result {
+	return command_review_svc.Result{}
 }
 func (rejectReviewer) Status() command_review_svc.Status   { return command_review_svc.Status{} }
 func (rejectReviewer) SetConfigErrorListener(func(string)) {}

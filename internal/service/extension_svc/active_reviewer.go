@@ -2,8 +2,12 @@ package extension_svc
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sort"
+	"strings"
 
+	"github.com/opskat/opskat/internal/service/command_review_svc"
 	"github.com/opskat/opskat/pkg/extension"
 )
 
@@ -126,4 +130,81 @@ func (s *Service) ListCommandReviewers(ctx context.Context, lang string) []Comma
 		out = append(out, info)
 	}
 	return out
+}
+
+var (
+	// ErrNoCommandReviewer 是没有启用中的审核扩展。
+	ErrNoCommandReviewer = errors.New("no command review extension is installed and enabled")
+	// ErrSeveralCommandReviewers 是启用了不止一个审核扩展，却没选用哪个。
+	ErrSeveralCommandReviewers = errors.New("several command review extensions are enabled; select one in settings")
+)
+
+// CommandReviewerName 是这次要用的审核扩展的名字。selected 是设置里选的，选了就用它
+// （能不能用由 ActiveCommandReviewer 检查）；没选时，启用中的审核扩展只有一个就用它。
+// 判断"是不是审核扩展"只读 manifest.json 的 capabilities.commandReview，不用加载扩展，
+// 所以 opsctl 也能这样选。
+func (s *Service) CommandReviewerName(ctx context.Context, selected string) (string, error) {
+	if selected != "" {
+		return selected, nil
+	}
+	infos, err := s.manager.ScanManifests()
+	if err != nil {
+		return "", err
+	}
+	states, err := s.stateRepo.FindAll(ctx)
+	if err != nil {
+		return "", fmt.Errorf("read extension states: %w", err)
+	}
+	disabled := make(map[string]bool, len(states))
+	for _, st := range states {
+		disabled[st.Name] = !st.Enabled
+	}
+	var names []string
+	for _, info := range infos {
+		if info.Manifest.Capabilities.CommandReview && !disabled[info.Name] {
+			names = append(names, info.Name)
+		}
+	}
+	switch len(names) {
+	case 0:
+		return "", ErrNoCommandReviewer
+	case 1:
+		return names[0], nil
+	default:
+		sort.Strings(names)
+		return "", fmt.Errorf("%w (%s)", ErrSeveralCommandReviewers, strings.Join(names, ", "))
+	}
+}
+
+// CommandReviewState 是设置页和权限模式卡片看到的审核状态。
+type CommandReviewState struct {
+	Reviewers []CommandReviewerInfo `json:"reviewers"`
+	// Selected 是设置里选的审核扩展；空表示没选（启用中的只有一个时自动用它）。
+	Selected string `json:"selected"`
+	// Active 是实际在用的审核扩展；没有可用的时为空，Problem 说明原因
+	// （与审核失败原因同名：no_reviewer / reviewer_unavailable）。
+	Active  string `json:"active"`
+	Problem string `json:"problem,omitempty"`
+}
+
+// CommandReviewState 按审核时同一套规则算出要用的审核扩展，并检查它现在能不能用。
+func (s *Service) CommandReviewState(ctx context.Context, lang, selected string) CommandReviewState {
+	st := CommandReviewState{Reviewers: s.ListCommandReviewers(ctx, lang), Selected: selected}
+	name, err := s.CommandReviewerName(ctx, selected)
+	switch {
+	case errors.Is(err, ErrNoCommandReviewer) || errors.Is(err, ErrSeveralCommandReviewers):
+		st.Problem = command_review_svc.ReasonNoReviewer
+		return st
+	case err != nil:
+		st.Problem = command_review_svc.ReasonReviewerUnavailable
+		return st
+	}
+	for _, r := range st.Reviewers {
+		if r.Name == name && r.Usable {
+			st.Active = name
+			return st
+		}
+	}
+	st.Problem = command_review_svc.ReasonReviewerUnavailable
+	return st
 }

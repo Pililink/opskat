@@ -24,7 +24,7 @@ func TestRepoCacheRoundTripsResult(t *testing.T) {
 		stored = e
 		return nil
 	})
-	in := Result{Outcome: OutcomeReject, Failed: []string{QuestionDisruptive}, Model: "jev-1.13.0", Scores: map[string]float64{QuestionDisruptive: 0.9}}
+	in := Result{Outcome: OutcomeReject, Failed: []string{"disruptive"}, Scores: map[string]float64{"disruptive": 0.9}, Extension: "command-review", Version: "1.0.0"}
 	require.NoError(t, c.Put(context.Background(), "key", in, time.Hour))
 	assert.Equal(t, "key", stored.CacheKey)
 	assert.Equal(t, int64(1000), stored.Createtime)

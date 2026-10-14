@@ -1,7 +1,8 @@
-package command_review_svc
+package jevreview
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -64,14 +66,9 @@ func TestEvalSamplesAreWellFormedAndCoverAssetTypes(t *testing.T) {
 	}
 }
 
-type noCache struct{}
-
-func (noCache) Get(context.Context, string) (*Result, error)             { return nil, nil }
-func (noCache) Put(context.Context, string, Result, time.Duration) error { return nil }
-
 // TestEvalAgainstJev 用真实的 Jev 审核全部样本并输出指标。需要 API key，平时跳过：
 //
-//	OPSKAT_TYPESAFE_EVAL_KEY=<key> go test ./internal/service/command_review_svc/ -run TestEvalAgainstJev -v -count=1
+//	OPSKAT_TYPESAFE_EVAL_KEY=<key> go test ./internal/pkg/jevreview/ -run TestEvalAgainstJev -v -count=1
 //
 // 可选：OPSKAT_TYPESAFE_EVAL_BASE_URL（默认 DefaultBaseURL）、OPSKAT_TYPESAFE_EVAL_MODEL（默认 DefaultModel）、OPSKAT_TYPESAFE_EVAL_THRESHOLD（默认 DefaultThreshold）。
 func TestEvalAgainstJev(t *testing.T) {
@@ -85,46 +82,67 @@ func TestEvalAgainstJev(t *testing.T) {
 		require.NoError(t, err)
 		threshold = f
 	}
-	cfg := NewConfig(Settings{
-		APIKey:    key,
-		BaseURL:   os.Getenv("OPSKAT_TYPESAFE_EVAL_BASE_URL"),
-		Model:     os.Getenv("OPSKAT_TYPESAFE_EVAL_MODEL"),
-		TimeoutMs: int((30 * time.Second).Milliseconds()),
-		Threshold: threshold,
-	})
-	svc := New(func() (Config, error) { return cfg, nil }, noCache{}, func(k, baseURL string) Evaluator { return typesafe.New(k, typesafe.WithBaseURL(baseURL)) }, nil)
+	baseURL := cmp.Or(os.Getenv("OPSKAT_TYPESAFE_EVAL_BASE_URL"), DefaultBaseURL)
+	model := cmp.Or(os.Getenv("OPSKAT_TYPESAFE_EVAL_MODEL"), DefaultModel)
+	client := typesafe.New(key, typesafe.WithBaseURL(baseURL))
 
 	samples := loadEvalSamples(t)
-	inputs := make([]Input, len(samples))
-	for i, s := range samples {
-		inputs[i] = Input{AssetType: s.AssetType, Command: s.Command}
+	type result struct {
+		failed   []string
+		scores   map[string]float64
+		err      error
+		duration time.Duration
 	}
-	results := svc.ReviewBatch(context.Background(), inputs)
+	results := make([]result, len(samples))
+	sem := make(chan struct{}, 4)
+	var wg sync.WaitGroup
+	for i, s := range samples {
+		wg.Add(1)
+		go func(i int, s evalSample) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			start := time.Now()
+			resp, err := client.Evaluate(ctx, Request(model, s.AssetType, s.Command))
+			r := result{err: err, duration: time.Since(start)}
+			if err == nil {
+				r.scores = map[string]float64{}
+				for id, a := range resp.Answers {
+					r.scores[id] = a.Noul
+				}
+				r.failed = Failed(r.scores, threshold)
+			}
+			results[i] = r
+		}(i, s)
+	}
+	wg.Wait()
 
 	var askTotal, askPassed, passTotal, passPassed, failed int
 	var durations []time.Duration
 	var falsePasses, falseAsks []string
 	for i, r := range results {
 		s := samples[i]
-		if r.Outcome == OutcomeFail {
+		if r.err != nil {
 			failed++
-			t.Logf("审核失败 [%s] %s: %s", s.AssetType, s.Command, r.Reason)
+			t.Logf("审核失败 [%s] %s: %s", s.AssetType, s.Command, FailReason(r.err))
 			continue
 		}
-		durations = append(durations, r.Duration)
-		passed := r.Outcome == OutcomePass
+		durations = append(durations, r.duration)
+		passed := len(r.failed) == 0
 		if s.Expect == "ask" {
 			askTotal++
 			if passed {
 				askPassed++
-				falsePasses = append(falsePasses, fmt.Sprintf("[%s/%s] %s %v", s.AssetType, s.Category, s.Command, r.Scores))
+				falsePasses = append(falsePasses, fmt.Sprintf("[%s/%s] %s %v", s.AssetType, s.Category, s.Command, r.scores))
 			}
 		} else {
 			passTotal++
 			if passed {
 				passPassed++
 			} else {
-				falseAsks = append(falseAsks, fmt.Sprintf("[%s/%s] %s failed=%v", s.AssetType, s.Category, s.Command, r.Failed))
+				falseAsks = append(falseAsks, fmt.Sprintf("[%s/%s] %s failed=%v", s.AssetType, s.Category, s.Command, r.failed))
 			}
 		}
 	}
@@ -142,7 +160,7 @@ func TestEvalAgainstJev(t *testing.T) {
 		return durations[int(q*float64(len(durations)-1))]
 	}
 
-	t.Logf("模型 %s，阈值 %.2f，样本 %d 条，审核失败 %d 条", cfg.Model, threshold, len(samples), failed)
+	t.Logf("模型 %s，阈值 %.2f，样本 %d 条，审核失败 %d 条", model, threshold, len(samples), failed)
 	t.Logf("本该问人却审核通过：%d / %d（%.1f%%）", askPassed, askTotal, pct(askPassed, askTotal))
 	t.Logf("可以自动执行且审核通过：%d / %d（%.1f%%）", passPassed, passTotal, pct(passPassed, passTotal))
 	t.Logf("单条耗时 p50 %s，p95 %s", quantile(0.5), quantile(0.95))

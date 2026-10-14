@@ -27,7 +27,7 @@ func TestRequireCpBatchApprovalKeepsReviewForAudit(t *testing.T) {
 			setAssetPermissionMode(t, env, "web-1", policyent.PermissionModeAssisted)
 
 			reviewer := &fakeReviewer{result: command_review_svc.Result{
-				Outcome: command_review_svc.OutcomeReject, Failed: []string{command_review_svc.QuestionDestructive},
+				Outcome: command_review_svc.OutcomeReject, Failed: []string{"destructive"},
 			}}
 			origReviewer := command_review_svc.Default()
 			command_review_svc.Register(reviewer)

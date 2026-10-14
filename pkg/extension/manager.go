@@ -160,6 +160,13 @@ func (m *Manager) GetExtension(name string) *Extension {
 	return m.extensions[name]
 }
 
+// PutForTest 把一个已构造的扩展放进管理器，只供测试构造“已加载”状态。
+func (m *Manager) PutForTest(ext *Extension) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.extensions[ext.Name] = ext
+}
+
 func (m *Manager) ListExtensions() []*Extension {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

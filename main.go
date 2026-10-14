@@ -438,6 +438,7 @@ func initExtensionSystem(
 	)
 
 	extB.SetService(extSvc)
+	bootstrap.SetExtensionService(extSvc)
 	aiB.SetExtensionService(extSvc)
 	opsctlB.SetExtToolExecutor(desktopExecExecutor{})
 	opsctlB.SetExtDevInstaller(desktopExtDevInstaller{ext: extB})

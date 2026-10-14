@@ -54,6 +54,8 @@ type AppConfig struct {
 	CommandReviewModel     string  `json:"command_review_model,omitempty"`
 	CommandReviewTimeoutMs int     `json:"command_review_timeout_ms,omitempty"`
 	CommandReviewThreshold float64 `json:"command_review_threshold,omitempty"`
+	// CommandReviewExtension 是当前生效的审核扩展名。空表示用内置 TypeSafe 审核。
+	CommandReviewExtension string `json:"command_review_extension,omitempty"`
 }
 
 // ExternalEditorConfig 是用户自定义外部编辑器配置。

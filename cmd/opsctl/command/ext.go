@@ -12,6 +12,7 @@ import (
 	"github.com/opskat/opskat/internal/bootstrap"
 	"github.com/opskat/opskat/internal/extreg"
 	"github.com/opskat/opskat/internal/repository/extension_state_repo"
+	"github.com/opskat/opskat/internal/service/extension_svc"
 	"github.com/opskat/opskat/pkg/extension"
 
 	"github.com/cago-frame/cago/pkg/logger"
@@ -153,6 +154,9 @@ func scanExtensionDirs() ([]scannedExtension, error) {
 // is reported the same way — it is a real, fixable degradation ("load it once in the
 // desktop app"), not something to swallow into a later "unknown asset type".
 func registerExtensionAssetTypes() {
+	// 审核器的来源与摘要检查需要扩展服务。这里不加载 WASM；真正实例化留给审核调用。
+	mgr := extension.NewManager(extensionsDirFn(), func(string) extension.HostProvider { return nil }, logger.Default())
+	bootstrap.SetExtensionService(extension_svc.New(mgr, extension_state_repo.ExtensionState(), nil, nil, logger.Default(), nil, nil))
 	scanned, err := scanExtensionDirs()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)

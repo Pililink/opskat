@@ -15,6 +15,7 @@ import (
 
 	"github.com/cago-frame/cago/pkg/logger"
 	"github.com/opskat/opskat/internal/pkg/typesafe"
+	"github.com/opskat/opskat/pkg/extension"
 	"go.uber.org/zap"
 )
 
@@ -99,6 +100,8 @@ const (
 	ReasonTimeout       = "timeout"
 	ReasonInvalidAPIKey = "invalid_api_key"
 	ReasonUnavailable   = "unavailable"
+	// ReasonInvalidResult 是扩展返回了不合规的整批结果。
+	ReasonInvalidResult = "invalid_result"
 )
 
 // Input 是一次审核的输入。Syntax 决定怎样找出命令里的敏感信息（见 RedactSensitive）。
@@ -119,6 +122,19 @@ type Result struct {
 	Duration  time.Duration      `json:"duration,omitempty"`
 	Cached    bool               `json:"cached,omitempty"`
 	Attempts  int                `json:"attempts,omitempty"` // 调用模型的次数，超时或连接出错时会重试
+	// Extension / Version 是做出这次判断的审核扩展。内置 TypeSafe 审核为空。
+	Extension string `json:"extension,omitempty"`
+	Version   string `json:"version,omitempty"`
+}
+
+// ExtensionReviewer 是当前生效的扩展审核器。没有选中时返回 nil，审核走内置 TypeSafe。
+type ExtensionReviewer interface {
+	// Identity 是扩展名、版本和设置哈希。设置哈希参与缓存键。
+	Identity() (name, version, settingsHash string)
+	// Limits 是 describe() 声明的单批条数和单条命令最大长度。
+	Limits() (maxItems, maxCommandLen int)
+	Questions() []string
+	Review(ctx context.Context, items []extension.ReviewItem) ([]extension.ReviewCommandResult, error)
 }
 
 // Config 是审核设置。APIKey 为空表示没有配置。
@@ -167,6 +183,8 @@ type service struct {
 	config    func() Config
 	cache     Cache
 	evaluator func(apiKey, baseURL string) Evaluator
+	// extension 每次审核时读取当前生效的扩展审核器。nil 函数表示没有接扩展。
+	extension func() ExtensionReviewer
 
 	mu       sync.Mutex
 	status   Status
@@ -195,6 +213,11 @@ func NewConfig(apiKey, baseURL, model string, timeoutMs int, threshold float64) 
 // New 创建审核服务。config 每次审核时读取，设置修改后立即生效。
 func New(config func() Config, cache Cache, evaluator func(apiKey, baseURL string) Evaluator) Service {
 	return &service{config: config, cache: cache, evaluator: evaluator, notified: map[string]bool{}}
+}
+
+// SetExtensionReviewer 安装“当前生效审核器”的读取函数。选中的扩展变化后下次审核即生效。
+func (s *service) SetExtensionReviewer(fn func() ExtensionReviewer) {
+	s.extension = fn
 }
 
 func (s *service) Status() Status {
@@ -263,6 +286,15 @@ type pendingReview struct {
 // ReviewBatch 审核多条命令，结果与输入一一对应。读写缓存按顺序做（SQLite 不适合并发写），
 // 只有调用模型这一步并行，最多 maxParallelReviews 条同时进行。
 func (s *service) ReviewBatch(ctx context.Context, ins []Input) []Result {
+	if s.extension != nil {
+		if rev := s.extension(); rev != nil {
+			return s.reviewWithExtension(ctx, rev, ins)
+		}
+	}
+	return s.reviewWithBuiltin(ctx, ins)
+}
+
+func (s *service) reviewWithBuiltin(ctx context.Context, ins []Input) []Result {
 	cfg := s.config()
 	results := make([]Result, len(ins))
 	var pending []pendingReview
@@ -414,6 +446,112 @@ func failReason(err error) string {
 	default:
 		return ReasonUnavailable
 	}
+}
+
+// reviewWithExtension 用当前生效的扩展审核器审核。超长命令不送审，按该条失败；
+// 其余按 maxItems 拆成多次 review_commands。一次调用失败则该批全部失败。
+func (s *service) reviewWithExtension(ctx context.Context, rev ExtensionReviewer, ins []Input) []Result {
+	cfg := s.config()
+	name, version, settingsHash := rev.Identity()
+	maxItems, maxLen := rev.Limits()
+	if maxItems <= 0 {
+		maxItems = 1
+	}
+	if maxLen <= 0 {
+		maxLen = cfg.MaxCommandLen
+	}
+	results := make([]Result, len(ins))
+	type pendingExt struct {
+		idx     int
+		item    extension.ReviewItem
+		key     string
+	}
+	var pending []pendingExt
+	for i, in := range ins {
+		command, err := RedactSensitive(in.Syntax, in.Command)
+		if err != nil {
+			logger.Ctx(ctx).Warn("redact command for review", zap.String("assetType", in.AssetType), zap.Error(err))
+			results[i] = s.recordFailure(Result{Outcome: OutcomeFail, Reason: ReasonUnparseable, Extension: name, Version: version})
+			continue
+		}
+		if len(command) > maxLen {
+			results[i] = s.recordFailure(Result{Outcome: OutcomeFail, Reason: ReasonTooLong, Extension: name, Version: version})
+			continue
+		}
+		key := extensionCacheKey(name, version, settingsHash, in.AssetType, in.Command)
+		if cached, err := s.cache.Get(ctx, key); err != nil {
+			logger.Ctx(ctx).Warn("read command review cache", zap.String("extension", name), zap.Error(err))
+		} else if cached != nil {
+			cached.Cached = true
+			cached.Extension = name
+			cached.Version = version
+			results[i] = *cached
+			continue
+		}
+		pending = append(pending, pendingExt{idx: i, key: key, item: extension.ReviewItem{AssetType: in.AssetType, Command: command, Syntax: string(in.Syntax)}})
+	}
+
+	for start := 0; start < len(pending); start += maxItems {
+		end := start + maxItems
+		if end > len(pending) {
+			end = len(pending)
+		}
+		batch := pending[start:end]
+		items := make([]extension.ReviewItem, len(batch))
+		for i, p := range batch {
+			items[i] = p.item
+		}
+		reqCtx, cancel := context.WithTimeout(ctx, cfg.Timeout)
+		startAt := time.Now()
+		out, err := rev.Review(reqCtx, items)
+		elapsed := time.Since(startAt)
+		cancel()
+		if err != nil || len(out) != len(batch) {
+			reason := ReasonInvalidResult
+			if errors.Is(err, context.DeadlineExceeded) {
+				reason = ReasonTimeout
+			}
+			logger.Ctx(ctx).Warn("extension command review failed", zap.String("extension", name), zap.String("reason", reason), zap.Error(err))
+			for _, p := range batch {
+				results[p.idx] = s.recordFailure(Result{Outcome: OutcomeFail, Reason: reason, Extension: name, Version: version, Duration: elapsed, Attempts: 1})
+			}
+			continue
+		}
+		s.recordSuccess()
+		for i, p := range batch {
+			r := extensionResult(name, version, out[i], elapsed)
+			if err := s.cache.Put(ctx, p.key, r, cacheTTL); err != nil {
+				logger.Ctx(ctx).Warn("write command review cache", zap.String("extension", name), zap.Error(err))
+			}
+			results[p.idx] = r
+		}
+	}
+	return results
+}
+
+func extensionResult(name, version string, r extension.ReviewCommandResult, elapsed time.Duration) Result {
+	out := Result{
+		Outcome:   Outcome(r.Outcome),
+		Reason:    r.Reason,
+		Failed:    r.Failed,
+		Extension: name,
+		Version:   version,
+		Duration:  elapsed,
+		Attempts:  1,
+	}
+	if r.Score != nil {
+		out.Scores = map[string]float64{}
+		for _, id := range r.Failed {
+			out.Scores[id] = *r.Score
+		}
+	}
+	return out
+}
+
+// extensionCacheKey 含扩展名、版本和设置哈希。用原始命令而不是替换后的。
+func extensionCacheKey(name, version, settingsHash, assetType, command string) string {
+	h := sha256.Sum256([]byte(strings.Join([]string{name, version, settingsHash, assetType, command}, "\x00")))
+	return hex.EncodeToString(h[:])
 }
 
 // cacheKey 由服务地址、模型、题目版本、资产类型和原始命令算出。用原始命令而不是替换后的：

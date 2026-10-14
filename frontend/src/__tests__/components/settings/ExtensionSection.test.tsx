@@ -85,4 +85,39 @@ describe("ExtensionSection detail", () => {
     await screen.findByRole("dialog");
     expect(useSettingsUiStore.getState().extensionDetail).toBeNull();
   });
+
+  // 纯审核扩展没有工具、策略组和页面：不显示三栏"无"，而是列出它审核哪几类危险。
+  it("shows a review extension's questions instead of empty tools, policies and pages", async () => {
+    const ext = installed("command-review", "");
+    await openDetail({
+      ...ext,
+      manifest: {
+        ...ext.manifest,
+        capabilities: { commandReview: true },
+        reviewer: {
+          questions: [
+            { id: "destructive", i18n: { name: { en: "may destroy data", "zh-CN": "可能破坏数据" } } },
+            { id: "disruptive", i18n: { name: { en: "may interrupt services", "zh-CN": "可能中断服务" } } },
+          ],
+        },
+      },
+    });
+    const questions = screen.getByTestId("extension-review-questions");
+    expect(questions).toHaveTextContent("may destroy data");
+    expect(questions).toHaveTextContent("may interrupt services");
+    expect(screen.queryByText("extension.noTools")).toBeNull();
+    expect(screen.queryByText("extension.noPolicies")).toBeNull();
+    expect(screen.queryByText("extension.noPages")).toBeNull();
+  });
+
+  it("still lists the tools of an extension that has them", async () => {
+    const ext = installed("es", "");
+    await openDetail({
+      ...ext,
+      manifest: { ...ext.manifest, tools: [{ name: "search", i18n: { description: "Search an index" } }] },
+    });
+    expect(screen.getByText("extension.tools")).toBeInTheDocument();
+    expect(screen.getByText("search")).toBeInTheDocument();
+    expect(screen.queryByTestId("extension-review-questions")).toBeNull();
+  });
 });

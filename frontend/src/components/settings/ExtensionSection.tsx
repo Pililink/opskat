@@ -62,6 +62,7 @@ import { syncExtensionUpdates, useExtensionUpdates } from "./extensionUpdates";
 import { Segmented } from "@/components/asset/fields";
 import { ExtensionSettingsForm } from "@/components/settings/ExtensionSettingsForm";
 import { useSettingsUiStore } from "@/stores/settingsUiStore";
+import { localizedName } from "@/lib/commandReview";
 import type { ExtCapabilities } from "@/extension/types";
 
 interface ExtInfo {
@@ -419,7 +420,7 @@ function UpdateAction({ card, install, onUpdate }: { card: StoreCard; install?: 
 }
 
 function ExtensionDetail({ ext }: { ext: ExtInfo }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const manifest = ext.manifest as Record<string, any> | undefined;
   const tools: { name: string; i18n?: { description?: string } }[] = manifest?.tools || [];
@@ -428,6 +429,8 @@ function ExtensionDetail({ ext }: { ext: ExtInfo }) {
   const pages: { id: string; i18n?: { name?: string }; slot?: string }[] = manifest?.frontend?.pages || [];
   const credentialsRead = ext.manifest?.capabilities?.credentials === "read";
   const commandReview = ext.manifest?.capabilities?.commandReview === true;
+  const reviewQuestions: { id: string; i18n?: { name?: Record<string, string> } }[] =
+    manifest?.reviewer?.questions || [];
   // 扩展在 describe() 里声明的设置项；停用的扩展没有加载，读不到设置。
   const hasSettings = ext.enabled && !!manifest?.settingsSchema;
 
@@ -470,67 +473,78 @@ function ExtensionDetail({ ext }: { ext: ExtInfo }) {
         </>
       )}
 
-      <Separator />
-
-      {/* Tools */}
-      <div>
-        <h4 className="text-sm font-medium mb-2">{t("extension.tools")}</h4>
-        {tools.length === 0 ? (
-          <p className="text-xs text-muted-foreground">{t("extension.noTools")}</p>
-        ) : (
-          <div className="space-y-1">
-            {tools.map((tool) => (
-              <div key={tool.name} className="flex justify-between text-xs p-2 rounded bg-muted/50">
-                <span className="font-mono">{tool.name}</span>
-                <span className="text-muted-foreground ml-2 text-right">{tool.i18n?.description || ""}</span>
-              </div>
-            ))}
+      {/* 只显示这个扩展真有的东西：纯审核扩展没有工具、策略组和页面，只有它审核的几类危险。 */}
+      {reviewQuestions.length > 0 && (
+        <>
+          <Separator />
+          <div>
+            <h4 className="text-sm font-medium mb-2">{t("extension.reviewQuestions")}</h4>
+            <ul data-testid="extension-review-questions" className="space-y-1">
+              {reviewQuestions.map((q) => (
+                <li key={q.id} className="text-xs p-2 rounded bg-muted/50">
+                  {localizedName(q.i18n?.name, i18n.language) ?? q.id}
+                </li>
+              ))}
+            </ul>
           </div>
-        )}
-      </div>
+        </>
+      )}
 
-      <Separator />
-
-      {/* Policy Groups */}
-      <div>
-        <h4 className="text-sm font-medium mb-2">{t("extension.policies")}</h4>
-        {policyGroups.length === 0 ? (
-          <p className="text-xs text-muted-foreground">{t("extension.noPolicies")}</p>
-        ) : (
-          <div className="space-y-1">
-            {policyGroups.map((pg) => (
-              <div key={pg.id} className="text-xs p-2 rounded bg-muted/50">
-                <span className="font-medium">{pg.i18n?.name || pg.id}</span>
-                {pg.policy && (
-                  <div className="mt-1 text-muted-foreground">
-                    {pg.policy.allow_list && <span>Allow: {pg.policy.allow_list.join(", ")}</span>}
-                    {pg.policy.deny_list && <span className="ml-2">Deny: {pg.policy.deny_list.join(", ")}</span>}
-                  </div>
-                )}
-              </div>
-            ))}
+      {tools.length > 0 && (
+        <>
+          <Separator />
+          <div>
+            <h4 className="text-sm font-medium mb-2">{t("extension.tools")}</h4>
+            <div className="space-y-1">
+              {tools.map((tool) => (
+                <div key={tool.name} className="flex justify-between text-xs p-2 rounded bg-muted/50">
+                  <span className="font-mono">{tool.name}</span>
+                  <span className="text-muted-foreground ml-2 text-right">{tool.i18n?.description || ""}</span>
+                </div>
+              ))}
+            </div>
           </div>
-        )}
-      </div>
+        </>
+      )}
 
-      <Separator />
-
-      {/* Pages */}
-      <div>
-        <h4 className="text-sm font-medium mb-2">{t("extension.pages")}</h4>
-        {pages.length === 0 ? (
-          <p className="text-xs text-muted-foreground">{t("extension.noPages")}</p>
-        ) : (
-          <div className="space-y-1">
-            {pages.map((page) => (
-              <div key={page.id} className="flex justify-between text-xs p-2 rounded bg-muted/50">
-                <span>{page.i18n?.name || page.id}</span>
-                <span className="text-muted-foreground font-mono">{page.slot || "-"}</span>
-              </div>
-            ))}
+      {policyGroups.length > 0 && (
+        <>
+          <Separator />
+          <div>
+            <h4 className="text-sm font-medium mb-2">{t("extension.policies")}</h4>
+            <div className="space-y-1">
+              {policyGroups.map((pg) => (
+                <div key={pg.id} className="text-xs p-2 rounded bg-muted/50">
+                  <span className="font-medium">{pg.i18n?.name || pg.id}</span>
+                  {pg.policy && (
+                    <div className="mt-1 text-muted-foreground">
+                      {pg.policy.allow_list && <span>Allow: {pg.policy.allow_list.join(", ")}</span>}
+                      {pg.policy.deny_list && <span className="ml-2">Deny: {pg.policy.deny_list.join(", ")}</span>}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
-        )}
-      </div>
+        </>
+      )}
+
+      {pages.length > 0 && (
+        <>
+          <Separator />
+          <div>
+            <h4 className="text-sm font-medium mb-2">{t("extension.pages")}</h4>
+            <div className="space-y-1">
+              {pages.map((page) => (
+                <div key={page.id} className="flex justify-between text-xs p-2 rounded bg-muted/50">
+                  <span>{page.i18n?.name || page.id}</span>
+                  <span className="text-muted-foreground font-mono">{page.slot || "-"}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

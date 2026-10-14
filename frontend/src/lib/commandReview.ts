@@ -46,12 +46,16 @@ const REVIEW_FAIL_REASONS: readonly string[] = [
  * 否则是内置题目的名称，都没有就显示题目 id。
  */
 export function questionLabel(t: TFunction, review: ReviewInfo, question: string, lang: string): string {
-  const names = review.failed_names?.[question];
-  if (names) {
-    if (lang.startsWith("zh") && names["zh-CN"]) return names["zh-CN"];
-    if (names.en) return names.en;
-  }
+  const name = localizedName(review.failed_names?.[question], lang);
+  if (name) return name;
   return REVIEW_QUESTIONS.includes(question) ? t(`commandReview.question.${question}`) : question;
+}
+
+/** 审核扩展声明的题目名称按界面语言取：中文界面优先 zh-CN，否则用英文；都没有时为 undefined。 */
+export function localizedName(names: Record<string, string> | undefined, lang: string): string | undefined {
+  if (!names) return undefined;
+  if (lang.startsWith("zh") && names["zh-CN"]) return names["zh-CN"];
+  return names.en || undefined;
 }
 
 /** 把审核结果写成一句话，例如"模型审核未通过（可能中断服务）"。lang 是界面语言，用来取审核扩展声明的题目名称。 */

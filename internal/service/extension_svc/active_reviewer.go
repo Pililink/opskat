@@ -91,3 +91,35 @@ func (s *Service) loadReviewer(ctx context.Context, name string) (*extension.Ext
 	}
 	return s.manager.GetExtension(name), nil
 }
+
+// CommandReviewerInfo 是设置页列出的一个审核扩展。
+type CommandReviewerInfo struct {
+	Name        string `json:"name"`
+	DisplayName string `json:"displayName"`
+	Version     string `json:"version"`
+	// Usable 表示现在能当审核器；不能时 Reason 说明原因（已停用、包摘要不符、正式版只认商店安装等）。
+	Usable bool   `json:"usable"`
+	Reason string `json:"reason,omitempty"`
+	// Signed 表示从官方商店安装、签名已校验；非正式版上本地安装的审核器可用但不是签名的。
+	Signed bool `json:"signed"`
+}
+
+// ListCommandReviewers 列出已加载的审核扩展及其能否使用，供设置页选择。
+func (s *Service) ListCommandReviewers(ctx context.Context, lang string) []CommandReviewerInfo {
+	var out []CommandReviewerInfo
+	for _, ext := range s.manager.ListExtensions() {
+		if !ext.Manifest.IsCommandReviewer() {
+			continue
+		}
+		localized := ext.Manifest.Localized(func(key string) string { return ext.Translate(lang, key) })
+		info := CommandReviewerInfo{Name: ext.Name, DisplayName: localized.I18n.DisplayName, Version: ext.Manifest.Version}
+		signed, err := s.reviewerProvenance(ctx, ext.Name, ext.Dir, ext.Manifest.Backend.Binary)
+		if err != nil {
+			info.Reason = err.Error()
+		} else {
+			info.Usable, info.Signed = true, signed
+		}
+		out = append(out, info)
+	}
+	return out
+}

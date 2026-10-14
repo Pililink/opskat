@@ -113,3 +113,20 @@ func TestSaveExtensionSettingsKeepsSecretWhenLeftBlank(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "n3w", secrets["token"])
 }
+
+// 设置表单读回时只知道密钥"已设置"，拿不到密文或明文。
+func TestSettingsViewHidesSecrets(t *testing.T) {
+	svc := settingsService(t)
+	ctx := context.Background()
+	require.NoError(t, svc.SaveExtensionSettings(ctx, "rev", map[string]string{
+		"endpoint": "https://review.example.com", "token": "s3cret",
+	}, func(plain string) (string, error) { return "enc:" + plain, nil }))
+
+	view, err := svc.SettingsView(ctx, "rev", "en")
+	require.NoError(t, err)
+	assert.Equal(t, "https://review.example.com", view.Values["endpoint"])
+	_, has := view.Values["token"]
+	assert.False(t, has)
+	assert.Equal(t, []string{"token"}, view.SecretsSet)
+	assert.NotNil(t, view.Schema)
+}

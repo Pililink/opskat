@@ -58,21 +58,31 @@ func (s *Service) recordProvenance(ctx context.Context, name, source, sha256 str
 	return nil
 }
 
-// CheckReviewerProvenance 重算已安装扩展的 WASM 摘要，并按当前构建判断能否当审核器。
-// 摘要不符或来源不合格时返回错误，调用方按审核失败处理。
+// CheckReviewerProvenance 重算已安装扩展的包摘要，并按当前构建判断能否当审核器。
+// 非正式版上本地安装、未经签名的审核器可以用；摘要不符或来源不合格时返回错误，调用方按审核失败处理。
 func (s *Service) CheckReviewerProvenance(ctx context.Context, name, dir, binary string) error {
+	_, err := s.reviewerProvenance(ctx, name, dir, binary)
+	return err
+}
+
+// reviewerProvenance 同 CheckReviewerProvenance，另外报告审核器是否经过官方签名。
+func (s *Service) reviewerProvenance(ctx context.Context, name, dir, binary string) (signed bool, err error) {
 	sum, err := extension.PackageSHA256(dir, binary)
 	if err != nil {
-		return err
+		return false, err
 	}
 	state, err := s.stateRepo.Find(ctx, name)
 	if err != nil {
-		return fmt.Errorf("command reviewer %q has no install record: %w", name, err)
+		return false, fmt.Errorf("command reviewer %q has no install record: %w", name, err)
 	}
-	if err := reviewerEligible(state, sum, currentApp()); err != nil {
+	err = reviewerEligible(state, sum, currentApp())
+	if errors.Is(err, ErrReviewerUnsigned) {
+		return false, nil
+	}
+	if err != nil {
 		logger.Ctx(ctx).Warn("command reviewer provenance rejected",
 			zap.String("extension", name), zap.String("source", state.Source), zap.Error(err))
-		return err
+		return false, err
 	}
-	return nil
+	return true, nil
 }

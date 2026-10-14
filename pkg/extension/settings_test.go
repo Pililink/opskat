@@ -69,3 +69,25 @@ func TestParseDescriptorSettingsSchema(t *testing.T) {
 		t.Fatalf("endpoint fields: %v", got)
 	}
 }
+
+func TestLocalizedTranslatesSettingsSchema(t *testing.T) {
+	m := &Manifest{SettingsSchema: map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"token": map[string]any{"type": "string", "format": "password", "title": "settings.token"},
+		},
+	}}
+	got := m.Localized(func(key string) string {
+		if key == "settings.token" {
+			return "API key"
+		}
+		return key
+	})
+	title := got.SettingsSchema["properties"].(map[string]any)["token"].(map[string]any)["title"]
+	if title != "API key" {
+		t.Fatalf("settings title not localized: %v", title)
+	}
+	if m.SettingsSchema["properties"].(map[string]any)["token"].(map[string]any)["title"] != "settings.token" {
+		t.Fatal("Localized must not modify the original schema")
+	}
+}

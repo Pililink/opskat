@@ -146,3 +146,37 @@ func (s *Service) loadSettings(ctx context.Context, name string) (map[string]str
 	}
 	return stored.Values, schema, nil
 }
+
+// ExtensionSettingsView 是设置表单读到的扩展设置：密钥字段不回值，只在 SecretsSet 里报告已设置。
+type ExtensionSettingsView struct {
+	Schema     map[string]any    `json:"schema"`
+	Values     map[string]string `json:"values"`
+	SecretsSet []string          `json:"secretsSet"`
+}
+
+// SettingsView 返回 name 的设置表单：按 lang 本地化的 schema、非密钥字段的值和已设置的密钥字段。
+func (s *Service) SettingsView(ctx context.Context, name, lang string) (*ExtensionSettingsView, error) {
+	ext := s.manager.GetExtension(name)
+	if ext == nil || ext.Manifest.SettingsSchema == nil {
+		return nil, fmt.Errorf("extension %q has no settings schema", name)
+	}
+	stored, _, err := s.loadSettings(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	localized := ext.Manifest.Localized(func(key string) string { return ext.Translate(lang, key) })
+	view := &ExtensionSettingsView{Schema: localized.SettingsSchema, Values: map[string]string{}, SecretsSet: []string{}}
+	secrets := map[string]struct{}{}
+	for _, f := range extension.PasswordFieldsFromSchema(ext.Manifest.SettingsSchema) {
+		secrets[f] = struct{}{}
+		if stored[f] != "" {
+			view.SecretsSet = append(view.SecretsSet, f)
+		}
+	}
+	for k, v := range stored {
+		if _, secret := secrets[k]; !secret {
+			view.Values[k] = v
+		}
+	}
+	return view, nil
+}

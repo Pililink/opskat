@@ -421,6 +421,10 @@ func (m *Manifest) Localized(tr func(key string) string) *Manifest {
 		}
 	}
 
+	if m.SettingsSchema != nil {
+		out.SettingsSchema = localizeConfigSchema(m.SettingsSchema, tr)
+	}
+
 	if len(m.Tools) > 0 {
 		out.Tools = make([]ToolDef, len(m.Tools))
 		for i, t := range m.Tools {

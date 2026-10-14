@@ -6,9 +6,11 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/opskat/opskat/internal/model/entity/extension_state_entity"
+	"github.com/opskat/opskat/internal/pkg/appversion"
 	"github.com/opskat/opskat/pkg/extension"
 )
 
@@ -145,4 +147,32 @@ func TestActiveCommandReviewerWithoutOnDemandRequiresLoaded(t *testing.T) {
 	svc := &Service{manager: mgr, stateRepo: repo, logger: nopLogger()}
 	_, err := svc.ActiveCommandReviewer(context.Background(), "rev")
 	require.Error(t, err)
+}
+
+// 非正式版上本地安装的审核器可以用，只是标"未经签名"；正式版上不能用。
+func TestActiveCommandReviewerAcceptsUnsignedOnNonRelease(t *testing.T) {
+	root := t.TempDir()
+	sum := writeReviewerPackage(t, root, "rev")
+	mgr := extension.NewManager(root, func(string) extension.HostProvider { return nil }, nopLogger())
+	mgr.PutForTest(reviewerExtension("rev", mgr.ExtDir("rev")))
+	repo := &memStateRepo{rows: map[string]*extension_state_entity.ExtensionState{
+		"rev": {Name: "rev", Enabled: true, Source: InstallOriginLocal, PackageSHA256: sum},
+	}}
+	svc := &Service{manager: mgr, stateRepo: repo, logger: nopLogger()}
+
+	useApp(t, appversion.Info{Kind: appversion.KindNightly, Version: "1.0.0-nightly.1"})
+	_, err := svc.ActiveCommandReviewer(context.Background(), "rev")
+	require.NoError(t, err)
+	list := svc.ListCommandReviewers(context.Background(), "en")
+	require.Len(t, list, 1)
+	assert.True(t, list[0].Usable)
+	assert.False(t, list[0].Signed)
+
+	useApp(t, appversion.Info{Kind: appversion.KindRelease, Version: "1.0.0"})
+	_, err = svc.ActiveCommandReviewer(context.Background(), "rev")
+	require.Error(t, err)
+	list = svc.ListCommandReviewers(context.Background(), "en")
+	require.Len(t, list, 1)
+	assert.False(t, list[0].Usable)
+	assert.NotEmpty(t, list[0].Reason)
 }

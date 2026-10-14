@@ -30,6 +30,8 @@ const (
 	CapCredentials   = "credentials"
 	CapTunnel        = "tunnel"
 	CapAssetEndpoint = "network.assetEndpoint"
+	// CapCommandReview 表示扩展可以自动放行命令。安装确认单独列出它。
+	CapCommandReview = "commandReview"
 )
 
 // CapabilityGrant is one grant an extension asks for. Value is the path / URL
@@ -151,6 +153,9 @@ func capabilityGrants(c extension.Capabilities) []CapabilityGrant {
 	}
 	if c.Network.AssetEndpoint {
 		out = append(out, CapabilityGrant{Kind: CapAssetEndpoint})
+	}
+	if c.CommandReview {
+		out = append(out, CapabilityGrant{Kind: CapCommandReview})
 	}
 	return out
 }

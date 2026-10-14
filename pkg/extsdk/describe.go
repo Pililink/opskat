@@ -21,6 +21,7 @@ type descriptor struct {
 	Policies   descPolicies    `json:"policies"`
 	Frontend   *descFrontend   `json:"frontend,omitempty"`
 	Snippets   *descSnippets   `json:"snippets,omitempty"`
+	Reviewer   *descReviewer   `json:"reviewer,omitempty"`
 }
 
 type descI18n struct {
@@ -101,6 +102,21 @@ type descSnippetCategory struct {
 	I18n      descName `json:"i18n"`
 }
 
+type descReviewer struct {
+	Questions     []descReviewQuestion `json:"questions"`
+	MaxItems      int                  `json:"maxItems"`
+	MaxCommandLen int                  `json:"maxCommandLen"`
+}
+
+type descReviewQuestion struct {
+	ID   string         `json:"id"`
+	I18n descReviewName `json:"i18n"`
+}
+
+type descReviewName struct {
+	Name map[string]string `json:"name"`
+}
+
 type descSeed struct {
 	Key         string `json:"key"`
 	Name        string `json:"name"`
@@ -169,6 +185,14 @@ func dispatchDescribe() (json.RawMessage, error) {
 			})
 		}
 		d.Frontend = fe
+	}
+
+	if commandReviewer != nil {
+		rev := &descReviewer{MaxItems: commandReviewer.maxItems, MaxCommandLen: commandReviewer.maxCommandLen}
+		for _, q := range commandReviewer.questions {
+			rev.Questions = append(rev.Questions, descReviewQuestion{ID: q.ID, I18n: descReviewName{Name: q.Name}})
+		}
+		d.Reviewer = rev
 	}
 
 	if len(snippetCats) > 0 || len(snippetSeeds) > 0 {

@@ -574,4 +574,5 @@ func resetRegistries() {
 	snippetSeeds = nil
 	actions = map[string]ActionHandler{}
 	configValidator = nil
+	commandReviewer = nil
 }

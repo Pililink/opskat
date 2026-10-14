@@ -27,6 +27,8 @@ type Descriptor struct {
 	Policies   PoliciesDef    `json:"policies"`
 	Frontend   FrontendDef    `json:"frontend"`
 	Snippets   SnippetsDef    `json:"snippets"`
+	// Reviewer is present only when the guest registered a command reviewer.
+	Reviewer *ReviewerDef `json:"reviewer,omitempty"`
 }
 
 // ParseDescriptor decodes and validates a describe() payload.
@@ -55,7 +57,10 @@ func (d *Descriptor) validate() error {
 	if err := d.validatePolicyGroups(); err != nil {
 		return err
 	}
-	return d.validateSnippets()
+	if err := d.validateSnippets(); err != nil {
+		return err
+	}
+	return d.validateReviewer()
 }
 
 // validateAssetScope enforces "an extension belongs to an asset type".
@@ -347,6 +352,7 @@ func (m *Manifest) apply(d *Descriptor) {
 	m.Policies.Actions = policyActions(d.Tools)
 	m.Frontend = d.Frontend
 	m.Snippets = d.Snippets
+	m.Reviewer = d.Reviewer
 }
 
 func policyActions(tools []ToolDef) []string {

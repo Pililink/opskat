@@ -121,8 +121,14 @@ func TestParseTransferEndpoint_WindowsDrivePathIsLocal(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("drive-letter paths exist only on Windows")
 	}
-	for _, in := range []string{`C:\Users\me\a.txt`, "C:/Users/me/a.txt", `d:\backup`} {
-		r := newStubResolver(&asset_entity.Asset{ID: 1, Name: "C", Type: asset_entity.AssetTypeSSH})
+	// 任意盘符（大小写、A–Z 两端）、两种分隔符、"C:foo" 这种盘内相对路径和只写盘符，都是本地。
+	for _, in := range []string{
+		`C:\Users\me\a.txt`, "C:/Users/me/a.txt", `d:\backup`, "Z:/x", `a:\x`, "C:foo", "C:",
+	} {
+		r := newStubResolver(
+			&asset_entity.Asset{ID: 1, Name: "C", Type: asset_entity.AssetTypeSSH},
+			&asset_entity.Asset{ID: 2, Name: "Z", Type: asset_entity.AssetTypeSSH},
+		)
 		asset, path, err := ParseTransferEndpoint(context.Background(), in, r.resolve)
 		if err != nil {
 			t.Fatalf("ParseTransferEndpoint(%q) unexpected error: %v", in, err)

@@ -751,3 +751,199 @@ describe("queryStore MongoDB actions", () => {
     expect(useQueryStore.getState().mongoStates["query-20"].collections.neverOpened).toBeUndefined();
   });
 });
+
+describe("queryStore.revealTable", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    provideDrivers(BUILTIN_DRIVERS);
+    useTabStore.setState({ tabs: [], activeTabId: null });
+    useQueryStore.setState({ dbStates: {}, redisStates: {}, mongoStates: {} });
+    vi.spyOn(useAssetStore.getState(), "getAssetPath").mockReturnValue("Test/SQLite");
+    useQueryStore.getState().openQueryTab(makeSQLiteAsset(30));
+  });
+
+  it("expands the database once and loads its tables when missing", async () => {
+    vi.mocked(ListTables).mockResolvedValue(["users"]);
+
+    useQueryStore.getState().revealTable("query-30", "main", "users");
+    const first = useQueryStore.getState().dbStates["query-30"];
+    expect(first.expandedDbs).toContain("main");
+    expect(first.revealRequest).toMatchObject({ db: "main", table: "users" });
+    await vi.waitFor(() => expect(ListTables).toHaveBeenCalledWith(30, "main"));
+
+    useQueryStore.getState().revealTable("query-30", "main", "users");
+    const second = useQueryStore.getState().dbStates["query-30"];
+    expect(second.expandedDbs.filter((d) => d === "main")).toHaveLength(1);
+  });
+});
+
+describe("queryStore inner tab closing and SQL numbering", () => {
+  const innerIds = () => useQueryStore.getState().dbStates["query-40"].innerTabs.map((t) => t.id);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    provideDrivers(BUILTIN_DRIVERS);
+    useTabStore.setState({ tabs: [], activeTabId: null });
+    useQueryStore.setState({ dbStates: {}, redisStates: {}, mongoStates: {} });
+    vi.spyOn(useAssetStore.getState(), "getAssetPath").mockReturnValue("Test/SQLite");
+    useQueryStore.getState().openQueryTab(makeSQLiteAsset(40));
+  });
+
+  function seed() {
+    const s = useQueryStore.getState();
+    s.openTableTab("query-40", "main", "a");
+    s.openTableTab("query-40", "main", "b");
+    s.openTableTab("query-40", "main", "c");
+  }
+
+  it("never reuses an SQL tab number after closing tabs", () => {
+    const s = useQueryStore.getState();
+    s.openSqlTab("query-40");
+    s.openSqlTab("query-40");
+    const [first, second] = useQueryStore.getState().dbStates["query-40"].innerTabs;
+    s.closeInnerTab("query-40", second.id);
+    s.closeInnerTab("query-40", first.id);
+    s.openSqlTab("query-40");
+    const titles = useQueryStore
+      .getState()
+      .dbStates["query-40"].innerTabs.map((t) => (t.type === "sql" ? t.title : ""));
+    expect(titles).toEqual(["SQL 3"]);
+  });
+
+  it("closeOtherInnerTabs keeps only the given tab and activates it", () => {
+    seed();
+    useQueryStore.getState().closeOtherInnerTabs("query-40", "table:main.b");
+    expect(innerIds()).toEqual(["table:main.b"]);
+    expect(useQueryStore.getState().dbStates["query-40"].activeInnerTabId).toBe("table:main.b");
+  });
+
+  it("closeRightInnerTabs drops tabs to the right and moves active onto the anchor if it was closed", () => {
+    seed();
+    expect(useQueryStore.getState().dbStates["query-40"].activeInnerTabId).toBe("table:main.c");
+    useQueryStore.getState().closeRightInnerTabs("query-40", "table:main.a");
+    expect(innerIds()).toEqual(["table:main.a"]);
+    expect(useQueryStore.getState().dbStates["query-40"].activeInnerTabId).toBe("table:main.a");
+  });
+
+  it("closeRightInnerTabs keeps the active tab when it survives", () => {
+    seed();
+    useQueryStore.getState().setActiveInnerTab("query-40", "table:main.a");
+    useQueryStore.getState().closeRightInnerTabs("query-40", "table:main.b");
+    expect(innerIds()).toEqual(["table:main.a", "table:main.b"]);
+    expect(useQueryStore.getState().dbStates["query-40"].activeInnerTabId).toBe("table:main.a");
+  });
+
+  describe("with unsaved edits", () => {
+    const db = () => useQueryStore.getState().dbStates["query-40"];
+
+    it("marks the outer tab unsaved while any inner tab has edits", () => {
+      seed();
+      const s = useQueryStore.getState();
+      s.setInnerTabDirty("query-40", "table:main.a", true);
+      s.setInnerTabDirty("query-40", "table:main.b", true);
+      s.setInnerTabDirty("query-40", "table:main.a", false);
+      expect(useTabStore.getState().unsavedTabIds).toContain("query-40");
+      s.setInnerTabDirty("query-40", "table:main.b", false);
+      expect(useTabStore.getState().unsavedTabIds).not.toContain("query-40");
+    });
+
+    it("holds the close of an edited tab for a decision and brings it to the front", () => {
+      seed();
+      useQueryStore.getState().setInnerTabDirty("query-40", "table:main.a", true);
+      useQueryStore.getState().closeInnerTab("query-40", "table:main.a");
+      expect(innerIds()).toEqual(["table:main.a", "table:main.b", "table:main.c"]);
+      expect(db().activeInnerTabId).toBe("table:main.a");
+      expect(db().closeRequest).toEqual({ ids: ["table:main.a"], dirtyIds: ["table:main.a"], closeOuter: false });
+    });
+
+    it("a batch close with edits closes nothing until decided; cancel keeps every tab", () => {
+      seed();
+      useQueryStore.getState().setInnerTabDirty("query-40", "table:main.b", true);
+      useQueryStore.getState().closeOtherInnerTabs("query-40", "table:main.c");
+      expect(innerIds()).toEqual(["table:main.a", "table:main.b", "table:main.c"]);
+      useQueryStore.getState().cancelCloseRequest("query-40");
+      expect(db().closeRequest).toBeUndefined();
+      expect(innerIds()).toEqual(["table:main.a", "table:main.b", "table:main.c"]);
+    });
+
+    it("forceCloseInnerTabs closes the requested tabs and forgets their edits", () => {
+      seed();
+      useQueryStore.getState().setInnerTabDirty("query-40", "table:main.b", true);
+      useQueryStore.getState().closeOtherInnerTabs("query-40", "table:main.c");
+      const { ids, closeOuter } = db().closeRequest!;
+      useQueryStore.getState().forceCloseInnerTabs("query-40", ids, closeOuter);
+      expect(innerIds()).toEqual(["table:main.c"]);
+      expect(db().activeInnerTabId).toBe("table:main.c");
+      expect(db().closeRequest).toBeUndefined();
+      expect(useTabStore.getState().unsavedTabIds).not.toContain("query-40");
+    });
+
+    it("forceCloseInnerTabs with closeOuter closes the database tab itself", () => {
+      seed();
+      useQueryStore.getState().setInnerTabDirty("query-40", "table:main.b", true);
+      useQueryStore.getState().forceCloseInnerTabs("query-40", ["table:main.b"], true);
+      expect(useTabStore.getState().tabs.map((t) => t.id)).not.toContain("query-40");
+      expect(useQueryStore.getState().dbStates["query-40"]).toBeUndefined();
+    });
+  });
+});
+
+describe("queryStore SQL numbering across persist and restore", () => {
+  const sqlTab = (n: number) => ({ id: `sql:${n}`, type: "sql", title: `SQL ${n}` });
+  const tabsJson = JSON.stringify({
+    tabs: [
+      {
+        id: "query-50",
+        type: "query",
+        label: "db",
+        meta: { type: "query", assetId: 50, assetName: "db", assetIcon: "", assetType: "database", driver: "sqlite" },
+      },
+    ],
+    activeTabId: "query-50",
+  });
+
+  async function restore(persisted: object) {
+    vi.resetModules();
+    localStorage.clear();
+    localStorage.setItem("tab_store", tabsJson);
+    localStorage.setItem("query_store_v1", JSON.stringify({ dbStates: { "query-50": persisted }, mongoStates: {} }));
+    const mod = await import("../stores/queryStore");
+    return mod.useQueryStore;
+  }
+  const base = { databases: [], tables: {}, expandedDbs: [], activeInnerTabId: null };
+
+  it("restores the persisted counter so closed numbers stay retired", async () => {
+    const store = await restore({ ...base, innerTabs: [sqlTab(1)], sqlTabSeq: 5 });
+    store.getState().openSqlTab("query-50");
+    expect(store.getState().dbStates["query-50"].innerTabs.map((t) => (t.type === "sql" ? t.title : ""))).toContain(
+      "SQL 6"
+    );
+  });
+
+  it("derives the counter from existing titles when an old persisted state has none", async () => {
+    const store = await restore({ ...base, innerTabs: [sqlTab(2), sqlTab(7)] });
+    store.getState().openSqlTab("query-50");
+    expect(store.getState().dbStates["query-50"].innerTabs.map((t) => (t.type === "sql" ? t.title : ""))).toContain(
+      "SQL 8"
+    );
+  });
+
+  it("keeps a closed number retired across a persist and restore round trip", async () => {
+    const store = await restore({ ...base, innerTabs: [sqlTab(1)], sqlTabSeq: 3 });
+    store.getState().openSqlTab("query-50");
+    // 关掉全部 SQL 标签:恢复后若按现存标题推算会回到 SQL 1,保留序号才是 SQL 5。
+    store.getState().closeOtherInnerTabs("query-50", "sql:1");
+    store.getState().closeInnerTab("query-50", "sql:1");
+    await vi.waitFor(() => {
+      const saved = JSON.parse(localStorage.getItem("query_store_v1")!);
+      expect(saved.dbStates["query-50"].innerTabs).toEqual([]);
+    });
+
+    const saved = JSON.parse(localStorage.getItem("query_store_v1")!);
+    const restored = await restore(saved.dbStates["query-50"]);
+    restored.getState().openSqlTab("query-50");
+    expect(restored.getState().dbStates["query-50"].innerTabs.map((t) => (t.type === "sql" ? t.title : ""))).toEqual([
+      "SQL 5",
+    ]);
+  });
+});

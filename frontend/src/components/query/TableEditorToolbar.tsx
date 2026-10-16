@@ -213,6 +213,8 @@ export function TableEditorToolbar({
   );
 }
 
+const DEFAULT_PAGE_SIZE_RANGE = { min: 1, max: 100000 };
+
 interface TableDataStatusBarProps {
   /** 驱动声明了表格编辑:新增 / 删除 / 应用 / 放弃修改才出现。 */
   gridEdit: boolean;
@@ -228,6 +230,16 @@ interface TableDataStatusBarProps {
   selectedRowCount: number;
   submitting: boolean;
   loading: boolean;
+  /** 正在取的页(从 0 起,与 page 相同);有值时中部显示「正在加载第 N 页…」。 */
+  loadingPage?: number | null;
+  /** 最近一次取数失败:中部显示「加载失败」,错误详情在结果区的卡片里。 */
+  failed?: boolean;
+  /** 最近一次取数耗时(毫秒),跟在行数与页码之后。 */
+  elapsedMs?: number | null;
+  /** 当前页行数:有值时中部显示「N 行」,取代页码 / 记录数文案(无总数的 SQL 结果用)。 */
+  rowCount?: number | null;
+  /** 页大小可输入的范围,缺省 1–100000。 */
+  pageSizeRange?: { min: number; max: number };
   refreshTitle: string;
   onRefresh: () => void;
   onStopLoading: () => void;
@@ -258,6 +270,11 @@ export function TableDataStatusBar({
   selectedRowCount,
   submitting,
   loading,
+  loadingPage,
+  failed,
+  elapsedMs,
+  rowCount,
+  pageSizeRange = DEFAULT_PAGE_SIZE_RANGE,
   refreshTitle,
   onRefresh,
   onStopLoading,
@@ -285,13 +302,14 @@ export function TableDataStatusBar({
   }
 
   const commitPageSize = () => {
-    const next = Math.max(1, Math.min(100000, Math.floor(Number(pageSizeDraft))));
+    const next = Math.max(pageSizeRange.min, Math.min(pageSizeRange.max, Math.floor(Number(pageSizeDraft))));
     if (!Number.isFinite(next)) {
       setPageSizeDraft(String(pageSize));
       return;
     }
-    setPageSizeDraft(String(next));
     if (next !== pageSize) onPageSizeChange(next);
+    // 草稿回到实际页大小:被拦截(留在本页)时不残留被拒绝的值;真正生效时由上面的同步接管新值。
+    setPageSizeDraft(String(pageSize));
   };
 
   const actionTone = "text-foreground disabled:text-muted-foreground disabled:opacity-35";
@@ -368,16 +386,23 @@ export function TableDataStatusBar({
       </div>
 
       <div className="min-w-0 flex-1 text-center">
-        {sqlSummary ? (
+        {loadingPage != null ? (
+          <span className="text-xs text-muted-foreground">{t("query.loadingPage", { page: loadingPage + 1 })}</span>
+        ) : failed ? (
+          <span className="text-xs text-destructive">{t("query.loadFailed")}</span>
+        ) : sqlSummary ? (
           <span className="block truncate font-mono text-[11px] text-foreground" title={sqlSummary}>
             {sqlSummary}
           </span>
-        ) : totalRows != null ? (
-          <span className="text-xs text-muted-foreground">
-            {t("query.recordsInPage", { count: totalRows, page: page + 1 })}
-          </span>
         ) : (
-          <span className="text-xs text-muted-foreground">{t("query.pageNumber", { page: page + 1 })}</span>
+          <span className="text-xs text-muted-foreground">
+            {rowCount != null
+              ? t("query.rows", { count: rowCount })
+              : totalRows != null
+                ? t("query.recordsInPage", { count: totalRows, page: page + 1 })
+                : t("query.page", { page: page + 1 })}
+            {elapsedMs != null && ` · ${t("query.elapsedMs", { ms: elapsedMs })}`}
+          </span>
         )}
       </div>
 

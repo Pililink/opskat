@@ -15,7 +15,14 @@ import { CodeEditor } from "@/components/CodeEditor";
 import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
 import { useQueryStore } from "@/stores/queryStore";
 import { isMac, formatModKey } from "@/stores/shortcutStore";
-import { CountTableRows, ExecuteSQL, GetTableDDL, OpenTable, QueryTableRows } from "../../../wailsjs/go/query/Query";
+import {
+  CountTableRows,
+  ExecuteSQL,
+  GetTableDDL,
+  GetTableMetadata,
+  OpenTable,
+  QueryTableRows,
+} from "../../../wailsjs/go/query/Query";
 import { dbdriver, query_svc } from "../../../wailsjs/go/models";
 import {
   QueryResultTable,
@@ -26,11 +33,13 @@ import {
   type RowDensity,
 } from "./QueryResultTable";
 import { SqlPreviewDialog } from "./SqlPreviewDialog";
+import { UnsavedEditsDialog, type UnsavedEditSummaryItem } from "./UnsavedEditsDialog";
 import { driverHasCapability, findDatabaseDriver, useDatabaseDrivers } from "@/lib/dbDrivers";
 import { ImportTableDataDialog } from "./ImportTableDataDialog";
 import { ExportTableDataDialog } from "./ExportTableDataDialog";
 import { TableFilterBuilder } from "./TableFilterBuilder";
 import { TableDataStatusBar, TableEditorToolbar, type TableExportFormat } from "./TableEditorToolbar";
+import { QueryErrorPanel } from "./QueryErrorPanel";
 import { QueryResultJsonView } from "./QueryResultJsonView";
 import { QueryRowDetailPanel } from "./QueryRowDetailPanel";
 import { QueryViewModeToggle, type QueryViewMode } from "./QueryViewModeToggle";
@@ -130,6 +139,12 @@ export const TableDataTab = memo(function TableDataTab(props: TableDataTabProps)
   return <TableDataTabContent {...props} />;
 });
 
+/** 有未提交修改时被拦下的操作。 */
+interface GuardedAction {
+  run: () => void;
+  description: string;
+}
+
 function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTabProps) {
   const { t } = useTranslation();
   const tab = useTabStore((s) => s.tabs.find((t) => t.id === tabId));
@@ -148,6 +163,10 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
   const [pageInput, setPageInput] = useState("1");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 首次打开(OpenTable)失败后重试要重跑打开流程:主键 / 列类型只有它会填。
+  const [openAttempt, setOpenAttempt] = useState(0);
+  // 最近一次成功取数(打开表 / 翻页 / 刷新)的耗时,显示在状态栏。
+  const [elapsedMs, setElapsedMs] = useState<number | null>(null);
   const [edits, setEdits] = useState<Map<string, unknown>>(new Map());
   const [submitting, setSubmitting] = useState(false);
   // `preview` = read-only view (opened by the "Preview SQL" button).
@@ -166,6 +185,8 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
   const [sortDir, setSortDir] = useState<SortDir>(null);
   const [applyVersion, setApplyVersion] = useState(0);
   const [primaryKeys, setPrimaryKeys] = useState<string[]>([]);
+  // 列注释 / 默认值 / 索引,只供「显示注释」与表头信息卡。undefined = 未加载或加载失败(两者都不影响表格)。
+  const [tableMeta, setTableMeta] = useState<query_svc.TableMetadata | undefined>(undefined);
   const [pkLoaded, setPkLoaded] = useState(false);
   const [deletePreview, setDeletePreview] = useState<{
     statements: string[];
@@ -184,6 +205,10 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
   const [viewMode, setViewMode] = useState<QueryViewMode>("table");
   const [rowDetailOpen, setRowDetailOpen] = useState(false);
   const [focusCellRequest, setFocusCellRequest] = useState<FocusCellRequest | null>(null);
+  // 有未提交修改时被拦下的操作:对话框打开期间挂在这里,按用户选择丢弃或执行。
+  const [guardedAction, setGuardedAction] = useState<GuardedAction | null>(null);
+  // 选「提交修改…」后,被拦下的操作等提交成功才执行;预览取消或提交失败时清掉。
+  const continueAfterSubmit = useRef<(() => void) | null>(null);
   const requestSeq = useRef(0);
   const latestDataRequest = useRef(0);
   const latestCountRequest = useRef(0);
@@ -232,6 +257,7 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
       setPkLoaded(false);
       setLoading(true);
       setError(null);
+      setElapsedMs(null);
     }
   }
 
@@ -246,10 +272,12 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     latestCountRequest.current = requestId;
     openedRef.current = false;
     (async () => {
+      const startedAt = performance.now();
       try {
         const raw = await OpenTable(assetId, database, table, pageSize);
         if (isCancelled(requestId) || latestDataRequest.current !== requestId) return;
         const parsed = JSON.parse(raw) as OpenTableResult;
+        setElapsedMs(Math.round(performance.now() - startedAt));
         setPrimaryKeys(parsed.primaryKeys ?? []);
         setColumnTypes(parsed.columnTypes ?? {});
         setColumnRules(parsed.columnRules ?? []);
@@ -271,9 +299,54 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     // pageSize 故意不在 deps 里:OpenTable 只在切换表时跑一次,
     // 用户改 pageSize 由下方 fetchData 的 useEffect 处理。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [assetId, database, table, nextRequestId, isCancelled]);
+  }, [assetId, database, table, openAttempt, nextRequestId, isCancelled]);
+
+  // 直接调绑定而不走 queryStore.loadTableMeta:后者失败会写整个面板的 dbState.error,
+  // 而元数据只是增强信息,拿不到时仅少了注释与信息卡。
+  useEffect(() => {
+    if (!assetId) return;
+    let stale = false;
+    GetTableMetadata(assetId, database, table).then(
+      (meta) => {
+        if (!stale) setTableMeta(meta);
+      },
+      () => {
+        // 失败:表格不显示注释开关与信息卡,也不写面板错误。
+        if (!stale) setTableMeta(undefined);
+      }
+    );
+    return () => {
+      stale = true;
+    };
+  }, [assetId, database, table, openAttempt]);
+  const columnMeta = useMemo(() => {
+    if (!tableMeta) return undefined;
+    const indexesByColumn = new Map<string, string[]>();
+    for (const index of tableMeta.indexes ?? []) {
+      for (const col of index.columns ?? [])
+        indexesByColumn.set(col, [...(indexesByColumn.get(col) ?? []), index.name]);
+    }
+    return Object.fromEntries(
+      (tableMeta.columns ?? []).map((col) => [
+        col.name,
+        {
+          comment: col.comment,
+          // 后端以 JSON null 表示「没有默认值」(生成的类型只写了 string | undefined),在这里统一成 undefined。
+          default: col.default ?? undefined,
+          type: col.type,
+          nullable: col.nullable,
+          primaryKey: col.primaryKey,
+          indexes: indexesByColumn.get(col.name) ?? [],
+        },
+      ])
+    );
+  }, [tableMeta]);
 
   // 翻页、计数发给驱动的是结构化的筛选条件与排序项,不是 SQL:怎么变成查询由驱动决定。
+  const notNullColumns = useMemo(
+    () => new Set(columnRules.filter((rule) => !rule.nullable).map((rule) => rule.name)),
+    [columnRules]
+  );
   const filterRequest = useMemo(
     () => toFilterRequest(appliedFilters).map((item) => dbdriver.FilterItem.createFrom(item)),
     [appliedFilters]
@@ -309,6 +382,7 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
       setLoading(true);
       setError(null);
 
+      const startedAt = performance.now();
       try {
         const result = await QueryTableRows(
           assetId,
@@ -322,13 +396,15 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
           })
         );
         if (isCancelled(requestId) || latestDataRequest.current !== requestId) return;
+        setElapsedMs(Math.round(performance.now() - startedAt));
         setColumns(result.columns);
         setRows(result.rows);
         setSelectedRowIdx(null);
       } catch (e) {
         if (isCancelled(requestId) || latestDataRequest.current !== requestId) return;
+        setElapsedMs(null);
         setError(String(e));
-        setColumns([]);
+        // 列保留:筛选器与列状态在重试 / 改筛选后仍沿用,错误卡片取代的只是表体。
         setRows([]);
         setSelectedRowIdx(null);
       } finally {
@@ -359,23 +435,13 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     setPageInput(String(page + 1));
   }
 
-  // Clear edits when page changes
-  // 翻页/改页大小时清空未提交编辑:渲染期对比上次值(含首次渲染,对齐原 effect 挂载即跑)。
-  const [prevEditsKey, setPrevEditsKey] = useState<{ page: number; pageSize: number } | null>(null);
-  if (prevEditsKey === null || page !== prevEditsKey.page || pageSize !== prevEditsKey.pageSize) {
-    setPrevEditsKey({ page, pageSize });
-    setEdits(new Map());
-    setNewRows([]);
-  }
-
-  // 列集合变化时收敛可见列:渲染期对比上次值(含首次渲染,对齐原 effect 挂载即跑)。
-  const [prevColumnsKey, setPrevColumnsKey] = useState<string[] | null>(null);
-  if (columns !== prevColumnsKey) {
-    setPrevColumnsKey(columns);
-    setVisibleColumns((prev) => {
-      const retained = prev.filter((col) => columns.includes(col));
-      return retained.length > 0 ? retained : columns;
-    });
+  // 隐藏列只在有序列名变化时重置(刷新 / 翻页 / 排序 / 筛选每次给新数组,名字不变就保留):
+  // 渲染期对比上次值(含首次渲染,对齐原 effect 挂载即跑)。
+  const columnsKey = JSON.stringify(columns);
+  const [prevColumnsKey, setPrevColumnsKey] = useState<string | null>(null);
+  if (columnsKey !== prevColumnsKey) {
+    setPrevColumnsKey(columnsKey);
+    setVisibleColumns(columns);
   }
 
   const handleCellEdit = useCallback((edit: CellEdit) => {
@@ -391,6 +457,41 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     setEdits(new Map());
     setNewRows([]);
   }, []);
+
+  const hasEdits = edits.size > 0 || newRows.length > 0;
+  // 会丢掉当前页修改的操作(翻页、改页大小、排序、筛选、刷新)都经过这里:没有修改直接执行,
+  // 有修改先弹框让用户选择留下、放弃后继续,或提交成功后再继续。
+  const guardEdits = useCallback(
+    (action: () => void, description: string) => {
+      if (!hasEdits) {
+        action();
+        return;
+      }
+      setGuardedAction({ run: action, description });
+    },
+    [hasEdits]
+  );
+
+  // 有无修改上报给 queryStore:关闭本标签、关闭外层数据库标签、⌘W 据此决定是否先拦下来问。
+  const setInnerTabDirty = useQueryStore((s) => s.setInnerTabDirty);
+  useEffect(() => {
+    setInnerTabDirty(tabId, innerTabId, hasEdits);
+    return () => setInnerTabDirty(tabId, innerTabId, false);
+  }, [hasEdits, innerTabId, setInnerTabDirty, tabId]);
+
+  // 关闭请求只涉及本标签这一个脏标签时,由这里的三选项对话框决定(多个时 DatabasePanel 弹批量框)。
+  const closeRequest = useQueryStore((s) => s.dbStates[tabId]?.closeRequest);
+  const forceCloseInnerTabs = useQueryStore((s) => s.forceCloseInnerTabs);
+  const cancelCloseRequest = useQueryStore((s) => s.cancelCloseRequest);
+  const closeGuard = useMemo((): GuardedAction | null => {
+    if (closeRequest?.dirtyIds.length !== 1 || closeRequest.dirtyIds[0] !== innerTabId) return null;
+    const { ids, closeOuter } = closeRequest;
+    return {
+      run: () => forceCloseInnerTabs(tabId, ids, closeOuter),
+      description: t("query.unsavedEditsDescClose"),
+    };
+  }, [closeRequest, forceCloseInnerTabs, innerTabId, t, tabId]);
+  const pendingGuard = closeGuard ?? guardedAction;
 
   const handleAddInlineRow = useCallback(() => {
     const firstVisibleColumn = visibleColumns.find((column) => columns.includes(column)) ?? columns[0];
@@ -525,14 +626,15 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
   );
 
   const openSqlDialog = useCallback(
-    (mode: "preview" | "confirm") => {
+    (mode: "preview" | "confirm"): boolean => {
       const result = buildChangeStatements();
       if (result.missingFields.length > 0) {
         showInsertValidationError(result.missingFields);
-        return;
+        return false;
       }
-      if (result.statements.length === 0) return;
+      if (result.statements.length === 0) return false;
       setDialogMode(mode);
+      return true;
     },
     [buildChangeStatements, showInsertValidationError]
   );
@@ -548,17 +650,18 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     return result.missingFields.length === 0 ? (result.statements[0] ?? "") : "";
   }, [buildChangeStatements, edits.size, newRows.length]);
 
-  const handleSubmit = useCallback(async () => {
-    if ((edits.size === 0 && newRows.length === 0) || !assetId) return;
+  // 返回是否全部提交成功(每条语句都执行成功且命中了行),拦截后的「提交后继续」靠它决定是否继续。
+  const handleSubmit = useCallback(async (): Promise<boolean> => {
+    if ((edits.size === 0 && newRows.length === 0) || !assetId) return false;
 
     const changeResult = buildChangeStatements();
     if (changeResult.missingFields.length > 0) {
       showInsertValidationError(changeResult.missingFields);
-      return;
+      return false;
     }
 
     const statements = changeResult.statements;
-    if (statements.length === 0) return;
+    if (statements.length === 0) return false;
     setSubmitting(true);
     let affectedTotal = 0;
     let zeroAffected = 0;
@@ -592,6 +695,7 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     if (errorMsg) {
       toast.error(errorMsg.trim());
     }
+    return !errorMsg && zeroAffected === 0;
   }, [
     edits.size,
     newRows.length,
@@ -605,27 +709,51 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     t,
   ]);
 
+  const goToPage = useCallback(
+    (target: number) => {
+      if (target === page) return;
+      guardEdits(() => setPage(target), t("query.unsavedEditsDescPage", { page: target + 1 }));
+    },
+    [guardEdits, page, t]
+  );
+
   const handlePageInputConfirm = useCallback(() => {
     const num = parseInt(pageInput, 10);
-    if (isNaN(num) || num < 1) {
-      setPageInput(String(page + 1));
-      return;
-    }
-    const target = totalPages ? Math.min(num, totalPages) - 1 : num - 1;
-    setPage(target);
-  }, [pageInput, page, totalPages]);
+    // 输入框先回到当前页:真的翻过去时由翻页同步成新页码,留在本页时不残留输入。
+    setPageInput(String(page + 1));
+    if (isNaN(num) || num < 1) return;
+    goToPage(totalPages ? Math.min(num, totalPages) - 1 : num - 1);
+  }, [goToPage, pageInput, page, totalPages]);
 
-  const handlePageSizeChange = useCallback((nextPageSize: number) => {
-    setPageSize(nextPageSize);
-    setPage(0);
-    setEdits(new Map());
-    setNewRows([]);
-  }, []);
+  const handlePageSizeChange = useCallback(
+    (nextPageSize: number) => {
+      guardEdits(
+        () => {
+          setPageSize(nextPageSize);
+          setPage(0);
+        },
+        t("query.unsavedEditsDescPageSize", { size: nextPageSize })
+      );
+    },
+    [guardEdits, t]
+  );
 
   const handleRefresh = useCallback(() => {
-    fetchData(page);
-    fetchCount();
-  }, [fetchData, fetchCount, page]);
+    guardEdits(() => {
+      fetchData(page);
+      fetchCount();
+    }, t("query.unsavedEditsDescRefresh"));
+  }, [fetchData, fetchCount, guardEdits, page, t]);
+
+  const handleRetry = useCallback(() => {
+    if (!openedRef.current) {
+      setError(null);
+      setLoading(true);
+      setOpenAttempt((n) => n + 1);
+      return;
+    }
+    handleRefresh();
+  }, [handleRefresh]);
 
   const handleStopLoading = useCallback(() => {
     if (!loading && !importing) return;
@@ -650,32 +778,39 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     return () => window.removeEventListener("keydown", handler);
   }, [isOuterActive, isInnerActive, handleRefresh]);
 
-  const handleApplyQuery = useCallback(() => {
-    setAppliedFilters(filters);
-    setAppliedSorts(sorts);
-    // Builder sort criteria override the header-click sort state.
-    if (sorts.length > 0) {
-      setSortColumn(null);
-      setSortDir(null);
-    }
-    setPage(0);
-    setEdits(new Map());
-    setNewRows([]);
-    setApplyVersion((v) => v + 1);
-  }, [filters, sorts]);
+  const handleApplyQuery = useCallback(
+    (nextFilters?: TableFilterItem[]) => {
+      const applied = nextFilters ?? filters;
+      guardEdits(() => {
+        setAppliedFilters(applied);
+        setAppliedSorts(sorts);
+        // Builder sort criteria override the header-click sort state.
+        if (sorts.length > 0) {
+          setSortColumn(null);
+          setSortDir(null);
+        }
+        setPage(0);
+        setApplyVersion((v) => v + 1);
+      }, t("query.unsavedEditsDescFilter"));
+    },
+    [filters, guardEdits, sorts, t]
+  );
 
-  const handleSortChange = useCallback((col: string | null, dir: SortDir) => {
-    setSortColumn(col);
-    setSortDir(dir);
-    // Header click takes precedence — clear the builder's sort criteria so the user
-    // can see which sort is actually applied.
-    setSorts([]);
-    setAppliedSorts([]);
-    setPage(0);
-    setEdits(new Map());
-    setNewRows([]);
-    setApplyVersion((v) => v + 1);
-  }, []);
+  const handleSortChange = useCallback(
+    (col: string | null, dir: SortDir) => {
+      guardEdits(() => {
+        setSortColumn(col);
+        setSortDir(dir);
+        // Header click takes precedence — clear the builder's sort criteria so the user
+        // can see which sort is actually applied.
+        setSorts([]);
+        setAppliedSorts([]);
+        setPage(0);
+        setApplyVersion((v) => v + 1);
+      }, t("query.unsavedEditsDescSort"));
+    },
+    [guardEdits, t]
+  );
 
   const handleFilterByCellValue = useCallback(
     ({ col, value, operator = "=" }: { col: string; value: unknown; operator?: CellValueFilterOperator }) => {
@@ -684,45 +819,45 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
           value: filterOperatorNeedsRange(operator) ? [cellValue, cellValue] : cellValue,
           operator,
         });
-      setFilters([condition(value)]);
-      setShowFilterSort(true);
-      // 没有值的单元格(尚未提交的新增行)按 NULL 筛选,而不是当作还没填值的条件被略过;
-      // 区间运算符两端都缺,条件照旧不产生限制。
-      const unfilledRange = value === undefined && filterOperatorNeedsRange(operator);
-      setAppliedFilters([
-        unfilledRange
-          ? createFilterCondition(`cell-${col}`, col, { operator })
-          : condition(value === undefined ? null : value),
-      ]);
-      setPage(0);
-      setEdits(new Map());
-      setNewRows([]);
-      setApplyVersion((v) => v + 1);
+      guardEdits(() => {
+        setFilters([condition(value)]);
+        setShowFilterSort(true);
+        // 没有值的单元格(尚未提交的新增行)按 NULL 筛选,而不是当作还没填值的条件被略过;
+        // 区间运算符两端都缺,条件照旧不产生限制。
+        const unfilledRange = value === undefined && filterOperatorNeedsRange(operator);
+        setAppliedFilters([
+          unfilledRange
+            ? createFilterCondition(`cell-${col}`, col, { operator })
+            : condition(value === undefined ? null : value),
+        ]);
+        setPage(0);
+        setApplyVersion((v) => v + 1);
+      }, t("query.unsavedEditsDescFilter"));
     },
-    []
+    [guardEdits, t]
   );
 
   const handleRemoveColumnFilter = useCallback(
     (column: string) => {
-      const next = removeFilterItemsByColumn(filters, column);
-      setFilters(next);
-      setAppliedFilters(next);
-      setPage(0);
-      setEdits(new Map());
-      setNewRows([]);
-      setApplyVersion((v) => v + 1);
+      guardEdits(() => {
+        const next = removeFilterItemsByColumn(filters, column);
+        setFilters(next);
+        setAppliedFilters(next);
+        setPage(0);
+        setApplyVersion((v) => v + 1);
+      }, t("query.unsavedEditsDescFilter"));
     },
-    [filters]
+    [filters, guardEdits, t]
   );
 
   const handleRemoveAllFilters = useCallback(() => {
-    setFilters([]);
-    setAppliedFilters([]);
-    setPage(0);
-    setEdits(new Map());
-    setNewRows([]);
-    setApplyVersion((v) => v + 1);
-  }, []);
+    guardEdits(() => {
+      setFilters([]);
+      setAppliedFilters([]);
+      setPage(0);
+      setApplyVersion((v) => v + 1);
+    }, t("query.unsavedEditsDescFilter"));
+  }, [guardEdits, t]);
 
   const handleSortByColumn = useCallback(
     (col: string, dir: Exclude<SortDir, null>) => {
@@ -732,17 +867,77 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
   );
 
   const handleClearFilterSort = useCallback(() => {
-    setFilters([]);
-    setAppliedFilters([]);
-    setSorts([]);
-    setAppliedSorts([]);
-    setSortColumn(null);
-    setSortDir(null);
-    setPage(0);
-    setEdits(new Map());
-    setNewRows([]);
-    setApplyVersion((v) => v + 1);
-  }, []);
+    guardEdits(() => {
+      setFilters([]);
+      setAppliedFilters([]);
+      setSorts([]);
+      setAppliedSorts([]);
+      setSortColumn(null);
+      setSortDir(null);
+      setPage(0);
+      setApplyVersion((v) => v + 1);
+    }, t("query.unsavedEditsDescFilter"));
+  }, [guardEdits, t]);
+
+  // 拦截对话框里的修改摘要:已保存行每个改动的单元格一条,新增行每行一条;行号与网格显示一致。
+  const unsavedSummary = useMemo((): UnsavedEditSummaryItem[] => {
+    const rowNumberOffset = page * pageSize;
+    const updates: { rowIdx: number; colIdx: number; item: UnsavedEditSummaryItem }[] = [];
+    for (const [key, value] of edits) {
+      const sep = key.indexOf(":");
+      const rowIdx = Number(key.substring(0, sep));
+      const column = key.substring(sep + 1);
+      if (rowIdx >= rows.length) continue;
+      updates.push({
+        rowIdx,
+        colIdx: columns.indexOf(column),
+        item: {
+          kind: "update",
+          row: rowNumberOffset + rowIdx + 1,
+          column,
+          oldValue: rows[rowIdx][column],
+          newValue: value,
+        },
+      });
+    }
+    updates.sort((a, b) => a.rowIdx - b.rowIdx || a.colIdx - b.colIdx);
+    const inserts = newRows.map((_, newRowIdx): UnsavedEditSummaryItem => {
+      const rowIdx = rows.length + newRowIdx;
+      return {
+        kind: "insert",
+        row: rowNumberOffset + rowIdx + 1,
+        values: columns
+          .filter((column) => edits.has(`${rowIdx}:${column}`))
+          .map((column) => ({ column, value: edits.get(`${rowIdx}:${column}`) })),
+      };
+    });
+    return [...updates.map((u) => u.item), ...inserts];
+  }, [columns, edits, newRows, page, pageSize, rows]);
+
+  // 只收起当前显示的那一个:关闭请求优先显示,收起后被它盖住的翻页等拦截照旧。
+  const handleGuardStay = useCallback(() => {
+    if (closeGuard) cancelCloseRequest(tabId);
+    else setGuardedAction(null);
+  }, [cancelCloseRequest, closeGuard, tabId]);
+
+  const handleGuardDiscard = useCallback(() => {
+    if (!pendingGuard) return;
+    handleGuardStay();
+    handleDiscard();
+    pendingGuard.run();
+  }, [handleDiscard, handleGuardStay, pendingGuard]);
+
+  const handleGuardSubmit = useCallback(() => {
+    if (!pendingGuard) return;
+    handleGuardStay();
+    if (openSqlDialog("confirm")) continueAfterSubmit.current = pendingGuard.run;
+  }, [handleGuardStay, openSqlDialog, pendingGuard]);
+
+  const handleConfirmSubmit = useCallback(async () => {
+    const next = continueAfterSubmit.current;
+    continueAfterSubmit.current = null;
+    if ((await handleSubmit()) && next) next();
+  }, [handleSubmit]);
 
   const handleDeleteRows = useCallback(
     (rowIdxs: number[]) => {
@@ -927,24 +1122,23 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
   }, [ddlLoading, ddlSQL, t]);
 
   // 提到顶层走 useCallback,使 QueryResultTable 的 memo 浅比较生效;
-  // 只依赖 rows.length —— 新增行用它来判断"(Default)"占位。
+  // 只依赖 rows.length 与 t —— 新增行用它来判断默认值占位。
   const rowsLength = rows.length;
   const renderCell = useCallback(
     (value: unknown, ctx: { rowIdx: number; col: string }) => {
       if (ctx.rowIdx >= rowsLength && value == null) {
-        return <span className="text-muted-foreground/70 italic">(Default)</span>;
+        return <span className="text-muted-foreground/70 italic">{t("query.newRowDefaultPlaceholder")}</span>;
       }
-      if (value == null) return <span className="text-muted-foreground italic">NULL</span>;
+      if (value == null) return <span className="text-muted-foreground italic">{t("query.nullValue")}</span>;
       return <span className="truncate block">{cellValueToDisplayText(value)}</span>;
     },
-    [rowsLength]
+    [rowsLength, t]
   );
 
   const hasNext = totalPages != null ? page < totalPages - 1 : rows.length === pageSize;
   const hasPrev = page > 0;
   const tableRows = useMemo(() => [...rows, ...newRows], [newRows, rows]);
   const pendingEditCount = edits.size + newRows.length;
-  const hasEdits = pendingEditCount > 0;
   const deletableRowCount = deletableRowIdxs.filter((idx) => tableRows[idx] != null).length;
   // 详情面板跟随"当前行":选中单元格所在行,或唯一被整行选中的那行。
   const detailRowIdx = selectedRowIdx ?? (selectedRowIdxs.length === 1 ? selectedRowIdxs[0] : null);
@@ -954,6 +1148,7 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     () => (visibleColumns.length > 0 ? visibleColumns : columns),
     [visibleColumns, columns]
   );
+  const findScope = useMemo(() => ({ rowCount: rows.length, page: page + 1 }), [rows.length, page]);
   const hasActiveFilterSort =
     filters.length > 0 ||
     sorts.length > 0 ||
@@ -961,6 +1156,15 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     sortRequest.length > 0 ||
     !!sortColumn ||
     !!sortDir;
+
+  const errorPanel = error ? (
+    <QueryErrorPanel
+      title={t("query.loadTableFailed", { table: `${database}.${table}` })}
+      error={error}
+      onRetry={handleRetry}
+      onEditFilter={filterRequest.length > 0 ? () => setShowFilterSort(true) : undefined}
+    />
+  ) : null;
 
   return (
     <div className="flex flex-col h-full">
@@ -1032,19 +1236,18 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
       {/* Table content */}
       <div className="flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">
-          {viewMode === "json" ? (
-            <QueryResultJsonView
-              rows={tableRows}
-              columns={effectiveVisibleColumns}
-              edits={edits}
-              error={error ?? undefined}
-            />
+          {viewMode === "json" && error ? (
+            errorPanel
+          ) : viewMode === "json" ? (
+            <QueryResultJsonView rows={tableRows} columns={effectiveVisibleColumns} edits={edits} />
           ) : (
             <QueryResultTable
               columns={columns}
               rows={tableRows}
               loading={loading || importing}
+              keepShapeWhileLoading
               error={error ?? undefined}
+              errorPanel={errorPanel}
               editable={canGridEdit}
               edits={edits}
               onCellEdit={handleCellEdit}
@@ -1077,6 +1280,10 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
               rowDensity={rowDensity}
               focusCellRequest={focusCellRequest}
               renderCell={renderCell}
+              findEnabled
+              findScope={findScope}
+              notNullColumns={notNullColumns}
+              columnMeta={columnMeta}
             />
           )}
         </div>
@@ -1107,17 +1314,20 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
         selectedRowCount={deletableRowCount}
         submitting={submitting || deleting}
         loading={loading || importing}
+        loadingPage={loading ? page : null}
+        failed={!!error}
+        elapsedMs={elapsedMs}
         refreshTitle={`${t("query.refreshTable")} (${REFRESH_SHORTCUT_LABEL})`}
         onRefresh={handleRefresh}
         onStopLoading={handleStopLoading}
         onPageInputChange={setPageInput}
         onPageInputConfirm={handlePageInputConfirm}
         onPageSizeChange={handlePageSizeChange}
-        onFirstPage={() => setPage(0)}
-        onPreviousPage={() => setPage((p) => p - 1)}
-        onNextPage={() => setPage((p) => p + 1)}
+        onFirstPage={() => goToPage(0)}
+        onPreviousPage={() => goToPage(page - 1)}
+        onNextPage={() => goToPage(page + 1)}
         onLastPage={() => {
-          if (totalPages != null) setPage(totalPages - 1);
+          if (totalPages != null) goToPage(totalPages - 1);
         }}
         onAddRow={handleAddInlineRow}
         onDeleteRows={handleDeleteSelectedRows}
@@ -1201,11 +1411,22 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
       <SqlPreviewDialog
         open={dialogMode !== null}
         onOpenChange={(open) => {
-          if (!open && !submitting) setDialogMode(null);
+          if (open || submitting) return;
+          setDialogMode(null);
+          continueAfterSubmit.current = null;
         }}
         statements={previewStatements}
-        onConfirm={dialogMode === "confirm" ? handleSubmit : undefined}
+        onConfirm={dialogMode === "confirm" ? handleConfirmSubmit : undefined}
         submitting={submitting}
+      />
+
+      <UnsavedEditsDialog
+        open={pendingGuard !== null}
+        summary={unsavedSummary}
+        description={pendingGuard?.description}
+        onStay={handleGuardStay}
+        onDiscard={handleGuardDiscard}
+        onSubmit={handleGuardSubmit}
       />
 
       <SqlPreviewDialog

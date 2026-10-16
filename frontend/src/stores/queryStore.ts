@@ -52,6 +52,24 @@ export interface DatabaseTabState {
   error: string | null;
   tableMeta?: Record<string, query_svc.TableMetadata>; // "db.table" -> metadata
   objects?: Record<string, query_svc.DatabaseObjects>; // db -> objects
+  /** 「在左侧树中定位」请求;nonce 递增让同一张表的重复请求也能再次触发树的响应。不持久化。 */
+  revealRequest?: { nonce: number; db: string; table: string };
+  /** 已分配过的最大 SQL 标签序号;只增不减,关闭标签后序号不复用。 */
+  sqlTabSeq?: number;
+  /** 有未提交修改的内层标签(由各 TableDataTab 上报)。不持久化。 */
+  dirtyInnerTabIds?: string[];
+  /**
+   * 涉及有未提交修改的标签、等待用户决定的关闭请求。不持久化。
+   * 只有一个脏标签时由该 TableDataTab 弹三选项对话框(可提交后再关),多个时由 DatabasePanel 弹批量对话框;
+   * 决定前一个都不关,确认后 forceCloseInnerTabs 关掉 ids 全部(closeOuter 时连外层数据库标签一起关)。
+   */
+  closeRequest?: InnerTabCloseRequest;
+}
+
+export interface InnerTabCloseRequest {
+  ids: string[];
+  dirtyIds: string[];
+  closeOuter: boolean;
 }
 
 const REDIS_PAGE_SIZE = 100;
@@ -147,9 +165,17 @@ interface QueryState {
   refreshTables: (tabId: string, database: string) => Promise<void>;
   toggleDbExpand: (tabId: string, database: string) => void;
   toggleSchemaExpand: (tabId: string, database: string, schema: string) => void;
+  revealTable: (tabId: string, database: string, table: string) => void;
   openTableTab: (tabId: string, database: string, table: string) => void;
   openSqlTab: (tabId: string, database?: string, sql?: string) => void;
   closeInnerTab: (tabId: string, innerTabId: string) => void;
+  closeOtherInnerTabs: (tabId: string, innerTabId: string) => void;
+  closeRightInnerTabs: (tabId: string, innerTabId: string) => void;
+  setInnerTabDirty: (tabId: string, innerTabId: string, dirty: boolean) => void;
+  /** 关闭内层标签的唯一入口:都没有未提交修改时直接关,否则挂起 closeRequest 等用户决定。 */
+  requestCloseInnerTabs: (tabId: string, ids: string[], opts?: { closeOuter?: boolean }) => void;
+  forceCloseInnerTabs: (tabId: string, ids: string[], closeOuter?: boolean) => void;
+  cancelCloseRequest: (tabId: string) => void;
   setActiveInnerTab: (tabId: string, innerTabId: string) => void;
   updateInnerTab: (tabId: string, innerTabId: string, patch: Record<string, unknown>) => void;
   markTableTabLoaded: (tabId: string, innerTabId: string) => void;
@@ -202,6 +228,7 @@ function defaultDbState(): DatabaseTabState {
     error: null,
     tableMeta: {},
     objects: {},
+    sqlTabSeq: 0,
   };
 }
 
@@ -601,6 +628,27 @@ export const useQueryStore = create<QueryState>((set, get) => ({
     }));
   },
 
+  revealTable: (tabId, database, table) => {
+    const state = get().dbStates[tabId];
+    if (!state) return;
+    if (!state.tables[database] && !state.loadingTables[database]) {
+      get().loadTables(tabId, database);
+    }
+    set((s) => {
+      const cur = s.dbStates[tabId];
+      return {
+        dbStates: {
+          ...s.dbStates,
+          [tabId]: {
+            ...cur,
+            expandedDbs: cur.expandedDbs.includes(database) ? cur.expandedDbs : [...cur.expandedDbs, database],
+            revealRequest: { nonce: (cur.revealRequest?.nonce ?? 0) + 1, db: database, table },
+          },
+        },
+      };
+    });
+  },
+
   openTableTab: (tabId, database, table) => {
     const state = get().dbStates[tabId];
     if (!state) return;
@@ -626,13 +674,14 @@ export const useQueryStore = create<QueryState>((set, get) => ({
   openSqlTab: (tabId, database?, sql?) => {
     const state = get().dbStates[tabId];
     if (!state) return;
-    const count = state.innerTabs.filter((t) => t.type === "sql").length + 1;
+    const count = (state.sqlTabSeq ?? 0) + 1;
     const innerId = `sql:${Date.now()}`;
     set((s) => ({
       dbStates: {
         ...s.dbStates,
         [tabId]: {
           ...state,
+          sqlTabSeq: count,
           innerTabs: [
             ...state.innerTabs,
             { id: innerId, type: "sql", title: `SQL ${count}`, sql, selectedDb: database },
@@ -644,21 +693,92 @@ export const useQueryStore = create<QueryState>((set, get) => ({
   },
 
   closeInnerTab: (tabId, innerTabId) => {
+    get().requestCloseInnerTabs(tabId, [innerTabId]);
+  },
+
+  closeOtherInnerTabs: (tabId, innerTabId) => {
+    const state = get().dbStates[tabId];
+    if (!state) return;
+    const ids = state.innerTabs.filter((t) => t.id !== innerTabId).map((t) => t.id);
+    get().requestCloseInnerTabs(tabId, ids);
+  },
+
+  closeRightInnerTabs: (tabId, innerTabId) => {
     const state = get().dbStates[tabId];
     if (!state) return;
     const idx = state.innerTabs.findIndex((t) => t.id === innerTabId);
-    const newTabs = state.innerTabs.filter((t) => t.id !== innerTabId);
-    let newActive = state.activeInnerTabId;
-    if (newActive === innerTabId) {
-      const neighbor = state.innerTabs[idx + 1] || state.innerTabs[idx - 1];
-      newActive = neighbor?.id || null;
+    if (idx < 0) return;
+    const ids = state.innerTabs.slice(idx + 1).map((t) => t.id);
+    get().requestCloseInnerTabs(tabId, ids);
+  },
+
+  setInnerTabDirty: (tabId, innerTabId, dirty) => {
+    const state = get().dbStates[tabId];
+    if (!state) return;
+    const current = state.dirtyInnerTabIds ?? [];
+    if (current.includes(innerTabId) === dirty) return;
+    const next = dirty ? [...current, innerTabId] : current.filter((id) => id !== innerTabId);
+    set((s) => ({ dbStates: { ...s.dbStates, [tabId]: { ...state, dirtyInnerTabIds: next } } }));
+    // 外层数据库标签借 tabStore 的未保存守卫:有脏内层标签时关外层会挂起 pendingCloseTabId,由 DatabasePanel 接管。
+    useTabStore.getState().setTabUnsaved(tabId, next.length > 0);
+  },
+
+  requestCloseInnerTabs: (tabId, ids, opts) => {
+    const state = get().dbStates[tabId];
+    if (!state) return;
+    const closeOuter = opts?.closeOuter ?? false;
+    const dirtyIds = ids.filter((id) => state.dirtyInnerTabIds?.includes(id));
+    if (dirtyIds.length === 0) {
+      get().forceCloseInnerTabs(tabId, ids, closeOuter);
+      return;
     }
     set((s) => ({
       dbStates: {
         ...s.dbStates,
-        [tabId]: { ...state, innerTabs: newTabs, activeInnerTabId: newActive },
+        [tabId]: {
+          ...state,
+          closeRequest: { ids, dirtyIds, closeOuter },
+          // 单个脏标签就地决定:切到它,让用户看着那页修改做选择。
+          activeInnerTabId: dirtyIds.length === 1 ? dirtyIds[0] : state.activeInnerTabId,
+        },
       },
     }));
+  },
+
+  forceCloseInnerTabs: (tabId, ids, closeOuter = false) => {
+    if (closeOuter) {
+      useTabStore.getState().forceCloseTab(tabId);
+      return;
+    }
+    const state = get().dbStates[tabId];
+    if (!state) return;
+    const closing = new Set(ids);
+    const innerTabs = state.innerTabs.filter((t) => !closing.has(t.id));
+    let activeInnerTabId = state.activeInnerTabId;
+    if (activeInnerTabId && closing.has(activeInnerTabId)) {
+      // 当前标签被关:优先落到它右侧最近的幸存标签,没有再找左侧。
+      const idx = state.innerTabs.findIndex((t) => t.id === activeInnerTabId);
+      const right = state.innerTabs.slice(idx + 1).find((t) => !closing.has(t.id));
+      const left = state.innerTabs
+        .slice(0, idx)
+        .reverse()
+        .find((t) => !closing.has(t.id));
+      activeInnerTabId = (right ?? left)?.id ?? null;
+    }
+    const dirtyInnerTabIds = (state.dirtyInnerTabIds ?? []).filter((id) => !closing.has(id));
+    set((s) => ({
+      dbStates: {
+        ...s.dbStates,
+        [tabId]: { ...state, innerTabs, activeInnerTabId, dirtyInnerTabIds, closeRequest: undefined },
+      },
+    }));
+    useTabStore.getState().setTabUnsaved(tabId, dirtyInnerTabIds.length > 0);
+  },
+
+  cancelCloseRequest: (tabId) => {
+    const state = get().dbStates[tabId];
+    if (!state?.closeRequest) return;
+    set((s) => ({ dbStates: { ...s.dbStates, [tabId]: { ...state, closeRequest: undefined } } }));
   },
 
   setActiveInnerTab: (tabId, innerTabId) => {
@@ -1406,6 +1526,7 @@ interface PersistedDbState {
   expandedSchemas?: Record<string, string[]>;
   innerTabs: InnerTab[];
   activeInnerTabId: string | null;
+  sqlTabSeq?: number;
 }
 
 interface PersistedMongoState {
@@ -1429,6 +1550,7 @@ function stripDbState(s: DatabaseTabState): PersistedDbState {
     expandedSchemas: s.expandedSchemas,
     innerTabs: s.innerTabs,
     activeInnerTabId: s.activeInnerTabId,
+    sqlTabSeq: s.sqlTabSeq,
   };
 }
 
@@ -1506,6 +1628,16 @@ registerTabCloseHook((tab) => {
 
 // === Restore Hook: initialize query tab states ===
 
+/** 持久化状态缺少序号计数时,按现存「SQL N」标签的最大 N 初始化,避免与它们重号。 */
+function maxSqlTitleNumber(innerTabs: InnerTab[]): number {
+  let max = 0;
+  for (const t of innerTabs) {
+    const m = t.type === "sql" ? /^SQL (\d+)$/.exec(t.title) : null;
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return max;
+}
+
 registerTabRestoreHook("query", (tabs) => {
   const persisted = loadPersistedQueryStore();
   // Drop persisted entries whose tab is no longer open
@@ -1528,6 +1660,7 @@ registerTabRestoreHook("query", (tabs) => {
           expandedSchemas: saved.expandedSchemas || {},
           innerTabs: (saved.innerTabs || []).map((it) => (it.type === "table" ? { ...it, pendingLoad: true } : it)),
           activeInnerTabId: saved.activeInnerTabId ?? null,
+          sqlTabSeq: saved.sqlTabSeq ?? maxSqlTitleNumber(saved.innerTabs || []),
         };
       } else {
         dbStates[tab.id] = defaultDbState();

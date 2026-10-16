@@ -15,8 +15,8 @@ import { CodeEditor } from "@/components/CodeEditor";
 import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
 import { useQueryStore } from "@/stores/queryStore";
 import { isMac, formatModKey } from "@/stores/shortcutStore";
-import { ExecuteSQL } from "../../../wailsjs/go/query/Query";
-import { OpenTable } from "../../../wailsjs/go/query/Query";
+import { CountTableRows, ExecuteSQL, GetTableDDL, OpenTable, QueryTableRows } from "../../../wailsjs/go/query/Query";
+import { dbdriver, query_svc } from "../../../wailsjs/go/models";
 import {
   QueryResultTable,
   CellEdit,
@@ -26,6 +26,7 @@ import {
   type RowDensity,
 } from "./QueryResultTable";
 import { SqlPreviewDialog } from "./SqlPreviewDialog";
+import { driverHasCapability, findDatabaseDriver, useDatabaseDrivers } from "@/lib/dbDrivers";
 import { ImportTableDataDialog } from "./ImportTableDataDialog";
 import { ExportTableDataDialog } from "./ExportTableDataDialog";
 import { TableFilterBuilder } from "./TableFilterBuilder";
@@ -39,8 +40,6 @@ import { toInsertSql, toTsv, toTsvData, toTsvFields, toUpdateSql } from "@/lib/t
 import { buildInsertStatement, validateInsertRow, type TableColumnRule } from "@/lib/tableEdit";
 import {
   buildDeleteStatement,
-  buildFilterByCellValueClause,
-  buildPagedSelect,
   buildSingleRowUpdate,
   quoteIdent,
   quoteTableRef,
@@ -48,10 +47,10 @@ import {
   type CellValueFilterOperator,
 } from "@/lib/tableSql";
 import {
-  buildFilterWhereClause,
-  buildSortOrderByClause,
   createFilterCondition,
   removeFilterItemsByColumn,
+  toFilterRequest,
+  toSortRequest,
   type TableFilterItem,
   type TableSortItem,
 } from "@/lib/tableFilter";
@@ -160,8 +159,9 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
   const [filters, setFilters] = useState<TableFilterItem[]>([]);
   const [sorts, setSorts] = useState<TableSortItem[]>([]);
   const [showFilterSort, setShowFilterSort] = useState(false);
-  const [whereClause, setWhereClause] = useState("");
-  const [orderByClause, setOrderByClause] = useState("");
+  // filters / sorts 是筛选器里正在编辑的内容;applied* 是已经生效、随请求发给驱动的那一份。
+  const [appliedFilters, setAppliedFilters] = useState<TableFilterItem[]>([]);
+  const [appliedSorts, setAppliedSorts] = useState<TableSortItem[]>([]);
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>(null);
   const [applyVersion, setApplyVersion] = useState(0);
@@ -195,6 +195,12 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
 
   const driver = queryMeta?.driver;
   const assetId = queryMeta?.assetId ?? 0;
+  // 入口按资产驱动声明的功能显隐;描述未就绪或驱动未注册时,这些入口都不出现。
+  const driversState = useDatabaseDrivers();
+  const driverDescriptor =
+    driversState.status === "ready" && driver ? findDatabaseDriver(driversState.drivers, driver) : undefined;
+  const can = (capability: string) => driverHasCapability(driverDescriptor, capability);
+  const canGridEdit = can("grid_edit");
 
   const totalPages = totalRows != null ? Math.max(1, Math.ceil(totalRows / pageSize)) : null;
   const nextRequestId = useCallback(() => {
@@ -229,8 +235,8 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     }
   }
 
-  // 打开表时一次性拉取主键 / 列类型 / 总行数 / 首页数据,替代原来 4 次独立的
-  // ExecuteSQL。后续 fetchCount/fetchData 仍按需触发(filter apply / 翻页 / 排序),
+  // 打开表时一次性拉取主键 / 列类型 / 总行数 / 首页数据。
+  // 后续 fetchCount/fetchData 仍按需触发(filter apply / 翻页 / 排序),
   // openedRef 作为初次挂载时的门闩,避免和 OpenTable 重复请求。
   // 用 requestId 接入现有取消系统,让"停止加载"按钮也能丢弃首次加载的结果。
   useEffect(() => {
@@ -267,30 +273,33 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assetId, database, table, nextRequestId, isCancelled]);
 
+  // 翻页、计数发给驱动的是结构化的筛选条件与排序项,不是 SQL:怎么变成查询由驱动决定。
+  const filterRequest = useMemo(
+    () => toFilterRequest(appliedFilters).map((item) => dbdriver.FilterItem.createFrom(item)),
+    [appliedFilters]
+  );
+  // Header-click sort takes precedence over the builder's sort criteria.
+  const sortRequest = useMemo(
+    () => (sortColumn && sortDir ? [{ column: sortColumn, dir: sortDir }] : toSortRequest(appliedSorts)),
+    [appliedSorts, sortColumn, sortDir]
+  );
+
   // Fetch total count
   const fetchCount = useCallback(async () => {
     if (!assetId) return;
     const requestId = nextRequestId();
     latestCountRequest.current = requestId;
-    const tableName = quoteTableRef(database, table, driver);
-    const where = whereClause.trim();
-    const wherePart = where ? ` WHERE ${where}` : "";
     try {
-      const result = await ExecuteSQL(assetId, `SELECT COUNT(*) AS cnt FROM ${tableName}${wherePart}`, database);
-      const parsed: SQLResult = JSON.parse(result);
+      const total = await CountTableRows(assetId, database, table, filterRequest);
       if (isCancelled(requestId) || latestCountRequest.current !== requestId) return;
-      const row = parsed.rows?.[0];
-      if (row) {
-        const cnt = Number(Object.values(row)[0]);
-        if (!isNaN(cnt)) setTotalRows(cnt);
-      }
+      setTotalRows(total);
     } catch {
       if (isCancelled(requestId) || latestCountRequest.current !== requestId) return;
       setTotalRows(null);
     } finally {
       cancelledRequests.current.delete(requestId);
     }
-  }, [assetId, database, table, driver, whereClause, nextRequestId, isCancelled]);
+  }, [assetId, database, table, filterRequest, nextRequestId, isCancelled]);
 
   const fetchData = useCallback(
     async (pageNum: number) => {
@@ -300,23 +309,21 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
       setLoading(true);
       setError(null);
 
-      const offset = pageNum * pageSize;
-      const tableName = quoteTableRef(database, table, driver);
-      const where = whereClause.trim();
-      // Header-click sort takes precedence over the manual ORDER BY input.
-      const orderBy =
-        sortColumn && sortDir
-          ? `${quoteIdent(sortColumn, driver)} ${sortDir === "asc" ? "ASC" : "DESC"}`
-          : orderByClause.trim();
-      const wherePart = where ? ` WHERE ${where}` : "";
-      const sql = buildPagedSelect({ tableRef: tableName, wherePart, orderByExpr: orderBy, pageSize, offset, driver });
-
       try {
-        const result = await ExecuteSQL(assetId, sql, database);
-        const parsed: SQLResult = JSON.parse(result);
+        const result = await QueryTableRows(
+          assetId,
+          database,
+          table,
+          query_svc.TableRowsRequest.createFrom({
+            filters: filterRequest,
+            sorts: sortRequest,
+            page: pageNum,
+            pageSize,
+          })
+        );
         if (isCancelled(requestId) || latestDataRequest.current !== requestId) return;
-        setColumns(parsed.columns || []);
-        setRows(parsed.rows || []);
+        setColumns(result.columns);
+        setRows(result.rows);
         setSelectedRowIdx(null);
       } catch (e) {
         if (isCancelled(requestId) || latestDataRequest.current !== requestId) return;
@@ -329,19 +336,7 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
         cancelledRequests.current.delete(requestId);
       }
     },
-    [
-      assetId,
-      database,
-      table,
-      driver,
-      pageSize,
-      whereClause,
-      orderByClause,
-      sortColumn,
-      sortDir,
-      nextRequestId,
-      isCancelled,
-    ]
+    [assetId, database, table, pageSize, filterRequest, sortRequest, nextRequestId, isCancelled]
   );
 
   useEffect(() => {
@@ -656,11 +651,10 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
   }, [isOuterActive, isInnerActive, handleRefresh]);
 
   const handleApplyQuery = useCallback(() => {
-    setWhereClause(buildFilterWhereClause(filters, driver));
-    const sortClause = buildSortOrderByClause(sorts, driver);
-    setOrderByClause(sortClause);
-    // Builder ORDER BY overrides the header-click sort state.
-    if (sortClause) {
+    setAppliedFilters(filters);
+    setAppliedSorts(sorts);
+    // Builder sort criteria override the header-click sort state.
+    if (sorts.length > 0) {
       setSortColumn(null);
       setSortDir(null);
     }
@@ -668,15 +662,15 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     setEdits(new Map());
     setNewRows([]);
     setApplyVersion((v) => v + 1);
-  }, [driver, filters, sorts]);
+  }, [filters, sorts]);
 
   const handleSortChange = useCallback((col: string | null, dir: SortDir) => {
     setSortColumn(col);
     setSortDir(dir);
-    // Header click takes precedence — clear the builder ORDER BY state so the user
+    // Header click takes precedence — clear the builder's sort criteria so the user
     // can see which sort is actually applied.
     setSorts([]);
-    setOrderByClause("");
+    setAppliedSorts([]);
     setPage(0);
     setEdits(new Map());
     setNewRows([]);
@@ -685,37 +679,45 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
 
   const handleFilterByCellValue = useCallback(
     ({ col, value, operator = "=" }: { col: string; value: unknown; operator?: CellValueFilterOperator }) => {
-      const filterValue = filterOperatorNeedsRange(operator) ? [value, value] : value;
-      const clause = buildFilterByCellValueClause(col, filterValue, driver, operator);
-      setFilters([createFilterCondition(`cell-${col}`, col, { value: filterValue, operator })]);
+      const condition = (cellValue: unknown) =>
+        createFilterCondition(`cell-${col}`, col, {
+          value: filterOperatorNeedsRange(operator) ? [cellValue, cellValue] : cellValue,
+          operator,
+        });
+      setFilters([condition(value)]);
       setShowFilterSort(true);
-      setWhereClause(clause);
+      // 没有值的单元格(尚未提交的新增行)按 NULL 筛选,而不是当作还没填值的条件被略过;
+      // 区间运算符两端都缺,条件照旧不产生限制。
+      const unfilledRange = value === undefined && filterOperatorNeedsRange(operator);
+      setAppliedFilters([
+        unfilledRange
+          ? createFilterCondition(`cell-${col}`, col, { operator })
+          : condition(value === undefined ? null : value),
+      ]);
       setPage(0);
       setEdits(new Map());
       setNewRows([]);
       setApplyVersion((v) => v + 1);
     },
-    [driver]
+    []
   );
 
   const handleRemoveColumnFilter = useCallback(
     (column: string) => {
-      setFilters((prev) => {
-        const next = removeFilterItemsByColumn(prev, column);
-        setWhereClause(buildFilterWhereClause(next, driver));
-        return next;
-      });
+      const next = removeFilterItemsByColumn(filters, column);
+      setFilters(next);
+      setAppliedFilters(next);
       setPage(0);
       setEdits(new Map());
       setNewRows([]);
       setApplyVersion((v) => v + 1);
     },
-    [driver]
+    [filters]
   );
 
   const handleRemoveAllFilters = useCallback(() => {
     setFilters([]);
-    setWhereClause("");
+    setAppliedFilters([]);
     setPage(0);
     setEdits(new Map());
     setNewRows([]);
@@ -731,9 +733,9 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
 
   const handleClearFilterSort = useCallback(() => {
     setFilters([]);
-    setWhereClause("");
+    setAppliedFilters([]);
     setSorts([]);
-    setOrderByClause("");
+    setAppliedSorts([]);
     setSortColumn(null);
     setSortDir(null);
     setPage(0);
@@ -908,117 +910,14 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     setDdlLoading(true);
 
     try {
-      let ddl = "";
-
-      if (driver === "postgresql") {
-        const tableLiteral = sqlQuote(table);
-        const columnsSql = `SELECT column_name, data_type, udt_name, is_nullable, column_default FROM information_schema.columns WHERE table_schema = 'public' AND table_name = ${tableLiteral} ORDER BY ordinal_position`;
-        const primaryKeySql = `SELECT kcu.column_name FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema WHERE tc.table_schema = 'public' AND tc.table_name = ${tableLiteral} AND tc.constraint_type = 'PRIMARY KEY' ORDER BY kcu.ordinal_position`;
-
-        const columnsResult = await ExecuteSQL(assetId, columnsSql, database);
-        const primaryKeyResult = await ExecuteSQL(assetId, primaryKeySql, database);
-        const columnsParsed: SQLResult = JSON.parse(columnsResult);
-        const primaryKeyParsed: SQLResult = JSON.parse(primaryKeyResult);
-
-        const columns = columnsParsed.rows || [];
-        const primaryKeyColumns = (primaryKeyParsed.rows || [])
-          .map((r) => String(Object.values(r)[0] ?? ""))
-          .filter(Boolean);
-
-        if (columns.length > 0) {
-          const defs = columns.map((col) => {
-            const name = String(col.column_name ?? "");
-            const dataType = String(col.data_type ?? "");
-            const udtName = String(col.udt_name ?? "");
-            const columnDefault = col.column_default == null ? "" : String(col.column_default);
-            const type = dataType === "USER-DEFINED" && udtName ? udtName : dataType;
-            const nullable = String(col.is_nullable ?? "").toUpperCase() === "YES";
-
-            let line = `${quoteIdent(name, driver)} ${type}`;
-            if (!nullable) line += " NOT NULL";
-            if (columnDefault) line += ` DEFAULT ${columnDefault}`;
-            return line;
-          });
-
-          if (primaryKeyColumns.length > 0) {
-            defs.push(`PRIMARY KEY (${primaryKeyColumns.map((c) => quoteIdent(c, driver)).join(", ")})`);
-          }
-
-          ddl = `CREATE TABLE ${quoteIdent("public", driver)}.${quoteIdent(table, driver)} (\n  ${defs.join(",\n  ")}\n);`;
-        }
-      } else if (driver === "sqlite") {
-        const schema = database ? `${quoteIdent(database, driver)}.` : "";
-        const result = await ExecuteSQL(
-          assetId,
-          `SELECT sql FROM ${schema}sqlite_master WHERE type IN ('table', 'view') AND name = ${sqlQuote(table)} LIMIT 1`,
-          database
-        );
-        const parsed: SQLResult = JSON.parse(result);
-        const row = parsed.rows?.[0];
-        if (row) {
-          ddl = String(row.sql ?? Object.values(row)[0] ?? "");
-        }
-      } else if (driver === "mssql") {
-        // MSSQL 无 SHOW CREATE TABLE，从 INFORMATION_SCHEMA 重建（table 为 schema.table）。
-        const dot = table.indexOf(".");
-        const schemaLit = sqlQuote(dot >= 0 ? table.slice(0, dot) : "dbo");
-        const tableLit = sqlQuote(dot >= 0 ? table.slice(dot + 1) : table);
-        const columnsSql =
-          `SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, IS_NULLABLE, COLUMN_DEFAULT ` +
-          `FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ${schemaLit} AND TABLE_NAME = ${tableLit} ORDER BY ORDINAL_POSITION`;
-        const primaryKeySql =
-          `SELECT kcu.COLUMN_NAME FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc ` +
-          `JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu ON tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME AND tc.TABLE_SCHEMA = kcu.TABLE_SCHEMA ` +
-          `WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY' AND tc.TABLE_SCHEMA = ${schemaLit} AND tc.TABLE_NAME = ${tableLit} ORDER BY kcu.ORDINAL_POSITION`;
-
-        const [columnsResult, primaryKeyResult] = await Promise.all([
-          ExecuteSQL(assetId, columnsSql, database),
-          ExecuteSQL(assetId, primaryKeySql, database),
-        ]);
-        const columnsParsed: SQLResult = JSON.parse(columnsResult);
-        const primaryKeyParsed: SQLResult = JSON.parse(primaryKeyResult);
-        const cols = columnsParsed.rows || [];
-        const pkColumns = (primaryKeyParsed.rows || []).map((r) => String(Object.values(r)[0] ?? "")).filter(Boolean);
-
-        if (cols.length > 0) {
-          const defs = cols.map((col) => {
-            const name = String(col.COLUMN_NAME ?? col.column_name ?? "");
-            const dataType = String(col.DATA_TYPE ?? col.data_type ?? "");
-            const maxLenRaw = col.CHARACTER_MAXIMUM_LENGTH ?? col.character_maximum_length;
-            const maxLen = maxLenRaw == null ? null : Number(maxLenRaw);
-            const type =
-              maxLen === -1 ? `${dataType}(max)` : maxLen && maxLen > 0 ? `${dataType}(${maxLen})` : dataType;
-            const nullable = String(col.IS_NULLABLE ?? col.is_nullable ?? "").toUpperCase() === "YES";
-            const colDefault = col.COLUMN_DEFAULT == null ? "" : String(col.COLUMN_DEFAULT);
-            let line = `${quoteIdent(name, driver)} ${type}`;
-            if (!nullable) line += " NOT NULL";
-            if (colDefault) line += ` DEFAULT ${colDefault}`;
-            return line;
-          });
-          if (pkColumns.length > 0) {
-            defs.push(`PRIMARY KEY (${pkColumns.map((c) => quoteIdent(c, driver)).join(", ")})`);
-          }
-          ddl = `CREATE TABLE ${quoteTableRef(database, table, driver)} (\n  ${defs.join(",\n  ")}\n);`;
-        }
-      } else {
-        const quotedTable = quoteIdent(table, driver);
-        const result = await ExecuteSQL(assetId, `SHOW CREATE TABLE ${quotedTable}`, database);
-        const parsed: SQLResult = JSON.parse(result);
-        const row = parsed.rows?.[0];
-        if (row) {
-          const values = Object.values(row);
-          const createSQL = values.find((v) => typeof v === "string" && /CREATE\s+(TABLE|VIEW)/i.test(String(v)));
-          ddl = String(createSQL ?? values[1] ?? values[0] ?? "");
-        }
-      }
-
+      const ddl = await GetTableDDL(assetId, database, table);
       setDdlSQL(ddl || t("query.ddlEmpty"));
     } catch (e) {
       setDdlSQL(String(e));
     } finally {
       setDdlLoading(false);
     }
-  }, [assetId, driver, table, database, t]);
+  }, [assetId, table, database, t]);
 
   const handleCopyDDL = useCallback(async () => {
     const text = ddlLoading ? "" : ddlSQL;
@@ -1056,15 +955,22 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     [visibleColumns, columns]
   );
   const hasActiveFilterSort =
-    filters.length > 0 || sorts.length > 0 || !!whereClause || !!orderByClause || !!sortColumn || !!sortDir;
+    filters.length > 0 ||
+    sorts.length > 0 ||
+    filterRequest.length > 0 ||
+    sortRequest.length > 0 ||
+    !!sortColumn ||
+    !!sortDir;
 
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-2 border-b border-border bg-muted/20 px-3 py-1.5 shrink-0">
-        <Button variant="outline" size="sm" className="h-7 text-xs gap-1 shrink-0" onClick={handleViewDDL}>
-          <FileCode2 className="h-3.5 w-3.5" />
-          {t("query.viewDDL")}
-        </Button>
+        {can("view_ddl") && (
+          <Button variant="outline" size="sm" className="h-7 text-xs gap-1 shrink-0" onClick={handleViewDDL}>
+            <FileCode2 className="h-3.5 w-3.5" />
+            {t("query.viewDDL")}
+          </Button>
+        )}
         <QueryViewModeToggle value={viewMode} onChange={setViewMode} />
         <Button
           variant={rowDetailOpen ? "secondary" : "ghost"}
@@ -1080,6 +986,9 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
           submitting={submitting || deleting}
           canExport={rows.length > 0}
           canImport={columns.length > 0}
+          gridEdit={canGridEdit}
+          importAvailable={can("import")}
+          sqlExportAvailable={can("export_sql")}
           columns={columns}
           visibleColumns={effectiveVisibleColumns}
           rowDensity={rowDensity}
@@ -1096,7 +1005,7 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
           onExport={handleExport}
           onPreviewSql={() => openSqlDialog("preview")}
         />
-        {driver !== "postgresql" && pkLoaded && primaryKeys.length === 0 && columns.length > 0 && (
+        {canGridEdit && driver !== "postgresql" && pkLoaded && primaryKeys.length === 0 && columns.length > 0 && (
           <span
             className="flex items-center gap-1 text-[11px] text-warning shrink-0"
             title={t("query.noPrimaryKeyTooltip")}
@@ -1136,7 +1045,7 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
               rows={tableRows}
               loading={loading || importing}
               error={error ?? undefined}
-              editable
+              editable={canGridEdit}
               edits={edits}
               onCellEdit={handleCellEdit}
               onSetCellValue={handleCellEdit}
@@ -1144,6 +1053,7 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
               onPasteBlock={handlePasteBlock}
               onGenerateUuid={handleCellEdit}
               onCopyAs={handleCopyAs}
+              copyAsSql={can("copy_sql")}
               onFilterByCellValue={handleFilterByCellValue}
               onSortByColumn={handleSortByColumn}
               onClearFilterSort={handleClearFilterSort}
@@ -1184,6 +1094,7 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
 
       {/* Footer bar */}
       <TableDataStatusBar
+        gridEdit={canGridEdit}
         pendingEditCount={pendingEditCount}
         sqlSummary={pendingSqlSummary}
         totalRows={totalRows}
@@ -1278,12 +1189,11 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
         totalRows={totalRows}
         page={page}
         pageSize={pageSize}
-        whereClause={whereClause}
-        orderByClause={orderByClause}
-        sortColumn={sortColumn}
-        sortDir={sortDir}
+        filters={filterRequest}
+        sorts={sortRequest}
         driver={driver}
         initialFormat={exportFormat}
+        sqlFormatAvailable={can("export_sql")}
         onFormatChange={setExportFormat}
       />
 

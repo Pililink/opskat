@@ -148,7 +148,21 @@ describe("table import helpers", () => {
     ]);
   });
 
-  it("builds MSSQL upsert and skip SQL with MERGE (no MySQL-only syntax)", () => {
+  describe("MSSQL import", () => {
+    // 期望的包装：同一批里由数据库判断映射列是否含自增列，含则临时 IDENTITY_INSERT ON，
+    // 语句失败时也要 OFF 并原样 THROW；不含则不触碰 IDENTITY_INSERT。
+    const wrapped = (core: string, columns: string[], table = "[dbo].[users]") => {
+      const hasIdentity =
+        "EXISTS (SELECT 1 FROM sys.identity_columns " +
+        `WHERE object_id = OBJECT_ID(N'${table}', N'U') AND name IN (${columns.map((c) => `N'${c}'`).join(", ")}))`;
+      return (
+        `IF ${hasIdentity} SET IDENTITY_INSERT ${table} ON; ` +
+        `BEGIN TRY ${core} END TRY ` +
+        `BEGIN CATCH IF ${hasIdentity} SET IDENTITY_INSERT ${table} OFF; THROW; END CATCH; ` +
+        `IF ${hasIdentity} SET IDENTITY_INSERT ${table} OFF;`
+      );
+    };
+
     const base = {
       tableName: "dbo.users",
       headers: ["id", "name", "email"],
@@ -158,24 +172,103 @@ describe("table import helpers", () => {
       primaryKeys: ["id"],
       driver: "mssql",
     };
+    const cols = ["id", "name", "email"];
 
-    expect(buildImportInsertSql({ ...base, mode: "append-update" })).toEqual([
-      "MERGE [dbo].[users] AS t USING (SELECT '1' AS [id], 'Alice' AS [name], 'alice@example.test' AS [email]) AS s " +
-        "ON (t.[id] = s.[id]) " +
-        "WHEN MATCHED THEN UPDATE SET t.[name] = s.[name], t.[email] = s.[email] " +
-        "WHEN NOT MATCHED THEN INSERT ([id], [name], [email]) VALUES (s.[id], s.[name], s.[email]);",
-    ]);
+    it("wraps MERGE for append-update and append-skip so identity columns can be written", () => {
+      expect(buildImportInsertSql({ ...base, mode: "append-update" })).toEqual([
+        wrapped(
+          "MERGE [dbo].[users] AS t USING (SELECT '1' AS [id], 'Alice' AS [name], 'alice@example.test' AS [email]) AS s " +
+            "ON (t.[id] = s.[id]) " +
+            "WHEN MATCHED THEN UPDATE SET t.[name] = s.[name], t.[email] = s.[email] " +
+            "WHEN NOT MATCHED THEN INSERT ([id], [name], [email]) VALUES (s.[id], s.[name], s.[email]);",
+          cols
+        ),
+      ]);
 
-    expect(buildImportInsertSql({ ...base, mode: "append-skip" })).toEqual([
-      "MERGE [dbo].[users] AS t USING (SELECT '1' AS [id], 'Alice' AS [name], 'alice@example.test' AS [email]) AS s " +
-        "ON (t.[id] = s.[id]) " +
-        "WHEN NOT MATCHED THEN INSERT ([id], [name], [email]) VALUES (s.[id], s.[name], s.[email]);",
-    ]);
+      expect(buildImportInsertSql({ ...base, mode: "append-skip" })).toEqual([
+        wrapped(
+          "MERGE [dbo].[users] AS t USING (SELECT '1' AS [id], 'Alice' AS [name], 'alice@example.test' AS [email]) AS s " +
+            "ON (t.[id] = s.[id]) " +
+            "WHEN NOT MATCHED THEN INSERT ([id], [name], [email]) VALUES (s.[id], s.[name], s.[email]);",
+          cols
+        ),
+      ]);
+    });
 
-    // update / delete / copy 走通用路径，只验证方括号引用正确
-    expect(buildImportInsertSql({ ...base, mode: "update" })).toEqual([
-      "UPDATE [dbo].[users] SET [name] = 'Alice', [email] = 'alice@example.test' WHERE [id] = '1';",
-    ]);
+    it("wraps plain INSERT for append, and keeps copy's DELETE as its own unwrapped element", () => {
+      const insert = "INSERT INTO [dbo].[users] ([id], [name], [email]) VALUES ('1', 'Alice', 'alice@example.test');";
+      expect(buildImportInsertSql({ ...base, mode: "append" })).toEqual([wrapped(insert, cols)]);
+      expect(buildImportInsertSql({ ...base, mode: "copy" })).toEqual([
+        "DELETE FROM [dbo].[users];",
+        wrapped(insert, cols),
+      ]);
+    });
+
+    it("wraps every extended-insert chunk", () => {
+      const out = buildImportInsertSql({
+        ...base,
+        rows: [
+          ["1", "A", "a@x"],
+          ["2", "B", "b@x"],
+        ],
+        mode: "append",
+        advancedOptions: { extendedInsert: true, maxStatementSizeKb: 1 },
+      });
+      expect(out).toEqual([
+        wrapped("INSERT INTO [dbo].[users] ([id], [name], [email]) VALUES ('1', 'A', 'a@x'), ('2', 'B', 'b@x');", cols),
+      ]);
+    });
+
+    it("adds no row count of its own around the import statement", () => {
+      // 导入摘要的「新增 / 更新」取自每个元素的受影响行数（go-mssqldb 把一批里所有带计数的
+      // DONE 相加）。SQL Server 把变量赋值（DECLARE @x = … / SET @x = … / SELECT @x = …）
+      // 计为 1 行，真库上每条包装后的语句会多算 1 行，没有自增列的表也一样。
+      for (const mode of ["append", "append-update", "append-skip", "copy"] as const) {
+        for (const statement of buildImportInsertSql({ ...base, mode })) {
+          expect(statement).not.toMatch(/\bDECLARE\b|\b(SET|SELECT)\s+@/i);
+        }
+      }
+    });
+
+    it("escapes quotes in the object name and column names inside N'' literals", () => {
+      const [sql] = buildImportInsertSql({
+        tableName: "dbo.o'brien",
+        headers: ["i'd"],
+        rows: [["1"]],
+        mapping: { "i'd": "i'd" },
+        nullStrategy: "literal-null",
+        mode: "append",
+        driver: "mssql",
+      });
+      expect(sql).toContain("OBJECT_ID(N'[dbo].[o''brien]', N'U')");
+      expect(sql).toContain("name IN (N'i''d')");
+    });
+
+    it("only looks up identity columns of user tables, so a view keeps its original error", () => {
+      // 视图的列也出现在 sys.identity_columns 里，但对视图 SET IDENTITY_INSERT 报 8105 并中止整批，
+      // 掩盖原本的「Cannot insert explicit value for identity column」。
+      for (const statement of buildImportInsertSql({ ...base, mode: "append" })) {
+        expect(statement.match(/OBJECT_ID\([^)]*\)/g)).toEqual(Array(3).fill("OBJECT_ID(N'[dbo].[users]', N'U')"));
+      }
+    });
+
+    it("leaves update and delete untouched (they do not insert)", () => {
+      expect(buildImportInsertSql({ ...base, mode: "update" })).toEqual([
+        "UPDATE [dbo].[users] SET [name] = 'Alice', [email] = 'alice@example.test' WHERE [id] = '1';",
+      ]);
+      expect(buildImportInsertSql({ ...base, mode: "delete" })).toEqual([
+        "DELETE FROM [dbo].[users] WHERE [id] = '1';",
+      ]);
+    });
+
+    it("does not leak IDENTITY_INSERT handling into other drivers", () => {
+      for (const driver of ["mysql", "postgresql", "sqlite"]) {
+        for (const mode of ["append", "append-update", "append-skip", "copy"] as const) {
+          const out = buildImportInsertSql({ ...base, mode, driver });
+          expect(out.join("\n")).not.toMatch(/IDENTITY_INSERT|sys\.identity_columns/);
+        }
+      }
+    });
   });
 
   it("keeps foreign-key toggling out of generated row statements", () => {

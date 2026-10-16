@@ -1,0 +1,60 @@
+import { vi } from "vitest";
+import { dbdriver } from "../../wailsjs/go/models";
+import { ListDatabaseDrivers } from "../../wailsjs/go/query/Query";
+import { resetDatabaseDriverCache } from "@/lib/dbDrivers";
+import builtinDrivers from "./builtinDbDrivers.json";
+
+type FormSpec = Record<string, string[]>;
+
+function driver(d: {
+  id: string;
+  name: string;
+  icon: string;
+  order: number;
+  defaultPort: number;
+  form: FormSpec;
+  capabilities?: string[];
+}): dbdriver.Descriptor {
+  return new dbdriver.Descriptor({
+    id: d.id,
+    name: d.name,
+    icon: d.icon,
+    order: d.order,
+    aliases: [],
+    defaultPort: d.defaultPort,
+    form: Object.entries(d.form).map(([tab, fields]) => ({ tab, fields })),
+    capabilities: d.capabilities ?? [],
+  });
+}
+
+/**
+ * 后端内置四个驱动的描述,供前端测试当作 Query.ListDatabaseDrivers 的返回值。
+ * 内容就是注册表序列化出来的 JSON,由 Go 侧 internal/archtest 的
+ * TestFrontendBuiltinDriverFixtureMatchesRegistry 核对:驱动描述变了而它没跟着改,那条测试先红。
+ */
+export const BUILTIN_DRIVERS: dbdriver.Descriptor[] = builtinDrivers.map((d) => new dbdriver.Descriptor(d));
+
+/** 前端从未听说过的驱动:带用户名/库名、TLS 与 SSL 模式,不用口令认证。 */
+export const FAKE_DRIVER: dbdriver.Descriptor = driver({
+  id: "fakedb",
+  name: "FakeDB",
+  icon: "fake-icon",
+  order: 5,
+  defaultPort: 9042,
+  form: {
+    connection: ["host", "port", "username", "database"],
+    tls: ["ssl_mode"],
+    advanced: ["query_timeout_seconds"],
+  },
+});
+
+/** 一个只在测试里存在的驱动,功能集合由测试指定,用来证明界面入口跟随驱动的声明。 */
+export function fakeDriverWith(capabilities: string[], id = FAKE_DRIVER.id): dbdriver.Descriptor {
+  return new dbdriver.Descriptor({ ...FAKE_DRIVER, id, name: "FakeDB", capabilities });
+}
+
+/** 让 Query.ListDatabaseDrivers 返回给定的描述列表,并丢弃进程内缓存。 */
+export function provideDrivers(drivers: dbdriver.Descriptor[]): void {
+  resetDatabaseDriverCache();
+  vi.mocked(ListDatabaseDrivers).mockResolvedValue(drivers);
+}

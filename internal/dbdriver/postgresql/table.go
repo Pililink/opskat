@@ -19,7 +19,7 @@ func quoteIdent(name string) string {
 
 func (dialect) QuoteIdent(name string) string { return quoteIdent(name) }
 
-func (dialect) TableRef(_, table string) string { return sqldb.QuoteQualified(table, quoteIdent) }
+func (dialect) TableRef(_, table string) string { return sqldb.QuoteSchemaTable(table, quoteIdent) }
 
 func (dialect) PrimaryKeys(ctx context.Context, conn *sql.Conn, _, table string) ([]string, error) {
 	schema, tbl := splitSchemaTable(table)
@@ -39,5 +39,7 @@ func (dialect) TableColumns(ctx context.Context, conn *sql.Conn, _, table string
 
 // columnsQuery 按 schema 与表名读列定义。
 const columnsQuery = "SELECT column_name, data_type, udt_name, is_nullable, column_default, " +
-	"col_description(format('%I.%I', table_schema, table_name)::regclass, ordinal_position::int) AS column_comment " +
+	"col_description(format('%I.%I', table_schema, table_name)::regclass, ordinal_position::int) AS column_comment, " +
+	"(is_identity = 'YES' OR column_default LIKE 'nextval(%') AS is_auto_increment, " +
+	"(identity_generation = 'ALWAYS') AS is_identity_always " +
 	"FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2 ORDER BY ordinal_position"

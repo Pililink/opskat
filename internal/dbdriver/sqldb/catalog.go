@@ -242,23 +242,40 @@ func AssembleMetadata(columns []dbdriver.ColumnMeta, primaryKeys []string, index
 	return &dbdriver.TableMetadata{Columns: columns, Indexes: indexes, ForeignKeys: foreignKeys}
 }
 
-// SplitSchemaTable 把可能带 schema 前缀的表名拆成（schema, table）：
-// "events" → (defaultSchema, "events")；"reporting.events" → ("reporting", "events")。
+// SplitSchemaTable 把列表给出的表名拆成（schema, table），只在第一个点处拆：
+// "events" → (defaultSchema, "events")；"reporting.events" → ("reporting", "events")；
+// "public.a.b" → ("public", "a.b")（名字带点的表作为一个整体，schema 名本身带点的不在此列）。
 func SplitSchemaTable(table, defaultSchema string) (string, string) {
-	parts := make([]string, 0, 2)
-	for _, p := range strings.Split(table, ".") {
-		if p != "" {
-			parts = append(parts, p)
+	if schema, name, qualified := strings.Cut(table, "."); qualified {
+		return schema, name
+	}
+	return defaultSchema, table
+}
+
+// QueryRecords 执行一条查询，把每一行按结果列名取成 map（[]byte 转成字符串，见 ZipRow）。
+func QueryRecords(ctx context.Context, conn *sql.Conn, query string, args ...any) ([]map[string]any, error) {
+	rows, err := conn.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+	var records []map[string]any
+	for rows.Next() {
+		values := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range values {
+			ptrs[i] = &values[i]
 		}
+		if err := rows.Scan(ptrs...); err != nil {
+			return nil, err
+		}
+		records = append(records, ZipRow(cols, values))
 	}
-	switch {
-	case len(parts) >= 2:
-		return parts[0], parts[len(parts)-1]
-	case len(parts) == 1:
-		return defaultSchema, parts[0]
-	default:
-		return defaultSchema, ""
-	}
+	return records, rows.Err()
 }
 
 // ZipRow 把一行的值按列名组成 map，[]byte 转成字符串。

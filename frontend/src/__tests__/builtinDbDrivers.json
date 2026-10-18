@@ -54,7 +54,14 @@
       "export_sql",
       "copy_sql",
       "read_only"
-    ]
+    ],
+    "canDisableForeignKeyChecks": true,
+    "locatesRowWithoutPrimaryKey": false,
+    "createDatabaseOptions": [
+      { "key": "charset", "default": "utf8mb4" },
+      { "key": "collation", "default": "utf8mb4_0900_ai_ci" }
+    ],
+    "alterTableAttributes": ["table_comment", "column_type", "column_nullable", "column_default", "column_comment"]
   },
   {
     "id": "postgresql",
@@ -114,7 +121,14 @@
       "export_sql",
       "copy_sql",
       "read_only"
-    ]
+    ],
+    "canDisableForeignKeyChecks": false,
+    "locatesRowWithoutPrimaryKey": true,
+    "createDatabaseOptions": [
+      { "key": "charset", "default": "UTF8" },
+      { "key": "collation", "default": "" }
+    ],
+    "alterTableAttributes": ["table_comment", "column_type", "column_nullable", "column_default", "column_comment"]
   },
   {
     "id": "mssql",
@@ -174,7 +188,11 @@
       "export_sql",
       "copy_sql",
       "read_only"
-    ]
+    ],
+    "canDisableForeignKeyChecks": true,
+    "locatesRowWithoutPrimaryKey": false,
+    "createDatabaseOptions": [{ "key": "collation", "default": "" }],
+    "alterTableAttributes": ["column_type", "column_nullable"]
   },
   {
     "id": "sqlite",
@@ -222,6 +240,10 @@
       "export_sql",
       "copy_sql",
       "read_only"
-    ]
+    ],
+    "canDisableForeignKeyChecks": true,
+    "locatesRowWithoutPrimaryKey": true,
+    "createDatabaseOptions": null,
+    "alterTableAttributes": []
   }
 ]

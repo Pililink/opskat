@@ -29,13 +29,13 @@ import { OpenDirectory } from "../../../wailsjs/go/system/System";
 import {
   CloseTableExport,
   ExportTableToXlsx,
+  GetRowStatements,
   OpenTableExport,
   ReadTableExport,
   SelectTableExportFile,
   WriteTableExportFile,
 } from "../../../wailsjs/go/query/Query";
-import type { dbdriver } from "../../../wailsjs/go/models";
-import { query, query_svc } from "../../../wailsjs/go/models";
+import { dbdriver, query, query_svc } from "../../../wailsjs/go/models";
 import type { TableSortRequestItem } from "@/lib/tableFilter";
 import {
   buildTableExportContent,
@@ -51,7 +51,6 @@ interface ExportTableDataDialogProps {
   assetId: number;
   database: string;
   table: string;
-  driver?: string;
   columns: string[];
   rows: Record<string, unknown>[];
   totalRows: number | null;
@@ -142,7 +141,6 @@ export function ExportTableDataDialog({
   assetId,
   database,
   table,
-  driver,
   columns,
   rows,
   totalRows,
@@ -198,8 +196,6 @@ export function ExportTableDataDialog({
   }, [database, meta.extension, table]);
   const estimatedRows = scope === "all" ? (totalRows ?? rows.length) : rows.length;
   const canStart = !!assetId && selectedColumns.length > 0 && !!filePath && !exporting;
-  // MSSQL 与 PG 一样按 schema.table 引用，不带 database 前缀（避免被当成 schema.object）
-  const tableName = driver === "postgresql" || driver === "mssql" ? table : `${database}.${table}`;
 
   const appendLog = useCallback((line: string) => {
     setLogLines((prev) => [...prev, line]);
@@ -294,31 +290,59 @@ export function ExportTableDataDialog({
         return;
       }
 
+      // 一批行的导出内容：SQL 是驱动按自己的方言生成的语句（每行一条 INSERT），分隔文本在这里拼。
+      // 整表导出为 SQL 不经这里：语句随游标一起交出。
+      const exportContent = async (chunkRows: Record<string, unknown>[], withHeaders: boolean): Promise<string> => {
+        if (format === "sql") {
+          const statements = await GetRowStatements(
+            assetId,
+            database,
+            table,
+            dbdriver.RowStatementsRequest.createFrom({
+              kind: "insert",
+              columns: selectedColumns,
+              rows: chunkRows,
+              primaryKeys: [],
+            })
+          );
+          return statements.join("\n");
+        }
+        return buildTableExportContent({
+          format,
+          columns: selectedColumns,
+          rows: chunkRows,
+          includeHeaders: withHeaders,
+          options: exportOptions,
+        });
+      };
+
       if (scope === "all") {
         appendLog("[EXP] Getting all data ...");
         let chunkIndex = 0;
         let wroteChunk = false;
         // 整表是后端对驱动的一次读取(一个游标),这里分批取出格式化写盘:不分页,
-        // 没有稳定顺序时也不会重复或漏行。
+        // 没有稳定顺序时也不会重复或漏行。导出为 SQL 时游标直接交出驱动生成的 INSERT:读游标占着
+        // 会话的连接,这时不能再另外请求语句(远端 SQLite 只有一条连接)。
         const cursor = await OpenTableExport(
           assetId,
           database,
           table,
-          query.TableExportStreamRequest.createFrom({ filters, sorts })
+          query.TableExportStreamRequest.createFrom({
+            filters,
+            sorts,
+            insertColumns: format === "sql" ? selectedColumns : [],
+          })
         );
         try {
           while (true) {
             const chunk = await ReadTableExport(cursor.id, EXPORT_ALL_CHUNK_SIZE);
+            // 导出为 SQL 时一批是驱动给的语句(每行一条),不再有行。
+            const statements = chunk.statements ?? [];
             const chunkRows = chunk.rows ?? [];
-            const content = buildTableExportContent({
-              format,
-              columns: selectedColumns,
-              rows: chunkRows,
-              tableName,
-              driver,
-              includeHeaders: includeHeaders && chunkIndex === 0,
-              options: exportOptions,
-            });
+            const content =
+              format === "sql"
+                ? statements.join("\n")
+                : await exportContent(chunkRows, includeHeaders && chunkIndex === 0);
             const chunkContent =
               wroteChunk && content ? `${exportChunkSeparator(format, exportOptions)}${content}` : content;
             if (chunkIndex === 0 || chunkContent) {
@@ -328,7 +352,7 @@ export function ExportTableDataDialog({
               });
               wroteChunk = true;
             }
-            processedRows += chunkRows.length;
+            processedRows += format === "sql" ? statements.length : chunkRows.length;
             if (chunk.done) break;
             chunkIndex += 1;
           }
@@ -344,15 +368,7 @@ export function ExportTableDataDialog({
       } else {
         appendLog("[EXP] Getting current page data ...");
         processedRows = rows.length;
-        const content = buildTableExportContent({
-          format,
-          columns: selectedColumns,
-          rows,
-          tableName,
-          driver,
-          includeHeaders,
-          options: exportOptions,
-        });
+        const content = await exportContent(rows, includeHeaders);
         await writeTableExportFile(filePath, content, { encoding, append: !!exportOptions.append });
       }
 
@@ -374,7 +390,6 @@ export function ExportTableDataDialog({
     assetId,
     canStart,
     database,
-    driver,
     encoding,
     estimatedRows,
     exportOptions,
@@ -388,7 +403,6 @@ export function ExportTableDataDialog({
     scope,
     selectedColumns,
     table,
-    tableName,
     t,
   ]);
 

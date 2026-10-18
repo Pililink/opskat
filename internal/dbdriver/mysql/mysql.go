@@ -29,6 +29,12 @@ var descriptor = dbdriver.Descriptor{
 		dbdriver.CapGridEdit, dbdriver.CapCreateTable, dbdriver.CapAlterTable, dbdriver.CapDropTable, dbdriver.CapTruncateTable,
 		dbdriver.CapImport, dbdriver.CapExportSQL, dbdriver.CapCopySQL, dbdriver.CapReadOnly,
 	},
+	CanDisableForeignKeyChecks: true,
+	CreateDatabaseOptions: []dbdriver.DatabaseOption{
+		{Key: dbdriver.OptionCharset, Default: "utf8mb4"},
+		{Key: dbdriver.OptionCollation, Default: "utf8mb4_0900_ai_ci"},
+	},
+	AlterTableAttributes: alterAttributes,
 }
 
 type driver struct {

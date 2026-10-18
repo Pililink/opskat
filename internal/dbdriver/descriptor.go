@@ -25,7 +25,58 @@ type Descriptor struct {
 	Form []FormTabFields `json:"form"`
 	// Capabilities 是驱动支持的功能；每一项单独声明，未声明即不支持。
 	Capabilities []Capability `json:"capabilities"`
+
+	// 以下是写功能内部的细项声明，各自只在声明了所属的功能时有意义。
+
+	// CanDisableForeignKeyChecks 声明导入（CapImport）能在执行期间关闭外键检查、结束后恢复
+	// （Session.ExecuteBatch 的 BatchRequest.DisableForeignKeyChecks）。没声明时导入不显示
+	// 「忽略外键」，会话以 ErrUnsupported 拒绝关闭外键检查。
+	CanDisableForeignKeyChecks bool `json:"canDisableForeignKeyChecks"`
+	// LocatesRowWithoutPrimaryKey 声明表格编辑（CapGridEdit）在表没有主键时也能精确定位要改 / 删
+	// 的那一行（PostgreSQL 的 (tableoid, ctid)、SQLite 的 rowid），而不只是在原值相同的几行里取一行。声明了，
+	// 表格不显示「无主键」提示。
+	LocatesRowWithoutPrimaryKey bool `json:"locatesRowWithoutPrimaryKey"`
+	// CreateDatabaseOptions 是新建数据库（CapCreateDatabase）时驱动接受的选项字段及默认值，按
+	// 对话框里的次序。建库对话框只显示这里声明的字段；没有声明的选项，会话以错误拒绝。
+	CreateDatabaseOptions []DatabaseOption `json:"createDatabaseOptions"`
+	// AlterTableAttributes 是改表（CapAlterTable）时，除了改表名、给列改名、新增与删除列之外还能
+	// 改的属性。改表对话框锁定没有声明的属性的输入；会话拒绝改动它们。
+	AlterTableAttributes []AlterAttribute `json:"alterTableAttributes"`
 }
+
+// AlterAttribute 是改表时可以单独声明能否修改的一项属性。
+type AlterAttribute string
+
+const (
+	// AlterTableComment：表注释。
+	AlterTableComment AlterAttribute = "table_comment"
+	// AlterColumnType / AlterColumnNullable / AlterColumnDefault：已有列的类型、可空与默认值。
+	// 新增的列总能给出这三项。
+	AlterColumnType     AlterAttribute = "column_type"
+	AlterColumnNullable AlterAttribute = "column_nullable"
+	AlterColumnDefault  AlterAttribute = "column_default"
+	// AlterColumnComment：列注释，新增的列与已有列都算。
+	AlterColumnComment AlterAttribute = "column_comment"
+)
+
+// AlterAttributes 是全部已知的改表属性。
+func AlterAttributes() []AlterAttribute {
+	return []AlterAttribute{AlterTableComment, AlterColumnType, AlterColumnNullable, AlterColumnDefault, AlterColumnComment}
+}
+
+// DatabaseOption 是新建数据库的一个选项字段。
+type DatabaseOption struct {
+	// Key 是选项的键，Session.CreateDatabaseStatements 的 Options 按它取值；对话框据此选标签。
+	Key string `json:"key"`
+	// Default 是对话框里这个字段的初始值，可以为空。
+	Default string `json:"default"`
+}
+
+// 建库选项的键。
+const (
+	OptionCharset   = "charset"
+	OptionCollation = "collation"
+)
 
 // FormTab 是资产表单的一个 Tab。
 type FormTab string
@@ -126,6 +177,12 @@ func (d Descriptor) Names() []string {
 // Supports 报告驱动是否声明了这项功能。
 func (d Descriptor) Supports(c Capability) bool {
 	return slices.Contains(d.Capabilities, c)
+}
+
+// GeneratesRowStatements 报告驱动是否声明了用到 Session.PrepareRowStatements 的功能（导出为 SQL、
+// 复制为 SQL）：声明了，会话就必须能生成行语句；都没声明，会话以 ErrUnsupported 拒绝。
+func (d Descriptor) GeneratesRowStatements() bool {
+	return d.Supports(CapExportSQL) || d.Supports(CapCopySQL)
 }
 
 // UsesField 报告驱动是否在表单的任一 Tab 中使用该字段。

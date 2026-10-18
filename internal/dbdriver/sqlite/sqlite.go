@@ -34,6 +34,10 @@ var descriptor = dbdriver.Descriptor{
 		dbdriver.CapGridEdit, dbdriver.CapCreateTable, dbdriver.CapAlterTable, dbdriver.CapDropTable, dbdriver.CapTruncateTable,
 		dbdriver.CapImport, dbdriver.CapExportSQL, dbdriver.CapCopySQL, dbdriver.CapReadOnly,
 	},
+	CanDisableForeignKeyChecks: true,
+	// 没有主键的表按 rowid 定位单行。
+	LocatesRowWithoutPrimaryKey: true,
+	AlterTableAttributes:        alterAttributes,
 }
 
 type driver struct{}

@@ -137,8 +137,331 @@ type Session interface {
 	// 写法都是驱动自己的方言。驱动没提供时返回包着 ErrUnsupported 的错误。
 	StarterQuery(ctx context.Context, database, table string, limit int) (string, error)
 
+	// 以下是写路径的语句生成：驱动在自己的会话上、按自己的方言生成语句并返回，只生成、不执行；
+	// 调用方展示后再经 Execute 执行的正是这些语句。生成时驱动可以先查表的元数据（列类型等）
+	// 来决定写法。table 用 ListTables 给出的形式。
+
+	// PrepareRowStatements 在会话上读好为这张表生成行语句要的一切（列类型、随会话设置变化的
+	// 字面量规则），交回一个之后不再碰数据库的 RowStatementWriter：返回前用过的连接已经还回，
+	// 所以调用方可以在另一个查询占着会话的连接时（整表导出为 SQL：先备好，再打开读取的游标，
+	// 边读边写语句）用它生成语句。驱动没有声明用到它的功能（Descriptor.GeneratesRowStatements）
+	// 时返回包着 ErrUnsupported 的错误，且不执行任何语句。
+	PrepareRowStatements(ctx context.Context, database, table string) (RowStatementWriter, error)
+
+	// GridEditStatements 生成表格编辑要执行的语句：每个新增行一条 INSERT、每个改动的行一条只改
+	// 那一行的 UPDATE、每个要删除的行一条只删那一行的 DELETE，各自按请求里的次序（见
+	// GridEditRequest）。定位已有行、没有主键时怎么收敛到一行、整行取默认值的写法、往自增列写值
+	// 时要的开关都由驱动决定。请求里的列不在表中（或表已不存在）时返回 error。驱动没有声明
+	// CapGridEdit 时返回包着 ErrUnsupported 的错误，且不执行任何语句。
+	GridEditStatements(ctx context.Context, database, table string, req GridEditRequest) (*GridEditStatements, error)
+
+	// CreateTableStatements 生成建表语句（只生成、不执行）：表名、列名按方言加引号，列的类型文本
+	// 原样写入，默认值的写法见 NewColumn.DefaultValue。req.Name 用 ListTables 给出的形式。驱动没有
+	// 声明 CapCreateTable 时返回包着 ErrUnsupported 的错误，且不执行任何语句。
+	CreateTableStatements(ctx context.Context, database string, req CreateTableRequest) ([]string, error)
+
+	// DropTableStatements 生成删除一张表的语句（只生成、不执行）。驱动没有声明 CapDropTable 时返回
+	// 包着 ErrUnsupported 的错误，且不执行任何语句。
+	DropTableStatements(ctx context.Context, database, table string) ([]string, error)
+
+	// TruncateTableStatements 生成清空一张表的语句（只生成、不执行）：没有 TRUNCATE 的方言用
+	// DELETE FROM。驱动没有声明 CapTruncateTable 时返回包着 ErrUnsupported 的错误，且不执行任何语句。
+	TruncateTableStatements(ctx context.Context, database, table string) ([]string, error)
+
+	// CreateDatabaseStatements 生成新建数据库的语句（只生成、不执行）。req.Options 的键只能是驱动
+	// 在 Descriptor.CreateDatabaseOptions 里声明过的；值为空表示不写该选项（用服务器默认）。驱动
+	// 没有声明 CapCreateDatabase 时返回包着 ErrUnsupported 的错误，且不执行任何语句。
+	CreateDatabaseStatements(ctx context.Context, req CreateDatabaseRequest) ([]string, error)
+
+	// AlterTableModel 读出改表对话框打开时的这张表：不带 schema 的表名、表注释，以及各列的名称、
+	// 类型、可空、默认值与注释，按列在表里的次序（见 AlterTableModel）。表不存在时返回 error。驱动
+	// 没有声明 CapAlterTable 时返回包着 ErrUnsupported 的错误，且不执行任何语句。
+	AlterTableModel(ctx context.Context, database, table string) (*AlterTableModel, error)
+
+	// AlterTableStatements 生成把表改成 req 的语句（只生成、不执行），按执行的次序；没有任何改动时
+	// 语句为空列表。驱动在自己的会话上读这张表现在的定义，与 req 比较得出改动（比较的方式同
+	// AlterTableRequest 的说明），改列时保留对话框里不显示、用户也没有改的列定义。req 要改驱动没有
+	// 声明可改的属性（Descriptor.AlterTableAttributes），或说到的列不在表中（表已不存在）时返回
+	// error。驱动没有声明 CapAlterTable 时返回包着 ErrUnsupported 的错误，且不执行任何语句。
+	AlterTableStatements(ctx context.Context, database, table string, req AlterTableRequest) (*AlterTableStatements, error)
+
+	// ImportStatements 生成导入要执行的语句（只生成、不执行），按执行的次序：各导入模式的写法（见
+	// ImportMode）、字面量、往自增列写值时要的开关都由驱动决定。请求里的列不在表中（或表已不存在）、
+	// 一行的值与列数不符时返回 error。没有列时返回空列表。驱动没有声明 CapImport 时返回包着
+	// ErrUnsupported 的错误，且不执行任何语句。
+	ImportStatements(ctx context.Context, database, table string, req ImportRequest) ([]string, error)
+
+	// ExecuteBatch 在会话的一条连接上按次序执行一批语句（导入的整批执行用它），见 BatchRequest。
+	// 空白语句跳过、不执行。语句本身的失败记在结果里，不作为 error 返回。
+	//
+	// 请求关闭外键检查时，驱动在执行前（事务之外）关闭、结束后恢复成关闭之前的样子（本来就没在
+	// 检查的连接不会被打开检查）——语句失败、回滚、ctx 被取消也要恢复；驱动没有声明 Descriptor.CanDisableForeignKeyChecks 时以 ErrUnsupported 拒绝，
+	// 且不执行任何语句。
+	//
+	// 批本身出错（拿不到连接，关闭 / 恢复外键检查、开始 / 提交 / 回滚事务失败，ctx 被取消）时
+	// 返回 error；此前已经执行过语句的，同时返回记着它们的结果。
+	ExecuteBatch(ctx context.Context, req BatchRequest) (*BatchResult, error)
+
 	// Close 释放会话占用的一切（连接、文件锁、远端文件系统）。
 	io.Closer
+}
+
+// RowStatementKind 是行语句的种类。
+type RowStatementKind string
+
+const (
+	// RowInsert：每行一条 INSERT，写入 Columns 列。
+	RowInsert RowStatementKind = "insert"
+	// RowUpdate：每行一条只改那一行的 UPDATE，把 Columns 列设为行里的值。
+	RowUpdate RowStatementKind = "update"
+)
+
+// RowStatementWriter 为一张表生成行语句（Session.PrepareRowStatements 备好的）。
+type RowStatementWriter interface {
+	// RowStatements 生成把若干行写进表的语句，每行一条，按 req.Rows 的次序：RowInsert 是 INSERT，
+	// RowUpdate 是只改那一行的 UPDATE（见 RowStatementsRequest）。没有行时返回空列表。只生成，
+	// 不执行，也不碰数据库。
+	RowStatements(req RowStatementsRequest) ([]string, error)
+}
+
+// RowStatementsRequest 是 RowStatementWriter.RowStatements 要生成的语句。
+type RowStatementsRequest struct {
+	Kind RowStatementKind `json:"kind"`
+	// Columns 是 INSERT 写入、UPDATE 设置的列，按语句里的次序。
+	Columns []string `json:"columns"`
+	// Rows 是各行的值，按列名取：表格里读到的值经前端原样带回（nil、字符串、数字、布尔），
+	// 行里没有的列按 NULL 写。
+	Rows []map[string]any `json:"rows"`
+	// PrimaryKeys 是 UPDATE 定位那一行的列（值取自同一行）；为空时按全部 Columns 定位。
+	// INSERT 不用它。
+	PrimaryKeys []string `json:"primaryKeys"`
+}
+
+// GridEditRequest 是 Session.GridEditStatements 要生成的语句：表格里新增、改动与删除的行。
+type GridEditRequest struct {
+	// Columns 是表格里的全部列，按表格的次序：表没有主键时按它们的原值定位已有的行。
+	Columns []string `json:"columns"`
+	// PrimaryKeys 是定位已有行的主键列，按主键里的次序；为空表示表没有主键。
+	PrimaryKeys []string `json:"primaryKeys"`
+	// Inserts 是新增的行。
+	Inserts []GridInsert `json:"inserts"`
+	// Updates 是改动的已有行。
+	Updates []GridUpdate `json:"updates"`
+	// Deletes 是要删除的已有行：表格里读到的整行（按列名取值），用来定位。
+	Deletes []map[string]any `json:"deletes"`
+}
+
+// GridInsert 是一个新增行。
+type GridInsert struct {
+	// Values 是填写过的列与值，按语句里的次序；为空表示整行取默认值。
+	Values []ColumnValue `json:"values"`
+}
+
+// GridUpdate 是一个改动的已有行。
+type GridUpdate struct {
+	// Row 是表格里读到的这一行（按列名取值，改动前的原值），用来定位。
+	Row map[string]any `json:"row"`
+	// Set 是改动的列与新值，按语句里的次序。
+	Set []ColumnValue `json:"set"`
+}
+
+// ColumnValue 是一列与它的值。值是表格里的值，经前端原样带回（nil、字符串、数字、布尔）。
+type ColumnValue struct {
+	Column string `json:"column"`
+	Value  any    `json:"value"`
+}
+
+// GridEditStatements 是表格编辑的语句，与 GridEditRequest 的三组逐一对应（同样长、同样的次序）。
+type GridEditStatements struct {
+	Inserts []string `json:"inserts"`
+	Updates []string `json:"updates"`
+	Deletes []string `json:"deletes"`
+}
+
+// NewColumn 是建表对话框里的一列。
+type NewColumn struct {
+	Name string `json:"name"`
+	// Type 是类型文本，原样写入（首尾空白除外）。
+	Type     string `json:"type"`
+	Nullable bool   `json:"nullable"`
+	// DefaultValue 是用户填的默认值文本，空表示没有默认值。数字、TRUE / FALSE / NULL、
+	// CURRENT_TIMESTAMP / NOW() 原样写入，其余当作字符串加引号。
+	DefaultValue string `json:"defaultValue"`
+}
+
+// CreateTableRequest 是 Session.CreateTableStatements 要生成的建表语句。
+type CreateTableRequest struct {
+	Name    string      `json:"name"`
+	Columns []NewColumn `json:"columns"`
+}
+
+// CreateDatabaseRequest 是 Session.CreateDatabaseStatements 要生成的建库语句。
+type CreateDatabaseRequest struct {
+	Name string `json:"name"`
+	// Options 是驱动声明的选项值，按选项的键取。
+	Options map[string]string `json:"options"`
+}
+
+// ColumnDefinition 是改表对话框里一列可编辑的部分。
+type ColumnDefinition struct {
+	Name string `json:"name"`
+	// Type 是类型文本，写进语句时原样（首尾空白除外）。
+	Type     string `json:"type"`
+	Nullable bool   `json:"nullable"`
+	// DefaultValue 是默认值文本，空表示没有默认值；写进语句的规则同 NewColumn.DefaultValue。
+	DefaultValue string `json:"defaultValue"`
+	// Comment 是列注释，空表示没有注释。
+	Comment string `json:"comment"`
+}
+
+// AlterTableModel 是改表对话框打开时看到的表。
+type AlterTableModel struct {
+	// Name 是改名输入框里的表名：不带 schema。
+	Name string `json:"name"`
+	// Comment 是表注释，没有时为空串。
+	Comment string `json:"comment"`
+	// Columns 按列在表里的次序。
+	Columns []ColumnDefinition `json:"columns"`
+}
+
+// AlterTableRequest 是改表对话框提交的改动：改完之后这张表的样子。
+//
+// 已有的列按 OriginalName 对到表里现在的那一列，与它比较：名称不同是改名，类型去掉首尾空白后
+// 不分大小写比较，默认值与注释去掉首尾空白后比较。都相同的列不生成语句。
+type AlterTableRequest struct {
+	// Name 是新表名，不带 schema（改名后表仍在原 schema）；为空或与现在的相同表示不改名。
+	Name string `json:"name"`
+	// Comment 是表注释；去掉首尾空白后与现在的相同表示不改。
+	Comment string `json:"comment"`
+	// Columns 是保留与新增的列，按对话框里的次序。
+	Columns []AlterColumn `json:"columns"`
+	// Drops 是要删除的已有列。
+	Drops []string `json:"drops"`
+}
+
+// AlterColumn 是改表请求里的一列。
+type AlterColumn struct {
+	// OriginalName 是这一列在表里现在的名字；为空表示新增的列。
+	OriginalName string `json:"originalName"`
+	// 以下同 ColumnDefinition：改表之后这一列的样子。
+	Name         string `json:"name"`
+	Type         string `json:"type"`
+	Nullable     bool   `json:"nullable"`
+	DefaultValue string `json:"defaultValue"`
+	Comment      string `json:"comment"`
+}
+
+// Definition 是这一列改表之后的样子。
+func (c AlterColumn) Definition() ColumnDefinition {
+	return ColumnDefinition{Name: c.Name, Type: c.Type, Nullable: c.Nullable, DefaultValue: c.DefaultValue, Comment: c.Comment}
+}
+
+// AlterTableStatements 是改表的语句。
+type AlterTableStatements struct {
+	// Statements 按执行的次序；任何一条失败都应停下。
+	Statements []string `json:"statements"`
+	// Table 是语句执行后这张表的名字，用 ListTables 给出的形式（改了名就是新名字，schema 不变）。
+	Table string `json:"table"`
+}
+
+// ImportMode 是导入模式：已有的行（按 ImportRequest.Keys 匹配）怎么处理。
+type ImportMode string
+
+const (
+	// ImportAppend：每行插入。
+	ImportAppend ImportMode = "append"
+	// ImportUpdate：按键更新已有的行，不插入。
+	ImportUpdate ImportMode = "update"
+	// ImportAppendUpdate：键已存在的行更新，其余插入（upsert）。
+	ImportAppendUpdate ImportMode = "append-update"
+	// ImportAppendSkip：键已存在的行跳过，其余插入。
+	ImportAppendSkip ImportMode = "append-skip"
+	// ImportDelete：按键删除已有的行。
+	ImportDelete ImportMode = "delete"
+	// ImportCopy：先清空表，再每行插入。
+	ImportCopy ImportMode = "copy"
+)
+
+// ImportRequest 是 Session.ImportStatements 要生成的导入语句：映射到表上的行，以及怎么写进去。
+//
+// 要按键匹配已有行的模式（更新、追加/更新、追加/跳过、删除）在 Columns 里没有键列时不生成任何
+// 语句；更新模式没有可更新的列时同样不生成。更新类模式不写数据库不允许更新的自增列（SQL Server
+// IDENTITY、PostgreSQL GENERATED ALWAYS）：已有行的其余列照常更新，自增列保持原值。
+type ImportRequest struct {
+	Mode ImportMode `json:"mode"`
+	// Columns 是写入的目标列，按语句里的次序。
+	Columns []string `json:"columns"`
+	// Keys 是匹配已有行的键列；只有同时在 Columns 里的才用来匹配。
+	Keys []string `json:"keys"`
+	// Rows 是各行的值，与 Columns 一一对应。
+	Rows [][]ImportValue `json:"rows"`
+	// ExtendedInsert 为真时把多行合并成一条多行 INSERT，每条不超过 MaxStatementSizeKB（可以带小数，
+	// 小于 1 按 1 算）；方言写不成多行的模式（SQL Server 的 MERGE）仍每行一条。
+	ExtendedInsert     bool    `json:"extendedInsert"`
+	MaxStatementSizeKB float64 `json:"maxStatementSizeKb"`
+}
+
+// ImportValueKind 是导入值的种类。
+type ImportValueKind string
+
+const (
+	ImportText   ImportValueKind = "text"
+	ImportNull   ImportValueKind = "null"
+	ImportBinary ImportValueKind = "binary"
+)
+
+// ImportValue 是导入的一个值，已按源文件的格式转换好（日期、小数点、空值、二进制编码都在前端
+// 处理）：驱动只按目标列写成字面量。
+type ImportValue struct {
+	Kind ImportValueKind `json:"kind"`
+	// Text 是 ImportText 的文本。
+	Text string `json:"text,omitempty"`
+	// Hex 是 ImportBinary 的字节，按十六进制写（不带前缀）。
+	Hex string `json:"hex,omitempty"`
+}
+
+// BatchRequest 是 Session.ExecuteBatch 要在一条连接上执行的一批语句。
+type BatchRequest struct {
+	// Statements 按次序执行。
+	Statements []string `json:"statements"`
+	// Atomic 为真时整批在一个事务里执行：任一条失败即停止并回滚整批。
+	Atomic bool `json:"atomic"`
+	// ContinueOnError 只在不是 Atomic 时有意义：一条失败后继续执行后面的；为假时停在失败的那条。
+	ContinueOnError bool `json:"continueOnError"`
+	// DisableForeignKeyChecks 要求执行期间关闭外键检查（见 Session.ExecuteBatch）。
+	DisableForeignKeyChecks bool `json:"disableForeignKeyChecks"`
+	// Database / Table 是这批语句写入的表，含义同 Session 的其他表操作（table 用 ListTables 给出
+	// 的形式）。按表停用外键约束的驱动（SQL Server）作用于这张表，所以关闭外键检查时 Table 必填。
+	Database string `json:"database"`
+	Table    string `json:"table"`
+}
+
+// BatchResult 是一批语句的执行结果。
+type BatchResult struct {
+	// Executed 是执行过的语句，按执行的次序；跳过的空白语句、没轮到的语句不在其中。
+	Executed []BatchStatement `json:"executed"`
+	// RolledBack 为真表示 Atomic 的批里有语句失败、整批已经回滚：Executed 里成功的语句也没有留下。
+	RolledBack bool `json:"rolledBack"`
+}
+
+// BatchStatement 是批里一条执行过的语句。
+type BatchStatement struct {
+	// Index 是它在 BatchRequest.Statements 里的下标。
+	Index int `json:"index"`
+	// AffectedRows 是成功时影响的行数。
+	AffectedRows int64 `json:"affectedRows"`
+	// Error 是失败时数据库给出的错误；成功时为空串。
+	Error string `json:"error,omitempty"`
+}
+
+// Failed 报告批里是否有语句失败。
+func (r *BatchResult) Failed() bool {
+	for _, statement := range r.Executed {
+		if statement.Error != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // Page 指定分页执行要取的那一页。

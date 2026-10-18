@@ -32,6 +32,10 @@ var descriptor = dbdriver.Descriptor{
 		// 一直对所有驱动显示；这一轮保持表单不变，所以仍然声明。
 		dbdriver.CapReadOnly,
 	},
+	CanDisableForeignKeyChecks: true,
+	// SQL Server 没有 CHARACTER SET，只有排序规则；默认空（用服务器默认）。
+	CreateDatabaseOptions: []dbdriver.DatabaseOption{{Key: dbdriver.OptionCollation}},
+	AlterTableAttributes:  alterAttributes,
 }
 
 type driver struct {

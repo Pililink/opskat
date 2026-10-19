@@ -36,7 +36,9 @@ describe("ExtensionSettingsForm", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "extension.settings.save" }));
     });
-    expect(SaveExtensionSettings).toHaveBeenCalledWith("jev-command-review", { endpoint: "https://review.example.com" });
+    expect(SaveExtensionSettings).toHaveBeenCalledWith("jev-command-review", {
+      endpoint: "https://review.example.com",
+    });
   });
 
   it("必填项没填时在字段下提示、不提交；已存过的密钥留空不算没填", async () => {
@@ -67,7 +69,9 @@ describe("ExtensionSettingsForm", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "extension.settings.save" }));
     });
-    expect(SaveExtensionSettings).toHaveBeenCalledWith("jev-command-review", { endpoint: "https://review.example.com" });
+    expect(SaveExtensionSettings).toHaveBeenCalledWith("jev-command-review", {
+      endpoint: "https://review.example.com",
+    });
   });
 
   it("审核扩展可以保存并测试：先保存，再用刚保存的设置测这个扩展，显示结果", async () => {

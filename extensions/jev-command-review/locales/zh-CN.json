@@ -7,7 +7,7 @@
   "settings.baseUrl.title": "服务地址",
   "settings.baseUrl.desc": "兼容 TypeSafe System One API 的服务。API key 只会发往这个地址。",
   "settings.model.title": "模型",
-  "settings.model.desc": "Jev 模型名，默认 latest（最新版本）。",
+  "settings.model.desc": "Jev 模型名，默认 jev-latest（最新版本）。",
   "settings.threshold.title": "阈值",
   "settings.threshold.desc": "0 到 1 之间的数。模型判断任意一种危险的概率达到它，命令就审核不通过；越小越严格。"
 }

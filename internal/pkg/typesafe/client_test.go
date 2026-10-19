@@ -34,11 +34,11 @@ func TestEvaluateSendsRequestAndParsesNoulAnswers(t *testing.T) {
 		assert.Equal(t, "Bearer test-key", r.Header.Get("Authorization"))
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
-		_, _ = w.Write([]byte(`{"model":"latest","answers":{"read_only":{"type":"noul","noul":0.93}},"usage":{"input_tokens":120,"output_tokens":5}}`))
+		_, _ = w.Write([]byte(`{"model":"jev-latest","answers":{"read_only":{"type":"noul","noul":0.93}},"usage":{"input_tokens":120,"output_tokens":5}}`))
 	})
 
 	resp, err := c.Evaluate(context.Background(), Request{
-		Model: "latest",
+		Model: "jev-latest",
 		State: map[string]string{"command": "ls -la"},
 		Questions: map[string]Question{
 			"read_only": {Type: QuestionNoul, Instructions: "Does `command` only read?"},
@@ -46,11 +46,11 @@ func TestEvaluateSendsRequestAndParsesNoulAnswers(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	assert.Equal(t, "latest", got.Model)
+	assert.Equal(t, "jev-latest", got.Model)
 	assert.Equal(t, "ls -la", got.State["command"])
 	assert.JSONEq(t, `{"type":"noul","instructions":"Does `+"`command`"+` only read?"}`, string(got.Questions["read_only"]))
 
-	assert.Equal(t, "latest", resp.Model)
+	assert.Equal(t, "jev-latest", resp.Model)
 	assert.InDelta(t, 0.93, resp.Answers["read_only"].Noul, 1e-9)
 	assert.Equal(t, 120, resp.Usage.InputTokens)
 }
@@ -64,11 +64,11 @@ func TestEvaluateRetriesRateLimitedAndOverloaded(t *testing.T) {
 		case 2:
 			w.WriteHeader(529)
 		default:
-			_, _ = w.Write([]byte(`{"model":"latest","answers":{"q":{"type":"noul","noul":0.1}}}`))
+			_, _ = w.Write([]byte(`{"model":"jev-latest","answers":{"q":{"type":"noul","noul":0.1}}}`))
 		}
 	})
 
-	resp, err := c.Evaluate(context.Background(), Request{Model: "latest", State: "x", Questions: map[string]Question{"q": {Type: QuestionNoul, Instructions: "?"}}})
+	resp, err := c.Evaluate(context.Background(), Request{Model: "jev-latest", State: "x", Questions: map[string]Question{"q": {Type: QuestionNoul, Instructions: "?"}}})
 	require.NoError(t, err)
 	assert.Equal(t, int32(3), calls.Load())
 	assert.InDelta(t, 0.1, resp.Answers["q"].Noul, 1e-9)
@@ -141,7 +141,7 @@ func TestEvaluateRejectsInvalidAnswer(t *testing.T) {
 
 func TestEvaluateRejectsAnswerMissingFromResponse(t *testing.T) {
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"model":"latest","answers":{}}`))
+		_, _ = w.Write([]byte(`{"model":"jev-latest","answers":{}}`))
 	})
 
 	_, err := c.Evaluate(context.Background(), Request{Model: "m", State: "x", Questions: map[string]Question{"q": {Type: QuestionNoul, Instructions: "?"}}})

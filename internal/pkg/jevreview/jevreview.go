@@ -22,7 +22,7 @@ const (
 // 设置没填时的默认值：TypeSafe 官方地址上的 Jev 最新模型。
 const (
 	DefaultBaseURL   = typesafe.DefaultBaseURL
-	DefaultModel     = "latest"
+	DefaultModel     = "jev-latest"
 	DefaultThreshold = 0.5
 )
 

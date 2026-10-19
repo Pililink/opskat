@@ -23,7 +23,7 @@ func main() {}
 type settings struct {
 	APIKey    string `json:"api_key" title:"settings.apiKey.title" desc:"settings.apiKey.desc" format:"password"`
 	BaseURL   string `json:"base_url" title:"settings.baseUrl.title" desc:"settings.baseUrl.desc" format:"endpoint" default:"https://api.typesafe.ai"`
-	Model     string `json:"model" title:"settings.model.title" desc:"settings.model.desc" default:"latest"`
+	Model     string `json:"model" title:"settings.model.title" desc:"settings.model.desc" default:"jev-latest"`
 	Threshold string `json:"threshold" title:"settings.threshold.title" desc:"settings.threshold.desc" default:"0.5"`
 }
 

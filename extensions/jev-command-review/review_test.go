@@ -19,7 +19,7 @@ const placeholder = "{{setting.api_key}}"
 
 // configured 是用户在设置页保存过后 settings_get 交给扩展的样子：密钥只有占位。
 func configured(extra map[string]string) map[string]string {
-	s := map[string]string{"api_key": placeholder, "base_url": "https://api.typesafe.ai/", "model": "latest", "threshold": "0.5"}
+	s := map[string]string{"api_key": placeholder, "base_url": "https://api.typesafe.ai/", "model": "jev-latest", "threshold": "0.5"}
 	for k, v := range extra {
 		s[k] = v
 	}
@@ -34,7 +34,7 @@ func jevAnswer(t *testing.T, w http.ResponseWriter, probs map[string]float64) {
 		answers[id] = map[string]any{"type": "noul", "noul": p}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"model": "latest", "answers": answers}))
+	require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"model": "jev-latest", "answers": answers}))
 }
 
 func allQuestions(p float64) map[string]float64 {

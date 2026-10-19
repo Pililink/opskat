@@ -3406,7 +3406,6 @@
     },
     "reason": {
       "not_configured": "the command review extension is not configured",
-      "api_key_unreadable": "the saved command review API key cannot be read",
       "invalid_api_key": "the command review API key is invalid",
       "timeout": "timed out",
       "too_long": "command too long",
@@ -3473,7 +3472,6 @@
       "reviewer_unavailable": "The command review extension in use is unavailable (it may be disabled, or its package was changed), so every review fails."
     },
     "scores": "Scores",
-    "scoreThreshold": "threshold {{threshold}}",
     "retried": "Retried automatically: {{attempts}} requests in total",
     "reviewedBy": "Judged by review extension {{name}} {{version}}",
     "scoreName": {

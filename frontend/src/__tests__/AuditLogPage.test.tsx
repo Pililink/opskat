@@ -107,8 +107,8 @@ describe("AuditLogPage result status", () => {
           DecisionSource: "autopilot_deny",
           MatchedPattern: "",
           Review:
-            '{"mode":"autopilot","outcome":"reject","failed":["disruptive"],"model":"jev-1.13.0",' +
-            '"scores":{"destructive":0.02,"disruptive":0.91,"remote_code":0.01},"threshold":0.2,"attempts":2}',
+            '{"mode":"autopilot","outcome":"reject","failed":["disruptive"],' +
+            '"scores":{"disruptive":0.91},"attempts":2}',
           Createtime: 1,
         },
       ],
@@ -125,15 +125,13 @@ describe("AuditLogPage result status", () => {
     await user.click(within(row).getByRole("button"));
     expect(screen.getByTestId("review-notice")).toHaveTextContent("commandReview.withMode");
 
-    // 每道题的评分，没过阈值的那题标出来
+    // 只列未通过题目的评分
     const scores = screen.getByTestId("review-scores");
     expect(scores).toHaveTextContent("commandReview.scores");
     const disruptive = within(scores).getByText("commandReview.scoreName.disruptive").closest("li") as HTMLElement;
     expect(disruptive).toHaveTextContent("0.91");
     expect(disruptive).toHaveAttribute("data-failed", "true");
-    const destructive = within(scores).getByText("commandReview.scoreName.destructive").closest("li") as HTMLElement;
-    expect(destructive).toHaveTextContent("0.02");
-    expect(destructive).toHaveAttribute("data-failed", "false");
+    expect(within(scores).queryByText("commandReview.scoreName.destructive")).toBeNull();
 
     // 第一次请求超时、自动重试过的，详情里写明请求了几次
     expect(screen.getByTestId("review-attempts")).toHaveTextContent("commandReview.retried");

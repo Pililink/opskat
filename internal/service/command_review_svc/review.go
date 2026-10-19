@@ -405,11 +405,8 @@ func extensionResult(name, version string, questions []extension.ReviewQuestion,
 			out.FailedNames[id] = names[id]
 		}
 	}
-	if r.Score != nil {
-		out.Scores = map[string]float64{}
-		for _, id := range r.Failed {
-			out.Scores[id] = *r.Score
-		}
+	if len(r.Scores) > 0 {
+		out.Scores = r.Scores
 	}
 	return out
 }

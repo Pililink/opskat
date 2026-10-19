@@ -14,9 +14,7 @@ export interface ReviewInfo {
   outcome: string; // pass / reject / fail
   reason?: string; // 审核失败的原因
   failed?: string[]; // 审核未通过时没满足条件的题目
-  model?: string;
-  scores?: Record<string, number>; // 每道题回答"是"的概率
-  threshold?: number; // 判断用的阈值；和 scores 一起出现
+  scores?: Record<string, number>; // 未通过题目回答"是"的概率
   duration_ms?: number;
   cached?: boolean;
   attempts?: number; // 调用模型的次数，超时或连接出错时会重试
@@ -29,7 +27,6 @@ export interface ReviewInfo {
 export const REVIEW_QUESTIONS: readonly string[] = ["destructive", "disruptive", "remote_code"];
 const REVIEW_FAIL_REASONS: readonly string[] = [
   "not_configured",
-  "api_key_unreadable",
   "invalid_api_key",
   "timeout",
   "too_long",

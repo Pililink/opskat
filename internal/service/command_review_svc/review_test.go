@@ -136,9 +136,8 @@ func TestUnavailableReviewerFails(t *testing.T) {
 
 func TestRejectCarriesQuestionNamesAndScore(t *testing.T) {
 	rev := newReviewer()
-	score := 0.93
 	rev.reply = func([]extension.ReviewItem) ([]extension.ReviewCommandResult, error) {
-		return []extension.ReviewCommandResult{{Outcome: extension.ReviewOutcomeReject, Failed: []string{"destructive"}, Score: &score}}, nil
+		return []extension.ReviewCommandResult{{Outcome: extension.ReviewOutcomeReject, Failed: []string{"destructive"}, Scores: map[string]float64{"destructive": 0.93}}}, nil
 	}
 	s, _ := newService(rev)
 

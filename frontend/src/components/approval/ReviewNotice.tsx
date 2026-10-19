@@ -46,7 +46,7 @@ export function ReviewMark({ review }: { review: ReviewInfo }) {
   );
 }
 
-/** 每道题的评分（回答"是"的概率）和当时的阈值，审计详情里用；达到阈值的题标出来。 */
+/** 未通过题目的评分（回答"是"的概率），审计详情里用；达到阈值的题标出来。 */
 export function ReviewScores({ review }: { review: ReviewInfo }) {
   const { t, i18n } = useTranslation();
   const { scores } = review;
@@ -58,10 +58,7 @@ export function ReviewScores({ review }: { review: ReviewInfo }) {
   ];
   return (
     <div data-testid="review-scores" className="text-xs">
-      <div className="text-muted-foreground">
-        {t("commandReview.scores")}
-        {review.threshold !== undefined && ` · ${t("commandReview.scoreThreshold", { threshold: review.threshold })}`}
-      </div>
+      <div className="text-muted-foreground">{t("commandReview.scores")}</div>
       <ul className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
         {ids.map((q) => (
           <li

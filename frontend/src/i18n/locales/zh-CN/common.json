@@ -3406,7 +3406,6 @@
     },
     "reason": {
       "not_configured": "命令审核扩展还没配置好",
-      "api_key_unreadable": "已保存的命令审核 API key 无法读取",
       "invalid_api_key": "命令审核的 API key 无效",
       "timeout": "超时",
       "too_long": "命令过长",
@@ -3473,7 +3472,6 @@
       "reviewer_unavailable": "要用的命令审核扩展现在不可用（可能被停用，或安装包被改动过），要审核的命令都会审核失败。"
     },
     "scores": "评分",
-    "scoreThreshold": "阈值 {{threshold}}",
     "retried": "自动重试过：共请求 {{attempts}} 次",
     "reviewedBy": "由审核扩展 {{name}} {{version}} 判断",
     "scoreName": {

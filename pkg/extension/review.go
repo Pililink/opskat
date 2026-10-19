@@ -112,12 +112,13 @@ type ReviewItem struct {
 	Syntax    string `json:"syntax"`
 }
 
-// ReviewCommandResult 是审核器对一条命令的回答。
+// ReviewCommandResult 是审核器对一条命令的回答。Scores 是未通过题目的评分（题目 id → 0~1），
+// 与 Failed 对应；审核器不给出评分时可以省略。
 type ReviewCommandResult struct {
-	Outcome string   `json:"outcome"`
-	Failed  []string `json:"failed,omitempty"`
-	Score   *float64 `json:"score,omitempty"`
-	Reason  string   `json:"reason,omitempty"`
+	Outcome string             `json:"outcome"`
+	Failed  []string           `json:"failed,omitempty"`
+	Scores  map[string]float64 `json:"scores,omitempty"`
+	Reason  string             `json:"reason,omitempty"`
 }
 
 // validateReviewResults 校验整批结果。任何一条不合规，整批按无效结果失败。
@@ -170,6 +171,9 @@ func validateOneReviewResult(i int, r ReviewCommandResult, known map[string]stru
 		return fmt.Errorf("results[%d]: outcome %q is not pass, reject or error", i, r.Outcome)
 	}
 	seen := make(map[string]struct{}, len(r.Failed))
+	if (r.Outcome == ReviewOutcomePass || r.Outcome == ReviewOutcomeError) && len(r.Scores) > 0 {
+		return fmt.Errorf("results[%d]: scores belong on reject, not %s", i, r.Outcome)
+	}
 	for _, id := range r.Failed {
 		if _, ok := known[id]; !ok {
 			return fmt.Errorf("results[%d]: question id %q is not declared", i, id)
@@ -179,8 +183,13 @@ func validateOneReviewResult(i int, r ReviewCommandResult, known map[string]stru
 		}
 		seen[id] = struct{}{}
 	}
-	if r.Score != nil && (*r.Score < 0 || *r.Score > 1) {
-		return fmt.Errorf("results[%d]: score %v is outside [0,1]", i, *r.Score)
+	for id, score := range r.Scores {
+		if _, ok := seen[id]; !ok {
+			return fmt.Errorf("results[%d]: score for question %q, which is not in failed", i, id)
+		}
+		if score < 0 || score > 1 {
+			return fmt.Errorf("results[%d]: score for %q is %v, outside [0,1]", i, id, score)
+		}
 	}
 	return nil
 }

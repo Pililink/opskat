@@ -6,7 +6,13 @@ import type { ContentBlock } from "../stores/aiStore";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 
 // 辅助审批下审核没通过的命令转人工确认时，审批项带着审核结果，人要能看到为什么要确认。
-const review = { mode: "assisted" as const, outcome: "reject", failed: ["disruptive"], model: "jev-1.13.0" };
+const review = {
+  mode: "assisted" as const,
+  outcome: "reject",
+  failed: ["disruptive"],
+  extension: "command-review",
+  version: "1.0.1",
+};
 
 function captureHandlers() {
   const handlers = new Map<string, (data: unknown) => void>();

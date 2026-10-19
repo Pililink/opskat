@@ -19,7 +19,7 @@ const placeholder = "{{setting.api_key}}"
 
 // configured 是用户在设置页保存过后 settings_get 交给扩展的样子：密钥只有占位。
 func configured(extra map[string]string) map[string]string {
-	s := map[string]string{"api_key": placeholder, "base_url": "https://api.typesafe.ai/", "model": "jev-1.13.0", "threshold": "0.5"}
+	s := map[string]string{"api_key": placeholder, "base_url": "https://api.typesafe.ai/", "model": "latest", "threshold": "0.5"}
 	for k, v := range extra {
 		s[k] = v
 	}
@@ -34,7 +34,7 @@ func jevAnswer(t *testing.T, w http.ResponseWriter, probs map[string]float64) {
 		answers[id] = map[string]any{"type": "noul", "noul": p}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"model": "jev-1.13.0", "answers": answers}))
+	require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"model": "latest", "answers": answers}))
 }
 
 func allQuestions(p float64) map[string]float64 {
@@ -63,8 +63,7 @@ func TestReviewRejectsAboveThresholdAndSendsTheCommand(t *testing.T) {
 	require.Len(t, out, 1)
 	assert.Equal(t, opskat.ReviewReject, out[0].Outcome)
 	assert.Equal(t, []string{jevreview.QuestionDestructive}, out[0].Failed)
-	require.NotNil(t, out[0].Score)
-	assert.InDelta(t, 0.93, *out[0].Score, 1e-9)
+	assert.Equal(t, map[string]float64{jevreview.QuestionDestructive: 0.93}, out[0].Scores)
 
 	assert.Equal(t, "Bearer "+placeholder, got.auth, "扩展只写占位，密钥由宿主替换")
 	assert.Equal(t, "/v1/systemone", got.path)

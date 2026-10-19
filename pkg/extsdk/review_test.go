@@ -20,8 +20,7 @@ func TestCommandReviewer(t *testing.T) {
 		var got []ReviewItem
 		CommandReviewer(questions, 8, 100, func(_ *ReviewContext, items []ReviewItem) ([]ReviewResult, error) {
 			got = items
-			score := 0.2
-			return []ReviewResult{{Outcome: ReviewReject, Failed: []string{"destructive"}, Score: &score}}, nil
+			return []ReviewResult{{Outcome: ReviewReject, Failed: []string{"destructive"}, Scores: map[string]float64{"destructive": 0.2}}}, nil
 		})
 
 		desc := decodeDescribe(t)

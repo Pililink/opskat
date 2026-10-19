@@ -23,7 +23,7 @@ func main() {}
 type settings struct {
 	APIKey    string `json:"api_key" title:"settings.apiKey.title" desc:"settings.apiKey.desc" format:"password"`
 	BaseURL   string `json:"base_url" title:"settings.baseUrl.title" desc:"settings.baseUrl.desc" format:"endpoint" default:"https://api.typesafe.ai"`
-	Model     string `json:"model" title:"settings.model.title" desc:"settings.model.desc" default:"jev-1.13.0"`
+	Model     string `json:"model" title:"settings.model.title" desc:"settings.model.desc" default:"latest"`
 	Threshold string `json:"threshold" title:"settings.threshold.title" desc:"settings.threshold.desc" default:"0.5"`
 }
 
@@ -112,9 +112,10 @@ func reviewOne(cfg config, item opskat.ReviewItem) opskat.ReviewResult {
 	if len(failed) == 0 {
 		return opskat.ReviewResult{Outcome: opskat.ReviewPass}
 	}
-	top := 0.0
+	// 只回未通过题目的评分：宿主按题目 id 显示，审计里每题一个数。
+	failedScores := make(map[string]float64, len(failed))
 	for _, id := range failed {
-		top = max(top, scores[id])
+		failedScores[id] = scores[id]
 	}
-	return opskat.ReviewResult{Outcome: opskat.ReviewReject, Failed: failed, Score: &top}
+	return opskat.ReviewResult{Outcome: opskat.ReviewReject, Failed: failed, Scores: failedScores}
 }

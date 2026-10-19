@@ -115,13 +115,13 @@ func TestReviewCommandsValidation(t *testing.T) {
 	Convey("审核结果整批校验", t, func() {
 		Convey("条数与输入一致且问题 id 都已声明", func() {
 			out, err := validateReviewResults(2, questions, func() (json.RawMessage, error) {
-				return decode(`[{"outcome":"pass"},{"outcome":"reject","failed":["remote_code"],"score":0.4}]`)
+				return decode(`[{"outcome":"pass"},{"outcome":"reject","failed":["remote_code"],"scores":{"remote_code":0.4}}]`)
 			})
 			So(err, ShouldBeNil)
 			So(len(out), ShouldEqual, 2)
 			So(out[0].Outcome, ShouldEqual, ReviewOutcomePass)
 			So(out[1].Failed, ShouldResemble, []string{"remote_code"})
-			So(out[1].Score, ShouldNotBeNil)
+			So(out[1].Scores, ShouldResemble, map[string]float64{"remote_code": 0.4})
 		})
 
 		Convey("条数不一致", func() {
@@ -172,6 +172,26 @@ func TestReviewCommandsValidation(t *testing.T) {
 				return decode(`[{"outcome":"pass","failed":["destructive"]}]`)
 			})
 			So(err, ShouldNotBeNil)
+		})
+
+		Convey("评分只能属于未通过的题目", func() {
+			_, err := validateReviewResults(1, questions, func() (json.RawMessage, error) {
+				return decode(`[{"outcome":"reject","failed":["destructive"],"scores":{"remote_code":0.4}}]`)
+			})
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring, "not in failed")
+
+			_, err = validateReviewResults(1, questions, func() (json.RawMessage, error) {
+				return decode(`[{"outcome":"reject","failed":["destructive"],"scores":{"destructive":1.5}}]`)
+			})
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring, "outside [0,1]")
+
+			_, err = validateReviewResults(1, questions, func() (json.RawMessage, error) {
+				return decode(`[{"outcome":"pass","scores":{"destructive":0.1}}]`)
+			})
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring, "scores belong on reject")
 		})
 
 		Convey("调用本身失败同样是无效结果", func() {

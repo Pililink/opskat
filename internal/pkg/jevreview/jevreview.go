@@ -19,15 +19,12 @@ const (
 	QuestionRemoteCode  = "remote_code"
 )
 
-// 设置没填时的默认值：TypeSafe 官方地址上的 Jev 具体版本。
+// 设置没填时的默认值：TypeSafe 官方地址上的 Jev 最新模型。
 const (
 	DefaultBaseURL   = typesafe.DefaultBaseURL
-	DefaultModel     = "jev-1.13.0"
+	DefaultModel     = "latest"
 	DefaultThreshold = 0.5
 )
-
-// QuestionsVersion 在题目文字或通过标准变化时递增，让旧的缓存失效。
-const QuestionsVersion = "3"
 
 // 调用模型失败的原因，与宿主的审核失败原因同名。
 const (
@@ -100,12 +97,4 @@ func FailReason(err error) string {
 	default:
 		return ReasonUnavailable
 	}
-}
-
-// Retryable 判断一次调用失败后值不值得再试：这次调用超时或网络出错时重试。服务端明确返回的
-// 错误（API key 无效、请求有误等）重试也不会成功，429 / 529 已经在客户端里退避重试过；
-// 调用方已经取消时也不再试。
-func Retryable(ctx context.Context, err error) bool {
-	var apiErr *typesafe.APIError
-	return ctx.Err() == nil && !errors.As(err, &apiErr)
 }

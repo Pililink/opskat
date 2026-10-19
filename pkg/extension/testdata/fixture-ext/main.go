@@ -34,8 +34,7 @@ func reviewCommands(_ *opskat.ReviewContext, items []opskat.ReviewItem) ([]opska
 			out[i] = opskat.ReviewResult{Outcome: opskat.ReviewError, Reason: "unavailable"}
 		default:
 			if strings.Contains(item.Command, "rm") {
-				score := 0.9
-				out[i] = opskat.ReviewResult{Outcome: opskat.ReviewReject, Failed: []string{"destructive"}, Score: &score}
+				out[i] = opskat.ReviewResult{Outcome: opskat.ReviewReject, Failed: []string{"destructive"}, Scores: map[string]float64{"destructive": 0.9}}
 				continue
 			}
 			out[i] = opskat.ReviewResult{Outcome: opskat.ReviewPass}

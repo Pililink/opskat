@@ -21,11 +21,12 @@ type ReviewItem struct {
 
 // ReviewResult 是对一条命令的回答。
 // reject 必须带未通过的问题 id；error 必须带原因 id；pass 两者都不带。
+// Scores 是未通过题目的评分（题目 id → 0~1），只能出现在 reject 上，可省略。
 type ReviewResult struct {
-	Outcome string   `json:"outcome"`
-	Failed  []string `json:"failed,omitempty"`
-	Score   *float64 `json:"score,omitempty"`
-	Reason  string   `json:"reason,omitempty"`
+	Outcome string             `json:"outcome"`
+	Failed  []string           `json:"failed,omitempty"`
+	Scores  map[string]float64 `json:"scores,omitempty"`
+	Reason  string             `json:"reason,omitempty"`
 }
 
 // ReviewQuestion 是审核器声明的一道题。Name 的 key 是语言代码。

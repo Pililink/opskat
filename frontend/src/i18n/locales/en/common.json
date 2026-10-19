@@ -3418,7 +3418,7 @@
     },
     "settings": {
       "title": "Command review",
-      "desc": "When an asset or group uses Assisted approval or Autopilot, a command the rules cannot decide is first judged by a command review extension, which stops only clearly dangerous operations. Decoded scripts are expanded and passwords and other secrets are masked before review.",
+      "desc": "For assets using Assisted approval or Autopilot, a command the rules cannot decide is first judged by the review extension, which stops only clearly dangerous operations. Before review, decoded scripts are expanded and passwords and other secrets are masked.",
       "timeout": "Review timeout (ms)",
       "timeoutHint": "Timeout for each call to the review extension; a timed-out call is retried once",
       "timeoutRange": "Timeout must be between {{min}} and {{max}} ms",
@@ -3430,8 +3430,8 @@
       "saved": "Command review settings saved",
       "lastFail": "Last review failure: {{reason}} ({{time}})",
       "notice": "This saves effort; it is not a security boundary. Misleading text written into a command can sway the model. Deny rules remain the real safeguard.",
-      "noReviewer": "No command review extension is available. Install and enable one under Settings › Extensions (for example \"Command Review (Jev)\"); until then Assisted approval asks you about every such command and Autopilot refuses them.",
-      "selectReviewer": "Several command review extensions are enabled; select one.",
+      "noReviewer": "No review extension is available. Install and enable one under Settings › Extensions (for example \"Jev Command Review\"). Until then, Assisted approval asks you about every such command and Autopilot refuses them.",
+      "selectReviewer": "Several review extensions are enabled; select one.",
       "configureReviewer": "Configure in extension details"
     },
     "mode": {
@@ -3462,7 +3462,7 @@
       "confirmAutopilot": "Commands that no rule decides will first be reviewed by the review model. They run when the review passes and are rejected without waiting for you when judged clearly dangerous or when the review fails. Meant for unattended use. Commands (with sensitive values replaced) are sent to the review service in Settings.",
       "confirm": "Turn on",
       "saved": "Permission mode saved",
-      "noReviewer": "No command review extension is available: Assisted approval asks you about every such command and Autopilot refuses them."
+      "noReviewer": "No review extension is available: Assisted approval and Autopilot fall back to the default behavior."
     },
     "configError": {
       "not_configured": "The command review extension is not configured yet (for example, no API key), so every review fails.",

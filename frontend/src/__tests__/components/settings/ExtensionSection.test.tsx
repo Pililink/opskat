@@ -54,7 +54,7 @@ describe("ExtensionSection detail", () => {
       values: {},
       secretsSet: [],
     } as never);
-    const ext = installed("command-review", "");
+    const ext = installed("jev-command-review", "");
     await openDetail({
       ...ext,
       manifest: {
@@ -65,7 +65,7 @@ describe("ExtensionSection detail", () => {
     });
     expect(screen.getByRole("alert")).toHaveTextContent("extension.commandReviewWarning");
     expect(await screen.findByTestId("extension-settings-form")).toBeInTheDocument();
-    expect(GetExtensionSettings).toHaveBeenCalledWith("command-review");
+    expect(GetExtensionSettings).toHaveBeenCalledWith("jev-command-review");
   });
 
   it("shows no settings section for an extension without settings", async () => {
@@ -76,19 +76,19 @@ describe("ExtensionSection detail", () => {
 
   // 设置 › AI › 命令审核里点"去扩展里设置"：切到扩展页并直接打开那个扩展的详情。
   it("opens the detail of the extension another settings page asked for", async () => {
-    const ext = installed("command-review", "");
+    const ext = installed("jev-command-review", "");
     vi.mocked(ListInstalledExtensions).mockResolvedValue([ext] as never);
     vi.mocked(GetExtensionDetail).mockResolvedValue(ext as never);
-    useSettingsUiStore.getState().openExtensionDetail("command-review");
+    useSettingsUiStore.getState().openExtensionDetail("jev-command-review");
     render(<ExtensionSection />);
-    await waitFor(() => expect(GetExtensionDetail).toHaveBeenCalledWith("command-review"));
+    await waitFor(() => expect(GetExtensionDetail).toHaveBeenCalledWith("jev-command-review"));
     await screen.findByRole("dialog");
     expect(useSettingsUiStore.getState().extensionDetail).toBeNull();
   });
 
   // 纯审核扩展没有工具、策略组和页面：不显示三栏"无"，而是列出它审核哪几类危险。
   it("shows a review extension's questions instead of empty tools, policies and pages", async () => {
-    const ext = installed("command-review", "");
+    const ext = installed("jev-command-review", "");
     await openDetail({
       ...ext,
       manifest: {

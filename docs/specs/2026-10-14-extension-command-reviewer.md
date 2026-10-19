@@ -4,7 +4,7 @@
 > Owner: OpsKat 维护者
 > Last updated: 2026-10-14
 
-**Objective:** 让"命令模型审核"可以由扩展提供、按需安装。本文是第 1 步：补齐宿主与扩展 SDK 的能力（审核器扩展点、opsctl 内运行审核器、扩展级设置与密钥、按设置放行网络、安装来源记录），并把 [辅助审批与 Autopilot](./2026-09-29-assisted-approval-autopilot.md) 里与具体审核服务无关的部分留在宿主。第 2 步再把现有的 TypeSafe/Jev 审核迁成官方扩展 `extensions/command-review`，另立文档。
+**Objective:** 让"命令模型审核"可以由扩展提供、按需安装。本文是第 1 步：补齐宿主与扩展 SDK 的能力（审核器扩展点、opsctl 内运行审核器、扩展级设置与密钥、按设置放行网络、安装来源记录），并把 [辅助审批与 Autopilot](./2026-09-29-assisted-approval-autopilot.md) 里与具体审核服务无关的部分留在宿主。第 2 步再把现有的 TypeSafe/Jev 审核迁成官方扩展 `extensions/jev-command-review`，另立文档。
 
 **Hard invariant:** 审核器只能把规则判为"需要确认"的命令改为放行，永远碰不到规则拒绝和"只能由人判断"（`Unreviewable`）的命令；审核器缺失、出错、超时、返回格式不对，一律按"审核失败"处理——辅助审批问人，Autopilot 拒绝，绝不因此放行。
 
@@ -76,7 +76,7 @@
 
 ## 实现说明（与上文的差异）
 
-- **内置审核已经去掉（第 2 步完成）。** 命令审核只由审核扩展来做，仓库里的官方实现是 `extensions/command-review`（TypeSafe Jev，题目和判定在 `internal/pkg/jevreview`）。宿主的 `config.json` 只剩审核超时和选用的扩展名；API key、服务地址、模型、阈值都是扩展设置。
+- **内置审核已经去掉（第 2 步完成）。** 命令审核只由审核扩展来做，仓库里的官方实现是 `extensions/jev-command-review`（TypeSafe Jev，题目和判定在 `internal/pkg/jevreview`）。宿主的 `config.json` 只剩审核超时和选用的扩展名；API key、服务地址、模型、阈值都是扩展设置。
 - **没选审核扩展时自动选用。** 与第 5 条不同：设置里没选时，启用中的审核扩展只有一个就用它（只读 `manifest.json` 的 `capabilities.commandReview`，opsctl 不加载扩展也能判断）；一个都没有、或有多个却没选，按 `no_reviewer` 审核失败并提醒用户。
 - **纯审核扩展不需要资产类型。** 描述符校验原本要求至少一个资产类型和策略面；声明了 reviewer 的扩展可以都不声明，但也就不能声明工具。
 - **`settings_get` 对已设置的密钥给出占位。** 扩展据此判断有没有配置 API key，仍然拿不到明文。

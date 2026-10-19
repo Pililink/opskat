@@ -47,7 +47,7 @@ describe("reviewSummary with an extension reviewer", () => {
     mode: "autopilot" as const,
     outcome: "reject",
     failed: ["data_loss"],
-    extension: "command-review",
+    extension: "jev-command-review",
     version: "1.2.0",
     failed_names: { data_loss: { en: "Loses data", "zh-CN": "丢失数据" } },
   };

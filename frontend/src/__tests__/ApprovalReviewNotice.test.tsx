@@ -10,7 +10,7 @@ const review = {
   mode: "assisted" as const,
   outcome: "reject",
   failed: ["disruptive"],
-  extension: "command-review",
+  extension: "jev-command-review",
   version: "1.0.1",
 };
 

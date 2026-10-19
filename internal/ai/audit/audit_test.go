@@ -240,13 +240,13 @@ func TestWriteToolCall_RecordsModelReview(t *testing.T) {
 		Decision: &aictx.CheckResult{
 			Decision:       aictx.Allow,
 			DecisionSource: aictx.SourceUserAllow,
-			Review:         &aictx.ReviewInfo{Mode: "assisted", Outcome: "reject", Failed: []string{"disruptive"}, Extension: "command-review", Version: "1.0.1"},
+			Review:         &aictx.ReviewInfo{Mode: "assisted", Outcome: "reject", Failed: []string{"disruptive"}, Extension: "jev-command-review", Version: "1.0.1"},
 		},
 	})
 
 	assert.Len(t, repo.logs, 1)
 	assert.Equal(t, aictx.SourceUserAllow, repo.logs[0].DecisionSource)
-	assert.JSONEq(t, `{"mode":"assisted","outcome":"reject","failed":["disruptive"],"extension":"command-review","version":"1.0.1"}`, repo.logs[0].Review)
+	assert.JSONEq(t, `{"mode":"assisted","outcome":"reject","failed":["disruptive"],"extension":"jev-command-review","version":"1.0.1"}`, repo.logs[0].Review)
 }
 
 func TestWriteToolCall_NoReviewLeavesColumnEmpty(t *testing.T) {

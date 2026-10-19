@@ -50,8 +50,8 @@ func registerFakeReviewer(t *testing.T, r command_review_svc.Result) *fakeReview
 }
 
 var (
-	reviewPass   = command_review_svc.Result{Outcome: command_review_svc.OutcomePass, Extension: "command-review", Version: "1.0.0"}
-	reviewReject = command_review_svc.Result{Outcome: command_review_svc.OutcomeReject, Failed: []string{"disruptive"}, Extension: "command-review", Version: "1.0.0",
+	reviewPass   = command_review_svc.Result{Outcome: command_review_svc.OutcomePass, Extension: "jev-command-review", Version: "1.0.0"}
+	reviewReject = command_review_svc.Result{Outcome: command_review_svc.OutcomeReject, Failed: []string{"disruptive"}, Extension: "jev-command-review", Version: "1.0.0",
 		FailedNames: map[string]map[string]string{"disruptive": {"en": "may interrupt services", "zh-CN": "可能中断服务"}}}
 	reviewFail = command_review_svc.Result{Outcome: command_review_svc.OutcomeFail, Reason: command_review_svc.ReasonTimeout}
 )
@@ -181,13 +181,13 @@ func TestApplyReview(t *testing.T) {
 			Convey("审核扩展未通过：拒绝原因用扩展声明的题目名称，并记下是哪个扩展审的", func() {
 				registerFakeReviewer(t, command_review_svc.Result{
 					Outcome: command_review_svc.OutcomeReject, Failed: []string{"data_loss"},
-					Extension: "command-review", Version: "1.2.0",
+					Extension: "jev-command-review", Version: "1.2.0",
 					FailedNames: map[string]map[string]string{"data_loss": {"en": "Loses data", "zh-CN": "丢失数据"}},
 				})
 				r := CheckPermission(aictx.WithPolicyLang(ctx, "zh-CN"), asset_entity.AssetTypeSSH, 1, cmd)
 				So(r.Decision, ShouldEqual, aictx.Deny)
 				So(r.Message, ShouldContainSubstring, "模型审核未通过（丢失数据）")
-				So(r.Review.Extension, ShouldEqual, "command-review")
+				So(r.Review.Extension, ShouldEqual, "jev-command-review")
 				So(r.Review.Version, ShouldEqual, "1.2.0")
 				So(r.Review.FailedNames["data_loss"]["en"], ShouldEqual, "Loses data")
 

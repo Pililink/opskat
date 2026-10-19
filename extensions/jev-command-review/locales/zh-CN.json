@@ -1,5 +1,5 @@
 {
-  "extension.displayName": "命令审核（Jev）",
+  "extension.displayName": "Jev 命令审核",
   "extension.description": "在辅助审批和 Autopilot 下用 TypeSafe 的 Jev 模型审核命令，只拦明确危险的操作",
 
   "settings.apiKey.title": "API key",

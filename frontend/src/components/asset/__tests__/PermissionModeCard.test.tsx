@@ -17,7 +17,7 @@ function mockReviewer(available: boolean) {
   vi.mocked(GetCommandReviewState).mockResolvedValue({
     reviewers: [],
     selected: "",
-    active: available ? "command-review" : "",
+    active: available ? "jev-command-review" : "",
     problem: available ? "" : "no_reviewer",
   } as never);
 }

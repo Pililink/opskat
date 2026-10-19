@@ -28,7 +28,7 @@ describe("ExtensionSettingsForm", () => {
 
   it("读回非密钥字段，已设置的密钥只显示为已设置，留空保存不提交新值", async () => {
     await act(async () => {
-      render(<ExtensionSettingsForm extensionName="command-review" />);
+      render(<ExtensionSettingsForm extensionName="jev-command-review" />);
     });
     expect(await screen.findByDisplayValue("https://review.example.com")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("asset.passwordUnchanged")).toHaveValue("");
@@ -36,7 +36,7 @@ describe("ExtensionSettingsForm", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "extension.settings.save" }));
     });
-    expect(SaveExtensionSettings).toHaveBeenCalledWith("command-review", { endpoint: "https://review.example.com" });
+    expect(SaveExtensionSettings).toHaveBeenCalledWith("jev-command-review", { endpoint: "https://review.example.com" });
   });
 
   it("必填项没填时在字段下提示、不提交；已存过的密钥留空不算没填", async () => {
@@ -47,7 +47,7 @@ describe("ExtensionSettingsForm", () => {
       secretsSet: [],
     } as never);
     await act(async () => {
-      render(<ExtensionSettingsForm extensionName="command-review" />);
+      render(<ExtensionSettingsForm extensionName="jev-command-review" />);
     });
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "extension.settings.save" }));
@@ -62,24 +62,24 @@ describe("ExtensionSettingsForm", () => {
       schema: { ...view.schema, required: ["endpoint", "token"] },
     } as never);
     await act(async () => {
-      render(<ExtensionSettingsForm extensionName="command-review" />);
+      render(<ExtensionSettingsForm extensionName="jev-command-review" />);
     });
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "extension.settings.save" }));
     });
-    expect(SaveExtensionSettings).toHaveBeenCalledWith("command-review", { endpoint: "https://review.example.com" });
+    expect(SaveExtensionSettings).toHaveBeenCalledWith("jev-command-review", { endpoint: "https://review.example.com" });
   });
 
   it("审核扩展可以保存并测试：先保存，再用刚保存的设置测这个扩展，显示结果", async () => {
     vi.mocked(TestCommandReviewer).mockResolvedValue({ mode: "", outcome: "fail", reason: "invalid_api_key" } as never);
     await act(async () => {
-      render(<ExtensionSettingsForm extensionName="command-review" reviewer />);
+      render(<ExtensionSettingsForm extensionName="jev-command-review" reviewer />);
     });
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "extension.settings.saveAndTest" }));
     });
     expect(SaveExtensionSettings).toHaveBeenCalled();
-    expect(TestCommandReviewer).toHaveBeenCalledWith("command-review");
+    expect(TestCommandReviewer).toHaveBeenCalledWith("jev-command-review");
     expect(screen.getByTestId("extension-settings-test-result")).toHaveTextContent("commandReview.summary.fail");
   });
 

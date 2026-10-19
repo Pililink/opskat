@@ -159,7 +159,7 @@ describe("AuditLogPage result status", () => {
           MatchedPattern: "",
           Review:
             '{"mode":"autopilot","outcome":"reject","failed":["data_loss"],"scores":{"data_loss":0.9},' +
-            '"extension":"command-review","version":"1.2.0","failed_names":{"data_loss":{"en":"Loses data"}}}',
+            '"extension":"jev-command-review","version":"1.2.0","failed_names":{"data_loss":{"en":"Loses data"}}}',
           Createtime: 1,
         },
       ],

@@ -1,5 +1,5 @@
 {
-  "extension.displayName": "Command Review (Jev)",
+  "extension.displayName": "Jev Command Review",
   "extension.description": "Reviews commands with TypeSafe's Jev model under Assisted approval and Autopilot, stopping only clearly dangerous ones",
 
   "settings.apiKey.title": "API key",

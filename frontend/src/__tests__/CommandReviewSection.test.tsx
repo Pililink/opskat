@@ -55,7 +55,7 @@ describe("CommandReviewSection", () => {
     expect(useSettingsUiStore.getState().extensionDetail).toBe("jev");
   });
 
-  it("没有审核扩展时说明要先安装，辅助审批和 Autopilot 在那之前不会自动审核", async () => {
+  it("没有审核扩展时提示去安装，并说明辅助审批和 Autopilot 会转到默认", async () => {
     vi.mocked(GetCommandReviewState).mockResolvedValue(state({ reviewers: [], active: "", problem: "no_reviewer" }));
     await renderSection();
     expect(screen.getByTestId("command-review-problem")).toHaveTextContent("commandReview.settings.noReviewer");

@@ -107,31 +107,6 @@ func TestParseTransferEndpoint_Local(t *testing.T) {
 	}
 }
 
-// Windows 上 E:/src/... 是盘符路径，不是资产 E 上的 /src/...。即使真有名为 E 的资产，
-// 盘符也优先，并且不该去查资产。
-func TestParseTransferEndpoint_WindowsDriveSlashIsLocal(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("drive-letter paths are local only on Windows")
-	}
-	r := newStubResolver(&asset_entity.Asset{ID: 1, Name: "E", Type: asset_entity.AssetTypeSSH})
-	in := "E:/src/vaalhub-workspace/plugin-catalog.sql"
-
-	asset, path, err := ParseTransferEndpoint(context.Background(), in, r.resolve)
-
-	if err != nil {
-		t.Fatalf("ParseTransferEndpoint(%q) unexpected error: %v", in, err)
-	}
-	if asset != nil {
-		t.Fatalf("ParseTransferEndpoint(%q) asset = %+v, want nil", in, asset)
-	}
-	if path != in {
-		t.Fatalf("ParseTransferEndpoint(%q) path = %q, want the input unchanged", in, path)
-	}
-	if len(r.refs) != 0 {
-		t.Fatalf("ParseTransferEndpoint(%q) asked resolver for %q, want no query", in, r.refs)
-	}
-}
-
 // drivePrefixRefs 是解析一个带盘符的路径时解析器被问到的前缀：Windows 上不问。
 func drivePrefixRefs(prefix string) []string {
 	if runtime.GOOS == "windows" {

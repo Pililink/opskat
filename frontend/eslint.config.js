@@ -28,6 +28,15 @@ const paletteRestrictions = [
   { selector: `TemplateElement[value.raw=/${paletteClassPattern}/]`, message: paletteMessage },
 ];
 
+// 数据库驱动差异在后端驱动注册表里，前端从驱动描述读取（src/lib/dbDrivers/，docs/references/adding-a-database-driver.md）：
+// 共享代码不得拿驱动名做比较。驱动名取自内置驱动的 id 与别名。
+const driverNames = "mysql|postgresql|postgres|mssql|sqlserver|sqlite|sqlite3";
+const driverMessage =
+  "共享代码不得按驱动名分支：驱动属性从 src/lib/dbDrivers 的驱动描述读取（driverHasCapability 等），方言 SQL 放进后端驱动（docs/references/adding-a-database-driver.md）。";
+const driverRestrictions = [
+  { selector: `BinaryExpression[operator=/^[!=]==?$/] > Literal[value=/^(${driverNames})$/]`, message: driverMessage },
+  { selector: `SwitchCase[test.value=/^(${driverNames})$/]`, message: driverMessage },
+];
 export default tseslint.config(
   { ignores: ["dist", "wailsjs"] },
   js.configs.recommended,
@@ -63,6 +72,13 @@ export default tseslint.config(
   {
     // 设计系统作用域（主应用 src + @opskat/ui）：palette 类名禁令只在 globals.css token 体系内生效。
     files: ["src/**/*.{ts,tsx}", "packages/ui/src/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-syntax": ["error", ...react19Restrictions, ...paletteRestrictions, ...driverRestrictions],
+    },
+  },
+  {
+    // 驱动描述的实现处与测试夹具：可以按驱动名比较（其余禁令保留）。
+    files: ["src/lib/dbDrivers/**/*.{ts,tsx}", "src/**/__tests__/**/*.{ts,tsx}", "src/**/*.test.{ts,tsx}"],
     rules: {
       "no-restricted-syntax": ["error", ...react19Restrictions, ...paletteRestrictions],
     },

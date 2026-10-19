@@ -6,9 +6,12 @@ import { asset_entity, query_svc } from "../../wailsjs/go/models";
 import {
   ExecuteSQL,
   ListDatabaseObjects,
+  ListDatabases,
   ListMongoCollections,
   ListMongoDatabases,
+  ListTables,
 } from "../../wailsjs/go/query/Query";
+import { BUILTIN_DRIVERS, FAKE_DRIVER, provideDrivers } from "./dbDriverFixtures";
 import { RedisGetKeyDetail } from "../../wailsjs/go/redis/Redis";
 import { RedisListDatabases, RedisScanKeys } from "../../wailsjs/go/redis/Redis";
 
@@ -531,48 +534,44 @@ describe("queryStore redis actions", () => {
 describe("queryStore database actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    provideDrivers(BUILTIN_DRIVERS);
     useTabStore.setState({ tabs: [], activeTabId: null });
     useQueryStore.setState({ dbStates: {}, redisStates: {}, mongoStates: {} });
     vi.spyOn(useAssetStore.getState(), "getAssetPath").mockReturnValue("Test/SQLite");
     useQueryStore.getState().openQueryTab(makeSQLiteAsset(30));
   });
 
-  it("loads SQLite schemas with PRAGMA database_list", async () => {
-    vi.mocked(ExecuteSQL).mockResolvedValueOnce(
-      JSON.stringify({
-        rows: [{ seq: 0, name: "main", file: "/tmp/app.db" }],
-      })
-    );
+  it("lists SQLite databases through the structured binding and shows what the driver returns", async () => {
+    vi.mocked(ListDatabases).mockResolvedValueOnce(["main"]);
 
     await useQueryStore.getState().loadDatabases("query-30");
 
-    expect(ExecuteSQL).toHaveBeenCalledWith(30, "SELECT name FROM pragma_database_list ORDER BY seq", "");
+    expect(ListDatabases).toHaveBeenCalledWith(30);
+    expect(ExecuteSQL).not.toHaveBeenCalled();
     expect(useQueryStore.getState().dbStates["query-30"].databases).toEqual(["main"]);
   });
 
-  it("loads SQLite tables from sqlite_master instead of SHOW TABLES", async () => {
-    vi.mocked(ExecuteSQL).mockResolvedValueOnce(
-      JSON.stringify({
-        rows: [{ name: "users" }, { name: "orders" }],
-      })
-    );
+  it("lists SQLite tables through the structured binding", async () => {
+    vi.mocked(ListTables).mockResolvedValueOnce(["users", "orders"]);
 
     await useQueryStore.getState().loadTables("query-30", "main");
 
-    expect(ExecuteSQL).toHaveBeenCalledWith(
-      30,
-      `SELECT name FROM "main".sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY name`,
-      "main"
-    );
+    expect(ListTables).toHaveBeenCalledWith(30, "main");
+    expect(ExecuteSQL).not.toHaveBeenCalled();
     expect(useQueryStore.getState().dbStates["query-30"].tables.main).toEqual(["users", "orders"]);
   });
 
+  it("reports a database listing failure in the same place as before", async () => {
+    vi.mocked(ListDatabases).mockRejectedValueOnce("boom");
+
+    await useQueryStore.getState().loadDatabases("query-30");
+
+    expect(useQueryStore.getState().dbStates["query-30"].error).toBe("boom");
+    expect(useQueryStore.getState().dbStates["query-30"].loadingDbs).toBe(false);
+  });
+
   it("refreshes SQLite object browser data with the table list", async () => {
-    vi.mocked(ExecuteSQL).mockResolvedValueOnce(
-      JSON.stringify({
-        rows: [{ name: "users" }, { name: "orders" }],
-      })
-    );
+    vi.mocked(ListTables).mockResolvedValueOnce(["users", "orders"]);
     vi.mocked(ListDatabaseObjects).mockResolvedValueOnce({
       views: [{ name: "v_orders", type: "view" }],
       procedures: [],
@@ -595,6 +594,7 @@ describe("queryStore database actions", () => {
 describe("queryStore PostgreSQL database actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    provideDrivers(BUILTIN_DRIVERS);
     useTabStore.setState({ tabs: [], activeTabId: null });
     useQueryStore.setState({ dbStates: {}, redisStates: {}, mongoStates: {} });
     vi.spyOn(useAssetStore.getState(), "getAssetPath").mockReturnValue("Test/PostgreSQL");
@@ -602,19 +602,12 @@ describe("queryStore PostgreSQL database actions", () => {
   });
 
   it("loads PostgreSQL tables from non-system schemas as schema.table", async () => {
-    vi.mocked(ExecuteSQL).mockResolvedValueOnce(
-      JSON.stringify({ rows: [{ name: "adm.ads_audit" }, { name: "public.users" }] })
-    );
+    vi.mocked(ListTables).mockResolvedValueOnce(["adm.ads_audit", "public.users"]);
 
     await useQueryStore.getState().loadTables("query-35", "admdb");
 
-    expect(ExecuteSQL).toHaveBeenCalledWith(
-      35,
-      "SELECT table_schema || '.' || table_name AS name FROM information_schema.tables " +
-        "WHERE table_schema NOT IN ('pg_catalog', 'information_schema') " +
-        "AND table_type IN ('BASE TABLE', 'VIEW') ORDER BY table_schema, table_name",
-      "admdb"
-    );
+    expect(ListTables).toHaveBeenCalledWith(35, "admdb");
+    expect(ExecuteSQL).not.toHaveBeenCalled();
     expect(useQueryStore.getState().dbStates["query-35"].tables.admdb).toEqual(["adm.ads_audit", "public.users"]);
     expect(useQueryStore.getState().dbStates["query-35"].expandedSchemas.admdb).toEqual(["adm", "public"]);
   });
@@ -629,9 +622,7 @@ describe("queryStore PostgreSQL database actions", () => {
         },
       },
     }));
-    vi.mocked(ExecuteSQL).mockResolvedValueOnce(
-      JSON.stringify({ rows: [{ name: "adm.ads_audit" }, { name: "reporting.events" }] })
-    );
+    vi.mocked(ListTables).mockResolvedValueOnce(["adm.ads_audit", "reporting.events"]);
 
     await useQueryStore.getState().loadTables("query-35", "admdb");
 
@@ -661,40 +652,59 @@ describe("queryStore PostgreSQL database actions", () => {
 describe("queryStore MSSQL database actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    provideDrivers(BUILTIN_DRIVERS);
     useTabStore.setState({ tabs: [], activeTabId: null });
     useQueryStore.setState({ dbStates: {}, redisStates: {}, mongoStates: {} });
     vi.spyOn(useAssetStore.getState(), "getAssetPath").mockReturnValue("Test/MSSQL");
     useQueryStore.getState().openQueryTab(makeMSSQLAsset(40));
   });
 
-  it("loads MSSQL databases from sys.databases instead of SHOW DATABASES", async () => {
-    vi.mocked(ExecuteSQL).mockResolvedValueOnce(JSON.stringify({ rows: [{ name: "appdb" }] }));
+  it("lists MSSQL databases through the structured binding, showing the driver's list as-is", async () => {
+    vi.mocked(ListDatabases).mockResolvedValueOnce(["appdb"]);
 
     await useQueryStore.getState().loadDatabases("query-40");
 
-    expect(ExecuteSQL).toHaveBeenCalledWith(
-      40,
-      "SELECT name FROM sys.databases WHERE database_id > 4 ORDER BY name",
-      ""
-    );
+    expect(ListDatabases).toHaveBeenCalledWith(40);
+    expect(ExecuteSQL).not.toHaveBeenCalled();
     expect(useQueryStore.getState().dbStates["query-40"].databases).toEqual(["appdb"]);
   });
 
-  it("loads MSSQL tables as schema.table from INFORMATION_SCHEMA instead of SHOW TABLES", async () => {
-    vi.mocked(ExecuteSQL).mockResolvedValueOnce(
-      JSON.stringify({ rows: [{ name: "dbo.users" }, { name: "sales.orders" }] })
-    );
+  it("lists MSSQL tables as schema.table through the structured binding", async () => {
+    vi.mocked(ListTables).mockResolvedValueOnce(["dbo.users", "sales.orders"]);
 
     await useQueryStore.getState().loadTables("query-40", "appdb");
 
-    expect(ExecuteSQL).toHaveBeenCalledWith(
-      40,
-      "SELECT TABLE_SCHEMA + '.' + TABLE_NAME AS name FROM INFORMATION_SCHEMA.TABLES " +
-        "WHERE TABLE_TYPE IN ('BASE TABLE', 'VIEW') ORDER BY TABLE_SCHEMA, TABLE_NAME",
-      "appdb"
-    );
+    expect(ListTables).toHaveBeenCalledWith(40, "appdb");
+    expect(ExecuteSQL).not.toHaveBeenCalled();
     expect(useQueryStore.getState().dbStates["query-40"].tables.appdb).toEqual(["dbo.users", "sales.orders"]);
     expect(useQueryStore.getState().dbStates["query-40"].expandedSchemas.appdb).toEqual(["dbo", "sales"]);
+  });
+});
+
+describe("queryStore with a driver unknown to the frontend", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    provideDrivers([FAKE_DRIVER]);
+    useTabStore.setState({ tabs: [], activeTabId: null });
+    useQueryStore.setState({ dbStates: {}, redisStates: {}, mongoStates: {} });
+    vi.spyOn(useAssetStore.getState(), "getAssetPath").mockReturnValue("Test/FakeDB");
+    useQueryStore.getState().openQueryTab({
+      ...makeDatabaseAsset(50),
+      Config: JSON.stringify({ driver: "fakedb", host: "h", port: 7777 }),
+    } as asset_entity.Asset);
+  });
+
+  it("presents the databases and tables the driver returned, as-is", async () => {
+    vi.mocked(ListDatabases).mockResolvedValueOnce(["alpha", "beta"]);
+    vi.mocked(ListTables).mockResolvedValueOnce(["t1", "t2"]);
+
+    await useQueryStore.getState().loadDatabases("query-50");
+    await useQueryStore.getState().loadTables("query-50", "alpha");
+
+    const state = useQueryStore.getState().dbStates["query-50"];
+    expect(state.databases).toEqual(["alpha", "beta"]);
+    expect(state.tables.alpha).toEqual(["t1", "t2"]);
+    expect(ExecuteSQL).not.toHaveBeenCalled();
   });
 });
 
@@ -739,5 +749,201 @@ describe("queryStore MongoDB actions", () => {
     expect(ListMongoCollections).toHaveBeenCalledTimes(1);
     expect(ListMongoCollections).toHaveBeenCalledWith(20, "app");
     expect(useQueryStore.getState().mongoStates["query-20"].collections.neverOpened).toBeUndefined();
+  });
+});
+
+describe("queryStore.revealTable", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    provideDrivers(BUILTIN_DRIVERS);
+    useTabStore.setState({ tabs: [], activeTabId: null });
+    useQueryStore.setState({ dbStates: {}, redisStates: {}, mongoStates: {} });
+    vi.spyOn(useAssetStore.getState(), "getAssetPath").mockReturnValue("Test/SQLite");
+    useQueryStore.getState().openQueryTab(makeSQLiteAsset(30));
+  });
+
+  it("expands the database once and loads its tables when missing", async () => {
+    vi.mocked(ListTables).mockResolvedValue(["users"]);
+
+    useQueryStore.getState().revealTable("query-30", "main", "users");
+    const first = useQueryStore.getState().dbStates["query-30"];
+    expect(first.expandedDbs).toContain("main");
+    expect(first.revealRequest).toMatchObject({ db: "main", table: "users" });
+    await vi.waitFor(() => expect(ListTables).toHaveBeenCalledWith(30, "main"));
+
+    useQueryStore.getState().revealTable("query-30", "main", "users");
+    const second = useQueryStore.getState().dbStates["query-30"];
+    expect(second.expandedDbs.filter((d) => d === "main")).toHaveLength(1);
+  });
+});
+
+describe("queryStore inner tab closing and SQL numbering", () => {
+  const innerIds = () => useQueryStore.getState().dbStates["query-40"].innerTabs.map((t) => t.id);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    provideDrivers(BUILTIN_DRIVERS);
+    useTabStore.setState({ tabs: [], activeTabId: null });
+    useQueryStore.setState({ dbStates: {}, redisStates: {}, mongoStates: {} });
+    vi.spyOn(useAssetStore.getState(), "getAssetPath").mockReturnValue("Test/SQLite");
+    useQueryStore.getState().openQueryTab(makeSQLiteAsset(40));
+  });
+
+  function seed() {
+    const s = useQueryStore.getState();
+    s.openTableTab("query-40", "main", "a");
+    s.openTableTab("query-40", "main", "b");
+    s.openTableTab("query-40", "main", "c");
+  }
+
+  it("never reuses an SQL tab number after closing tabs", () => {
+    const s = useQueryStore.getState();
+    s.openSqlTab("query-40");
+    s.openSqlTab("query-40");
+    const [first, second] = useQueryStore.getState().dbStates["query-40"].innerTabs;
+    s.closeInnerTab("query-40", second.id);
+    s.closeInnerTab("query-40", first.id);
+    s.openSqlTab("query-40");
+    const titles = useQueryStore
+      .getState()
+      .dbStates["query-40"].innerTabs.map((t) => (t.type === "sql" ? t.title : ""));
+    expect(titles).toEqual(["SQL 3"]);
+  });
+
+  it("closeOtherInnerTabs keeps only the given tab and activates it", () => {
+    seed();
+    useQueryStore.getState().closeOtherInnerTabs("query-40", "table:main.b");
+    expect(innerIds()).toEqual(["table:main.b"]);
+    expect(useQueryStore.getState().dbStates["query-40"].activeInnerTabId).toBe("table:main.b");
+  });
+
+  it("closeRightInnerTabs drops tabs to the right and moves active onto the anchor if it was closed", () => {
+    seed();
+    expect(useQueryStore.getState().dbStates["query-40"].activeInnerTabId).toBe("table:main.c");
+    useQueryStore.getState().closeRightInnerTabs("query-40", "table:main.a");
+    expect(innerIds()).toEqual(["table:main.a"]);
+    expect(useQueryStore.getState().dbStates["query-40"].activeInnerTabId).toBe("table:main.a");
+  });
+
+  it("closeRightInnerTabs keeps the active tab when it survives", () => {
+    seed();
+    useQueryStore.getState().setActiveInnerTab("query-40", "table:main.a");
+    useQueryStore.getState().closeRightInnerTabs("query-40", "table:main.b");
+    expect(innerIds()).toEqual(["table:main.a", "table:main.b"]);
+    expect(useQueryStore.getState().dbStates["query-40"].activeInnerTabId).toBe("table:main.a");
+  });
+
+  describe("with unsaved edits", () => {
+    const db = () => useQueryStore.getState().dbStates["query-40"];
+
+    it("marks the outer tab unsaved while any inner tab has edits", () => {
+      seed();
+      const s = useQueryStore.getState();
+      s.setInnerTabDirty("query-40", "table:main.a", true);
+      s.setInnerTabDirty("query-40", "table:main.b", true);
+      s.setInnerTabDirty("query-40", "table:main.a", false);
+      expect(useTabStore.getState().unsavedTabIds).toContain("query-40");
+      s.setInnerTabDirty("query-40", "table:main.b", false);
+      expect(useTabStore.getState().unsavedTabIds).not.toContain("query-40");
+    });
+
+    it("holds the close of an edited tab for a decision and brings it to the front", () => {
+      seed();
+      useQueryStore.getState().setInnerTabDirty("query-40", "table:main.a", true);
+      useQueryStore.getState().closeInnerTab("query-40", "table:main.a");
+      expect(innerIds()).toEqual(["table:main.a", "table:main.b", "table:main.c"]);
+      expect(db().activeInnerTabId).toBe("table:main.a");
+      expect(db().closeRequest).toEqual({ ids: ["table:main.a"], dirtyIds: ["table:main.a"], closeOuter: false });
+    });
+
+    it("a batch close with edits closes nothing until decided; cancel keeps every tab", () => {
+      seed();
+      useQueryStore.getState().setInnerTabDirty("query-40", "table:main.b", true);
+      useQueryStore.getState().closeOtherInnerTabs("query-40", "table:main.c");
+      expect(innerIds()).toEqual(["table:main.a", "table:main.b", "table:main.c"]);
+      useQueryStore.getState().cancelCloseRequest("query-40");
+      expect(db().closeRequest).toBeUndefined();
+      expect(innerIds()).toEqual(["table:main.a", "table:main.b", "table:main.c"]);
+    });
+
+    it("forceCloseInnerTabs closes the requested tabs and forgets their edits", () => {
+      seed();
+      useQueryStore.getState().setInnerTabDirty("query-40", "table:main.b", true);
+      useQueryStore.getState().closeOtherInnerTabs("query-40", "table:main.c");
+      const { ids, closeOuter } = db().closeRequest!;
+      useQueryStore.getState().forceCloseInnerTabs("query-40", ids, closeOuter);
+      expect(innerIds()).toEqual(["table:main.c"]);
+      expect(db().activeInnerTabId).toBe("table:main.c");
+      expect(db().closeRequest).toBeUndefined();
+      expect(useTabStore.getState().unsavedTabIds).not.toContain("query-40");
+    });
+
+    it("forceCloseInnerTabs with closeOuter closes the database tab itself", () => {
+      seed();
+      useQueryStore.getState().setInnerTabDirty("query-40", "table:main.b", true);
+      useQueryStore.getState().forceCloseInnerTabs("query-40", ["table:main.b"], true);
+      expect(useTabStore.getState().tabs.map((t) => t.id)).not.toContain("query-40");
+      expect(useQueryStore.getState().dbStates["query-40"]).toBeUndefined();
+    });
+  });
+});
+
+describe("queryStore SQL numbering across persist and restore", () => {
+  const sqlTab = (n: number) => ({ id: `sql:${n}`, type: "sql", title: `SQL ${n}` });
+  const tabsJson = JSON.stringify({
+    tabs: [
+      {
+        id: "query-50",
+        type: "query",
+        label: "db",
+        meta: { type: "query", assetId: 50, assetName: "db", assetIcon: "", assetType: "database", driver: "sqlite" },
+      },
+    ],
+    activeTabId: "query-50",
+  });
+
+  async function restore(persisted: object) {
+    vi.resetModules();
+    localStorage.clear();
+    localStorage.setItem("tab_store", tabsJson);
+    localStorage.setItem("query_store_v1", JSON.stringify({ dbStates: { "query-50": persisted }, mongoStates: {} }));
+    const mod = await import("../stores/queryStore");
+    return mod.useQueryStore;
+  }
+  const base = { databases: [], tables: {}, expandedDbs: [], activeInnerTabId: null };
+
+  it("restores the persisted counter so closed numbers stay retired", async () => {
+    const store = await restore({ ...base, innerTabs: [sqlTab(1)], sqlTabSeq: 5 });
+    store.getState().openSqlTab("query-50");
+    expect(store.getState().dbStates["query-50"].innerTabs.map((t) => (t.type === "sql" ? t.title : ""))).toContain(
+      "SQL 6"
+    );
+  });
+
+  it("derives the counter from existing titles when an old persisted state has none", async () => {
+    const store = await restore({ ...base, innerTabs: [sqlTab(2), sqlTab(7)] });
+    store.getState().openSqlTab("query-50");
+    expect(store.getState().dbStates["query-50"].innerTabs.map((t) => (t.type === "sql" ? t.title : ""))).toContain(
+      "SQL 8"
+    );
+  });
+
+  it("keeps a closed number retired across a persist and restore round trip", async () => {
+    const store = await restore({ ...base, innerTabs: [sqlTab(1)], sqlTabSeq: 3 });
+    store.getState().openSqlTab("query-50");
+    // 关掉全部 SQL 标签:恢复后若按现存标题推算会回到 SQL 1,保留序号才是 SQL 5。
+    store.getState().closeOtherInnerTabs("query-50", "sql:1");
+    store.getState().closeInnerTab("query-50", "sql:1");
+    await vi.waitFor(() => {
+      const saved = JSON.parse(localStorage.getItem("query_store_v1")!);
+      expect(saved.dbStates["query-50"].innerTabs).toEqual([]);
+    });
+
+    const saved = JSON.parse(localStorage.getItem("query_store_v1")!);
+    const restored = await restore(saved.dbStates["query-50"]);
+    restored.getState().openSqlTab("query-50");
+    expect(restored.getState().dbStates["query-50"].innerTabs.map((t) => (t.type === "sql" ? t.title : ""))).toEqual([
+      "SQL 5",
+    ]);
   });
 });

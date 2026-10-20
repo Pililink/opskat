@@ -52,7 +52,7 @@ interface ApprovalItemData {
 
 interface SingleApprovalEvent {
   confirm_id: string;
-  kind: "single" | "once" | "delete" | "extension";
+  kind: "single" | "once" | "delete";
   type: string;
   asset_id: number;
   asset_name: string;
@@ -81,7 +81,7 @@ interface QueueItem {
   id: string;
   // "delete" 与 "single" 共用同一套渲染骨架（同一个 opsctl:approval 事件），
   // 只在按钮区按 kind 收窄——与 ApprovalBlock.tsx 的 kind 取值保持一致，不新造第三套判断。
-  kind: "single" | "once" | "batch" | "grant" | "delete" | "extension";
+  kind: "single" | "once" | "batch" | "grant" | "delete";
   items: ApprovalItemData[];
   description?: string;
   sessionID?: string;
@@ -206,6 +206,11 @@ export function OpsctlApprovalDialog({ suspended = false }: { suspended?: boolea
           // 都带了它（batch_exec 的 exec/sql/redis/mongo 混合批不产出，留空），折叠摘要
           // 因此报得出两端基点，不止是条数。
           detail: i.detail,
+          // opsctl batch 里扩展资产的条目才有：扩展分类出的动作与这次调用触及的资源，
+          // 与单条审批一样展示在命令上方（batch 没有「记住」，不带 remember_pattern）。
+          action: i.action,
+          resource: i.resource,
+          resources: i.resources,
         }));
         enqueue({
           id: data.confirm_id,

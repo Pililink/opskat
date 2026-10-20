@@ -31,7 +31,6 @@ import (
 	"github.com/opskat/opskat/internal/app/system"
 	"github.com/opskat/opskat/internal/app/vnc"
 
-	aitool "github.com/opskat/opskat/internal/ai/tool"
 	"github.com/opskat/opskat/internal/assetconn"
 	_ "github.com/opskat/opskat/internal/assettype"
 	"github.com/opskat/opskat/internal/bootstrap"
@@ -405,16 +404,15 @@ func initExtensionSystem(
 	}
 
 	extDir := filepath.Join(dataDir, "extensions")
+	// extSvc 在下面才构造：工厂只在扩展加载时调用，那时它已经赋值。
+	var extSvc *extension_svc.Service
 	mgr := extpkg.NewManager(extDir, func(extName string) extpkg.HostProvider {
-		provider := extpkg.NewDefaultHostProvider(extpkg.DefaultHostConfig{
-			Logger:        logger.Default(),
-			AssetConfigs:  extB.NewAssetConfigGetter(extName),
-			FileDialogs:   extB.NewFileDialogOpener(),
-			KV:            extB.NewKVStore(extName),
-			ActionEvents:  extB.NewActionEventHandler(extName),
-			AssetDialer:   extB.NewAssetDialer(extName),
-			ExtensionName: extName,
-		})
+		// 资产配置 / KV / 连接路径来自 extension_svc（与 opsctl 共用），文件对话框与
+		// action 事件只有桌面窗口能给。
+		cfg := extSvc.HostConfig(extName)
+		cfg.FileDialogs = extB.NewFileDialogOpener()
+		cfg.ActionEvents = extB.NewActionEventHandler(extName)
+		provider := extpkg.NewDefaultHostProvider(cfg)
 		// The asset's cached HTTP client (kept for keep-alive reuse across calls)
 		// is built from its connection settings; once those change or the asset
 		// is gone, the cache must be dropped instead of reused on the next open.
@@ -422,12 +420,7 @@ func initExtensionSystem(
 		return provider
 	}, logger.Default())
 
-	// 测试连接：declare()d 处理器要跑 WASM，只在桌面进程接线（opsctl 走
-	// RegisterDescribeOnly，从不设置这个）。必须在任何扩展加载之前接好——extreg
-	// 加载期一遇到声明了处理器的类型就要拿它建 tester。
-	extreg.SetConnTestRegistrar(extB.NewConnTestRegistrar())
-
-	extSvc := extension_svc.New(
+	extSvc = extension_svc.New(
 		mgr,
 		extension_state_repo.ExtensionState(),
 		extension_data_repo.ExtensionData(),
@@ -437,9 +430,13 @@ func initExtensionSystem(
 		extension.SnippetExtensionHook{},
 	)
 
+	// 测试连接：declare()d 处理器要跑 WASM，由运行扩展的进程接线（桌面端在这里，
+	// opsctl 在激活扩展时）。必须在任何扩展加载之前接好——extreg 加载期一遇到声明了
+	// 处理器的类型就要拿它建 tester。
+	extreg.SetConnTestRegistrar(extSvc.ConnTestRegistrar())
+
 	extB.SetService(extSvc)
 	aiB.SetExtensionService(extSvc)
-	opsctlB.SetExtToolExecutor(desktopExecExecutor{})
 	opsctlB.SetExtDevInstaller(desktopExtDevInstaller{ext: extB})
 
 	// 接入 snippet 分类注册表
@@ -460,14 +457,6 @@ func initExtensionSystem(
 		}
 		wailsRuntime.EventsEmit(wctx, "ext:ready", nil)
 	}()
-}
-
-// desktopExecExecutor 把统一 exec handler 交给 opsctl binder：opsctl 对扩展资产的命令
-// 由桌面进程执行（WASM 运行时只在这里），走的仍然是同一个 handler。
-type desktopExecExecutor struct{}
-
-func (desktopExecExecutor) ExecuteExtTool(ctx context.Context, assetID int64, command string) (string, error) {
-	return aitool.ExecOnAsset(ctx, assetID, command)
 }
 
 // desktopExtDevInstaller 把 `opsctl ext dev` 的安装请求交回扩展 binder，跑的是

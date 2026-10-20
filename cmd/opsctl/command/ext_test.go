@@ -19,6 +19,7 @@ import (
 	"github.com/opskat/opskat/internal/model/entity/extension_state_entity"
 	"github.com/opskat/opskat/internal/repository/extension_state_repo"
 	"github.com/opskat/opskat/pkg/extension"
+	"github.com/opskat/opskat/pkg/extension/extensiontest"
 )
 
 // --- fixtures ----------------------------------------------------------------
@@ -189,7 +190,7 @@ func TestRegisterExtensionAssetTypesMakesTheTypeUsableWithoutWASM(t *testing.T) 
 	assert.Equal(t, "acme-store", handler.Type())
 	owner, ok := assettype.ExtensionOwnerOf("acme-store")
 	require.True(t, ok)
-	assert.Equal(t, "acme", owner, "exec routes to the desktop app by this answer")
+	assert.Equal(t, "acme", owner, "exec activates the owning extension by this answer")
 
 	// `opsctl help acme-store` renders the tool/parameter table describe() reported.
 	help, ok := permission.HelpFor("acme-store")
@@ -199,95 +200,64 @@ func TestRegisterExtensionAssetTypesMakesTheTypeUsableWithoutWASM(t *testing.T) 
 	// `opsctl policy show/allow/deny` need a permanent-rule landing for the type.
 	assert.True(t, permission.TypeRulesSupported("acme-store"))
 
-	// …but execution is not local: the WASM runtime, the host capabilities and the
-	// decrypted asset config only exist in the desktop process.
+	// …but nothing executes until exec activates the extension: this registration
+	// compiles no WASM.
 	assert.NotContains(t, permission.RegisteredExecTypes(), "acme-store")
 }
 
-func TestRegisterExtensionAssetTypesReportsAMissingDescriptorInsteadOfRegisteringNothing(t *testing.T) {
+func TestRegisterExtensionAssetTypesReportsAFailedDescribeInsteadOfRegisteringNothing(t *testing.T) {
 	dir := withExtensionDir(t)
 	stub := installDescribeStub(t)
 	writeExtManifest(t, stub, dir, "acme", "acme-store")
-	// This machine has never loaded the extension: the manifest is the security
-	// contract only, so nothing local knows what the extension can do.
+	// This machine has never loaded the extension, and loading it here fails.
 	require.NoError(t, stub.DeleteDescriptor("acme"))
 	forgetExtension(t, "acme")
 
-	var reported []error
-	orig := extregRegisterFn
-	extregRegisterFn = func(info *extension.ManifestInfo) error {
-		err := orig(info)
-		reported = append(reported, err)
-		return err
+	var described []string
+	orig := describeExtensionFn
+	describeExtensionFn = func(_ context.Context, extDir string) (*extension.ManifestInfo, error) {
+		described = append(described, filepath.Base(extDir))
+		return nil, errors.New("wasm does not compile")
 	}
-	t.Cleanup(func() { extregRegisterFn = orig })
+	t.Cleanup(func() { describeExtensionFn = orig })
 
-	registerExtensionAssetTypes()
+	stderr := captureStderr(t, registerExtensionAssetTypes)
 
-	require.Len(t, reported, 1)
-	require.Error(t, reported[0], "a cache miss must be surfaced, not swallowed into a later unknown-type error")
-	assert.Contains(t, reported[0].Error(), "acme")
+	assert.Equal(t, []string{"acme"}, described)
+	assert.Contains(t, stderr, "acme")
+	assert.Contains(t, stderr, "wasm does not compile")
 	_, registered := assettype.Get("acme-store")
 	assert.False(t, registered)
 }
 
-// --- delegation --------------------------------------------------------------
+// An extension that cannot be described here (no cache, main.wasm gone) leaves its
+// asset type unclaimed; the final error names the extension and the reason instead of
+// only saying the type has no exec support.
+func TestCmdExec_ExtensionThatFailedToDescribeIsNamedInTheError(t *testing.T) {
+	env := setupLocalExtExec(t)
+	require.NoError(t, os.Remove(filepath.Join(env.extDir, "main.wasm")))
+	_ = captureStderr(t, func() { bootWithoutDescribeCache(t, env) })
 
-func TestExecViaDesktopFailsClosedWhenDesktopIsOffline(t *testing.T) {
-	registerBulkExtension(t)
-	orig := delegateExtExecFn
-	delegateExtExecFn = func(int64, string, string, string) (string, error) {
-		return "", errors.New("cannot connect to approval socket")
-	}
-	t.Cleanup(func() { delegateExtExecFn = orig })
-
-	asset := &asset_entity.Asset{ID: 1, Name: "my-bucket", Type: "acme-store"}
-	assert.Equal(t, 1, execViaDesktop(asset, "acme", "list_objects --bucket=logs", "sess"))
-}
-
-func TestExecViaDesktopPassesTheCommandThroughVerbatim(t *testing.T) {
-	registerBulkExtension(t)
-	var gotID int64
-	var gotCommand string
-	orig := delegateExtExecFn
-	delegateExtExecFn = func(assetID int64, _, command, _ string) (string, error) {
-		gotID, gotCommand = assetID, command
-		return `{"objects":1}`, nil
-	}
-	t.Cleanup(func() { delegateExtExecFn = orig })
-
-	asset := &asset_entity.Asset{ID: 7, Name: "my-bucket", Type: "acme-store"}
-	require.Equal(t, 0, execViaDesktop(asset, "acme", "list_objects --bucket=logs", "sess"))
-	assert.Equal(t, int64(7), gotID)
-	// The desktop side canonicalizes and policy-checks; opsctl must not rewrite the
-	// command on the way there, or approval would show something else than was typed.
-	assert.Equal(t, "list_objects --bucket=logs", gotCommand)
-}
-
-// A policy refusal from the desktop arrives as a tool error; opsctl must report it
-// the way a denied builtin exec does — exit 1, the reason on stderr, nothing on
-// stdout — so a script piping the output cannot mistake the refusal for a result.
-func TestExecViaDesktopPolicyDenialExitsNonZeroOnStderr(t *testing.T) {
-	registerBulkExtension(t)
-	refusal := "command denied by policy: delete_bucket"
-	orig := delegateExtExecFn
-	delegateExtExecFn = func(int64, string, string, string) (string, error) {
-		return "", errors.New(refusal)
-	}
-	t.Cleanup(func() { delegateExtExecFn = orig })
-
-	var code int
-	var stderr string
-	stdout := captureStdout(t, func() {
-		stderr = captureStderr(t, func() {
-			code = execViaDesktop(&asset_entity.Asset{ID: 7, Name: "my-bucket", Type: "acme-store"},
-				"acme", "delete_bucket --bucket=logs", "sess")
-		})
-	})
+	code, _, stderr := env.exec(t, "fx-1", "--", "echo", "--msg", "hi")
 
 	assert.Equal(t, 1, code)
-	assert.Contains(t, stderr, refusal)
-	assert.Empty(t, string(stdout))
+	lines := strings.Split(strings.TrimSpace(stderr), "\n")
+	last := lines[len(lines)-1]
+	assert.Contains(t, last, "has no exec support yet")
+	assert.Contains(t, last, `"`+extensiontest.FixtureName+`"`)
+	assert.Contains(t, last, "main.wasm")
+}
+
+// With no describe failure the message stays exactly the AI exec tool's.
+func TestUnsupportedExecTypeError_UnchangedWhenNoExtensionFailed(t *testing.T) {
+	dir := withExtensionDir(t)
+	writeExtManifest(t, installDescribeStub(t), dir, "acme", "acme-store")
+	forgetExtension(t, "acme")
+	registerExtensionAssetTypes()
+
+	err := unsupportedExecTypeError(&asset_entity.Asset{Name: "a", Type: "rdp"})
+
+	assert.NotContains(t, err.Error(), "failed to describe")
 }
 
 // --- ext dev -----------------------------------------------------------------
@@ -378,58 +348,151 @@ func registerBulkExtension(t *testing.T) {
 	registerExtensionAssetTypes()
 }
 
-// captureDelegation replaces the desktop hand-off and records what would be sent.
-func captureDelegation(t *testing.T) *[]string {
-	t.Helper()
-	var sent []string
-	orig := delegateExtExecFn
-	delegateExtExecFn = func(_ int64, _, command, _ string) (string, error) {
-		sent = append(sent, command)
-		return "{}", nil
-	}
-	t.Cleanup(func() { delegateExtExecFn = orig })
-	return &sent
-}
-
-func TestExecViaDesktopExpandsFileFlagsBeforeSending(t *testing.T) {
+// prepareExtensionExec reads `--<flag>-file` into the inline `--<flag> <content>`
+// form after activating the extension, so canonicalization, policy, approval and the
+// tool only ever see the inline form.
+func TestPrepareExtensionExecExpandsFileFlags(t *testing.T) {
 	registerBulkExtension(t)
+	orig := activateExtensionFn
+	activateExtensionFn = func(context.Context, string) error { return nil }
+	t.Cleanup(func() { activateExtensionFn = orig })
 	asset := &asset_entity.Asset{ID: 7, Name: "s", Type: "acme-store"}
 	path := filepath.Join(t.TempDir(), "body.ndjson")
 	require.NoError(t, os.WriteFile(path, []byte("line1\nline2\n"), 0o600))
+	ctx := context.Background()
 
 	t.Run("file path", func(t *testing.T) {
-		sent := captureDelegation(t)
-		require.Equal(t, 0, execViaDesktop(asset, "acme", "bulk --index=logs --body-file "+path, "sess"))
-		require.Len(t, *sent, 1)
-		assert.NotContains(t, (*sent)[0], "-file", "the desktop must only ever see the inline form")
-		assert.Contains(t, (*sent)[0], "--body='line1\nline2\n'")
+		got, err := prepareExtensionExec(ctx, asset, "acme", "bulk --index=logs --body-file "+path)
+		require.NoError(t, err)
+		assert.NotContains(t, got, "-file", "everything after opsctl only ever sees the inline form")
+		assert.Contains(t, got, "--body='line1\nline2\n'")
 	})
 
 	t.Run("stdin", func(t *testing.T) {
-		sent := captureDelegation(t)
 		orig := execStdin
 		execStdin = strings.NewReader("line1\nline2\n")
 		t.Cleanup(func() { execStdin = orig })
-		require.Equal(t, 0, execViaDesktop(asset, "acme", "bulk --index=logs --body-file -", "sess"))
-		require.Len(t, *sent, 1)
-		assert.Contains(t, (*sent)[0], "--body='line1\nline2\n'")
+		got, err := prepareExtensionExec(ctx, asset, "acme", "bulk --index=logs --body-file -")
+		require.NoError(t, err)
+		assert.Contains(t, got, "--body='line1\nline2\n'")
 	})
 
-	t.Run("a refused file sends nothing and exits non-zero", func(t *testing.T) {
-		sent := captureDelegation(t)
-		var code int
-		stderr := captureStderr(t, func() {
-			code = execViaDesktop(asset, "acme", "bulk --body=x --body-file "+path, "sess")
-		})
-		assert.NotEqual(t, 0, code)
-		assert.Empty(t, *sent)
-		assert.Contains(t, stderr, "--body")
+	t.Run("a refused file is an error", func(t *testing.T) {
+		_, err := prepareExtensionExec(ctx, asset, "acme", "bulk --body=x --body-file "+path)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "--body")
 
-		stderr = captureStderr(t, func() {
-			code = execViaDesktop(asset, "acme", "bulk --body-file "+path+".missing", "sess")
-		})
-		assert.NotEqual(t, 0, code)
-		assert.Empty(t, *sent)
-		assert.Contains(t, stderr, "missing")
+		_, err = prepareExtensionExec(ctx, asset, "acme", "bulk --body-file "+path+".missing")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "missing")
 	})
+}
+
+// --- no describe() cache on this machine ---------------------------------------
+
+// bootWithoutDescribeCache puts the fixture environment in the state of a machine whose
+// desktop app never loaded the extension: installed, enabled, but no extension_describe
+// row, then runs opsctl's boot registration.
+func bootWithoutDescribeCache(t *testing.T, env *localExtEnv) {
+	t.Helper()
+	extreg.Unregister(extensiontest.FixtureName)
+	require.NoError(t, repoDescribeCache{}.DeleteDescriptor(extensiontest.FixtureName))
+	_, payload, err := repoDescribeCache{}.LoadDescriptor(extensiontest.FixtureName)
+	require.NoError(t, err)
+	require.Empty(t, payload, "precondition: the cache row is gone")
+	registerExtensionAssetTypes()
+}
+
+// opsctl describes the extension itself when the cache has no answer, instead of
+// leaving its asset types unregistered and telling the user to open the desktop app.
+func TestRegisterExtensionAssetTypes_FillsAMissingDescribeCacheItself(t *testing.T) {
+	env := setupLocalExtExec(t)
+	bootWithoutDescribeCache(t, env)
+
+	owner, ok := assettype.ExtensionOwnerOf("fixture")
+	require.True(t, ok, "the type must be registered from opsctl's own describe()")
+	assert.Equal(t, extensiontest.FixtureName, owner)
+	_, payload, err := repoDescribeCache{}.LoadDescriptor(extensiontest.FixtureName)
+	require.NoError(t, err)
+	assert.NotEmpty(t, payload, "the answer is written to the cache for the next command")
+}
+
+// unwritableDescribeCache is the data dir's describe() cache with writes failing
+// (a locked or read-only database).
+type unwritableDescribeCache struct{ repoDescribeCache }
+
+func (unwritableDescribeCache) StoreDescriptor(string, string, []byte) error {
+	return errors.New("database is locked")
+}
+
+// The answer opsctl just got from describe() registers the extension even when it
+// cannot be written to the cache: the command that described it still sees its types.
+func TestRegisterExtensionAssetTypes_UsesItsOwnDescribeWhenTheCacheCannotBeWritten(t *testing.T) {
+	env := setupLocalExtExec(t)
+	extension.SetDescribeCache(unwritableDescribeCache{})
+	t.Cleanup(func() { extension.SetDescribeCache(repoDescribeCache{}) })
+
+	stderr := captureStderr(t, func() { bootWithoutDescribeCache(t, env) })
+
+	owner, ok := assettype.ExtensionOwnerOf("fixture")
+	require.True(t, ok, "the type must be registered from opsctl's own describe(): %s", stderr)
+	assert.Equal(t, extensiontest.FixtureName, owner)
+}
+
+func TestCmdExec_ExtensionAssetRunsWithNoDescribeCache(t *testing.T) {
+	env := setupLocalExtExec(t)
+	bootWithoutDescribeCache(t, env)
+
+	code, stdout, stderr := env.exec(t, "fx-1", "--", "echo", "--msg", "hi")
+
+	require.Equal(t, 0, code, "stderr: %s", stderr)
+	assert.Equal(t, `{"args":{"msg":"hi"},"tool":"echo"}`, stdout)
+	assert.NotContains(t, stderr, "desktop")
+}
+
+func TestCmdCreateAsset_ExtensionTypeWorksWithNoDescribeCache(t *testing.T) {
+	env := setupLocalExtExec(t)
+	bootWithoutDescribeCache(t, env)
+
+	var code int
+	stderr := captureStderr(t, func() {
+		captureStdout(t, func() {
+			code = cmdCreate(context.Background(), buildHandlerMap(),
+				[]string{"asset", "--type", "fixture", "--name", "fx-2", "--config", `{"endpoint":"http://127.0.0.1:1"}`}, "sess-ext")
+		})
+	})
+
+	// Nothing can approve the write here (no terminal, no desktop), so the command stops
+	// at the approval step: it got past the type lookup, which is what the cache fixes.
+	assert.NotContains(t, stderr, "unsupported asset type")
+	assert.Equal(t, 3, code, "stderr: %s", stderr)
+	assert.Contains(t, stderr, "NEEDS TTY")
+}
+
+func TestCmdPolicyShow_ExtensionAssetWorksWithNoDescribeCache(t *testing.T) {
+	env := setupLocalExtExec(t)
+	bootWithoutDescribeCache(t, env)
+
+	var code int
+	stderr := captureStderr(t, func() {
+		captureStdout(t, func() {
+			code = cmdPolicyShow(context.Background(), []string{"fx-1"}, "sess-ext")
+		})
+	})
+
+	assert.Equal(t, 0, code, "stderr: %s", stderr)
+	assert.NotContains(t, stderr, "no permanent rule support")
+}
+
+// A disabled extension is neither described nor loaded: it stays out of the registry
+// and its describe() stays unanswered.
+func TestRegisterExtensionAssetTypes_DisabledExtensionIsNotDescribed(t *testing.T) {
+	env := setupLocalExtExec(t, &extension_state_entity.ExtensionState{Name: extensiontest.FixtureName, Enabled: false})
+	bootWithoutDescribeCache(t, env)
+
+	_, ok := assettype.Get("fixture")
+	assert.False(t, ok)
+	_, payload, err := repoDescribeCache{}.LoadDescriptor(extensiontest.FixtureName)
+	require.NoError(t, err)
+	assert.Empty(t, payload, "a disabled extension is not loaded, so nothing is cached")
 }

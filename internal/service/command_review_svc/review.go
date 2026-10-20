@@ -143,14 +143,14 @@ type Service interface {
 	ReviewBatch(ctx context.Context, ins []Input) []Result
 	// TestReviewer 用 rev 审一条无害的命令，不读写缓存：扩展设置页据此确认这个审核扩展能不能用。
 	TestReviewer(ctx context.Context, rev ExtensionReviewer) Result
-	// Status 返回本进程启动以来最近一次审核失败的情况，没失败过则为空。
+	// Status 返回本进程启动以来最近一次还没恢复的审核失败，没失败过或之后已有一次成功则为空。
 	Status() Status
 	// SetConfigErrorListener 注册设置问题（没有审核扩展、扩展没配置好等）的通知，
 	// 同一种问题只通知一次，审核恢复成功后再出错会重新通知。
 	SetConfigErrorListener(fn func(reason string))
 }
 
-// Status 是最近一次审核失败的情况，设置页据此提示配置问题。
+// Status 是最近一次还没恢复的审核失败，设置页据此提示；之后有一次审核成功就为空。
 type Status struct {
 	LastFailReason string    `json:"lastFailReason,omitempty"`
 	LastFailAt     time.Time `json:"lastFailAt,omitempty"`
@@ -200,10 +200,12 @@ func (s *service) recordFailure(r Result) Result {
 	return r
 }
 
-// recordSuccess 让之后再出的设置问题重新通知。最近一次失败留着，设置页照样显示。
+// recordSuccess 清掉最近一次失败：设置页只显示还没恢复的失败。
+// 同时让同一种设置问题之后再出现时重新通知。
 func (s *service) recordSuccess() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.status = Status{}
 	s.notified = map[string]bool{}
 }
 

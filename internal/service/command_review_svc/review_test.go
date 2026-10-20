@@ -491,10 +491,8 @@ func TestConfigErrorsNotifyOnceAndShowInStatus(t *testing.T) {
 	assert.Equal(t, ReasonInvalidAPIKey, s.Status().LastFailReason)
 
 	rev.reply = nil
-	failedAt := s.Status().LastFailAt
 	s.Review(context.Background(), Input{AssetType: "ssh", Command: "uptime"})
-	assert.Equal(t, Status{LastFailReason: ReasonInvalidAPIKey, LastFailAt: failedAt}, s.Status(),
-		"设置页显示本次启动以来最近一次审核失败，之后审核成功也保留")
+	assert.Equal(t, Status{}, s.Status(), "之后审核成功，设置页不再显示已经恢复的失败")
 
 	rev.reply = invalidKey
 	s.Review(context.Background(), Input{AssetType: "ssh", Command: "df -h"})

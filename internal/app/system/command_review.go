@@ -22,7 +22,7 @@ const (
 )
 
 // CommandReviewSettings 是设置页读到的、宿主侧的审核设置。具体审核服务的设置（API key、模型等）
-// 属于审核扩展，在扩展设置里。LastFailReason / LastFailAt 是本次启动以来最近一次审核失败。
+// 属于审核扩展，在扩展设置里。LastFailReason / LastFailAt 是本次启动以来最近一次还没恢复的审核失败。
 type CommandReviewSettings struct {
 	TimeoutMs      int    `json:"timeoutMs"`
 	LastFailReason string `json:"lastFailReason"`

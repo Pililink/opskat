@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/opskat/opskat/internal/ai/aictx"
+	"github.com/opskat/opskat/internal/approval"
 )
 
 // ApprovalItem 统一审批项，AI 和 opsctl 共用
@@ -37,6 +38,28 @@ type ApprovalItem struct {
 	Review *aictx.ReviewInfo `json:"review,omitempty"`
 }
 
+// ApprovalItemOfRequest is the approval item an opsctl single-approval request
+// carries: the request is the item's wire form (internal/approval does not depend on
+// this package), so opsctl's terminal prompt and the desktop dialog answering the
+// request read the same item.
+func ApprovalItemOfRequest(req approval.ApprovalRequest) ApprovalItem {
+	return ApprovalItem{
+		Type: req.Type, AssetID: req.AssetID, AssetName: req.AssetName, Command: req.Command, Detail: req.Detail,
+		Action: req.Action, Resource: req.Resource, Resources: req.Resources, RememberPattern: req.RememberPattern,
+		Review: req.Review,
+	}
+}
+
+// ApprovalItemOfBatchItem is ApprovalItemOfRequest for one item of an opsctl batch
+// approval.
+func ApprovalItemOfBatchItem(item approval.BatchItem) ApprovalItem {
+	return ApprovalItem{
+		Type: item.Type, AssetID: item.AssetID, AssetName: item.AssetName, Command: item.Command, Detail: item.Detail,
+		Action: item.Action, Resource: item.Resource, Resources: item.Resources, RememberPattern: item.RememberPattern,
+		Review: item.Review,
+	}
+}
+
 // ApprovalResponse 统一审批响应
 type ApprovalResponse struct {
 	Decision    string         `json:"decision"`               // "allow", "deny", "allowAll"
@@ -56,8 +79,6 @@ const (
 	ApprovalKindLocalTool = "local_tool"
 	// ApprovalKindDelete 删除类审批不可 grant，前端不渲染 rememberMode。
 	ApprovalKindDelete = "delete"
-	// ApprovalKindExtension 扩展参数没有定义安全、可复用的 grant pattern，只能本次允许。
-	ApprovalKindExtension = "extension"
 )
 
 // ApprovalDecision 是经过 ParseApprovalResponse 白名单解析后的 typed 决策。
@@ -101,7 +122,7 @@ func ParseApprovalResponse(kind string, resp ApprovalResponse, expectedItems ...
 
 	switch kind {
 	case ApprovalKindSingle, ApprovalKindOnce, ApprovalKindBatch, ApprovalKindGrant, ApprovalKindLocalTool,
-		ApprovalKindDelete, ApprovalKindExtension:
+		ApprovalKindDelete:
 	default:
 		return ParsedApprovalResponse{Decision: ApprovalDeny}, fmt.Errorf("invalid approval kind %q", kind)
 	}
@@ -188,8 +209,6 @@ func ApprovalKindFor(approvalType, command string) string {
 	switch approvalType {
 	case ApprovalTypeDelete:
 		return ApprovalKindDelete
-	case "ext_tool":
-		return ApprovalKindExtension
 	default:
 		if SupportsGrantApproval(approvalType) && len(NormalizeGrantPatterns(approvalType, command, GrantOriginSystem)) > 0 {
 			return ApprovalKindSingle
